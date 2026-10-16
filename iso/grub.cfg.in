@@ -1,0 +1,32 @@
+set timeout=@TIMEOUT@
+set default=@DEFAULT@
+
+loadfont unicode
+
+set menu_color_normal=white/black
+set menu_color_highlight=black/light-gray
+
+menuentry "Install MaluOS Server" {
+    set gfxpayload=keep
+    linux  /casper/vmlinuz autoinstall ds=nocloud\;s=/cdrom/maluos/nocloud-interactive/ @EXTRA_ARGS@---
+    initrd /casper/initrd
+}
+menuentry "Install MaluOS Server (automated, erases first disk)" {
+    set gfxpayload=keep
+    linux  /casper/vmlinuz autoinstall ds=nocloud\;s=/cdrom/maluos/nocloud-auto/ @EXTRA_ARGS@---
+    initrd /casper/initrd
+}
+menuentry "Stock Ubuntu Server installer (no MaluOS packages)" {
+    set gfxpayload=keep
+    linux  /casper/vmlinuz  ---
+    initrd /casper/initrd
+}
+grub_platform
+if [ "$grub_platform" = "efi" ]; then
+menuentry 'Boot from next volume' {
+    exit 1
+}
+menuentry 'UEFI Firmware Settings' {
+    fwsetup
+}
+fi

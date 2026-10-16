@@ -22,7 +22,7 @@ repo/          aptly configuration and publish scripts
 scripts/       build helpers and the client bootstrap installer
 tests/         install tests (clean mmdebstrap chroot)
 ci/            GitHub Actions
-autoinstall/   subiquity autoinstall and cloud-init data   (Phase 2+)
+autoinstall/   subiquity autoinstall templates             (Phase 2+)
 firstboot/     first-boot provisioning                      (Phase 4)
 iso/           ISO build scripts                            (Phase 2/3)
 docs/          plan and design notes

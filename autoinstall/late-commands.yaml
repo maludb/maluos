@@ -1,0 +1,27 @@
+# Shared tail of every MaluOS autoinstall (spliced in by iso/build-iso.sh).
+late-commands:
+  # 1. MaluOS repository from the install media -> installed system.
+  - mkdir -p /target/var/lib/maluos/apt
+  - cp -rL /cdrom/maluos/apt/. /target/var/lib/maluos/apt/
+  - |
+    cat > /target/etc/apt/sources.list.d/maluos-iso.sources <<'SRC'
+    # MaluOS packages carried on the install media.
+    Types: deb
+    URIs: file:/var/lib/maluos/apt
+    Suites: resolute
+    Components: main
+    Signed-By: /var/lib/maluos/apt/bootstrap/maluos-archive-keyring.gpg
+    SRC
+  # 2. PGDG (PostgreSQL 18). The key ships in Ubuntu's postgresql-client-common;
+  #    the sources file is byte-identical to the one maluos-archive installs.
+  - curtin in-target --target=/target -- apt-get install -y -q postgresql-client-common
+  - cp /cdrom/maluos/pgdg.sources /target/etc/apt/sources.list.d/pgdg.sources
+  # 3. The MaluOS stack.
+  - curtin in-target --target=/target -- apt-get update -q
+  - curtin in-target --target=/target -- env DEBIAN_FRONTEND=noninteractive apt-get install -y -q maluos-server
+  # 4. No public MaluOS mirror yet: keep the network source present but off.
+  - "sed -i '/^Enabled:/d; $a Enabled: no' /target/etc/apt/sources.list.d/maluos.sources"
+  # 5. Serial console alongside the VGA console (headless servers, VM tests).
+  - sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT=.*/GRUB_CMDLINE_LINUX_DEFAULT="console=tty1 console=ttyS0,115200"/' /target/etc/default/grub
+  - curtin in-target --target=/target -- update-grub
+  - echo "MaluOS 26.04 (resolute) installed $(date -u +%FT%TZ)" > /target/etc/maluos-release

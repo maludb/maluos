@@ -25,5 +25,6 @@ for p in maluos-keyring maluos-archive; do
     ln -sf "$(basename "$latest")" "$boot/${p}_latest_all.deb"
 done
 cp "$ROOT/scripts/install-maluos.sh" "$boot/"
+gpg --batch --export "$MALUOS_SIGNING_UID" > "$boot/maluos-archive-keyring.gpg"
 echo "== published $MALUOS_SUITE to $MALUOS_PUBLISH_ROOT"
 aptly repo show -with-packages "$MALUOS_APTLY_REPO" | sed -n '/Packages:/,$p'

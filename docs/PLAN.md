@@ -25,8 +25,8 @@ repository is the distribution layer.
 |---|---|---|
 | 0 | Repo layout, decisions | done 2026-10-16 |
 | 1 | Signed package repository; one command installs the MaluDB stack on clean 26.04 | done 2026-10-16 (see phase1-repository.md) |
-| 2 | First bootable ISO by remastering Ubuntu Server 26.04.1 with autoinstall + MaluOS pool + grub branding | next |
-| 3 | Own ISO pipeline: mmdebstrap rootfs from seeds, casper, squashfs, grub-mkrescue; also qcow2/raw cloud image | |
+| 2 | First bootable ISO by remastering Ubuntu Server 26.04.1 with autoinstall + MaluOS pool + grub branding | built 2026-10-16 (see phase2-iso.md) |
+| 3 | Own ISO pipeline: mmdebstrap rootfs from seeds, casper, squashfs, grub-mkrescue; also qcow2/raw cloud image; branding packages; offline PG18 pool | next |
 | 4 | First boot: PG18 cluster, maludb bootstrap, first tenant/principal, enrollment token; all via cloud-init | |
 | 5 | CI: package builds on every push; ISO boot tests on GitHub runners (KVM available there, not on the dev host) | ongoing |
 | 6+ | Agent-native features | after 1-5 green |

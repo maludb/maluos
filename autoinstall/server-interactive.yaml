@@ -1,0 +1,30 @@
+#cloud-config
+autoinstall:
+  version: 1
+  refresh-installer:
+    update: false
+  interactive-sections:
+    - locale
+    - keyboard
+    - network
+    - proxy
+    - storage
+    - identity
+    - ssh
+  locale: en_US.UTF-8
+  keyboard:
+    layout: us
+  timezone: UTC
+  storage:
+    layout:
+      name: lvm
+  identity:
+    hostname: maluos
+    username: maluos
+    password: "$6$JiuKZtdHT5qsUZfT$XMdWgSWDGNbNCtLnJ7YVd3pr0SSI.zZmZs3T8mR9.7R0.frTG//sPI77goxj2/r7g.0f7K233qAJPYKTJoklL/"
+  ssh:
+    install-server: true
+    allow-pw: true
+    authorized-keys: @AUTHORIZED_KEYS@
+  updates: security
+  shutdown: reboot
