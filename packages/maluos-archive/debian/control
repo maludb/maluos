@@ -1,0 +1,20 @@
+Source: maluos-archive
+Section: misc
+Priority: important
+Maintainer: Edward Honour <ed@maludb.org>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.6.2
+Homepage: https://github.com/maludb/maluos
+Rules-Requires-Root: no
+
+Package: maluos-archive
+Architecture: all
+Multi-Arch: foreign
+Depends: ${misc:Depends}, maluos-keyring, postgresql-client-common
+Description: APT source configuration for the MaluOS repository
+ Installs the deb822 APT source entries that a MaluOS system pulls
+ packages from: the MaluOS repository itself and the PostgreSQL Global
+ Development Group (PGDG) repository that supplies PostgreSQL 18.
+ .
+ The PGDG entry is verified with the key shipped by Ubuntu's own
+ postgresql-client-common package, so no third-party key is vendored.

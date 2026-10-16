@@ -1,0 +1,3 @@
+# This is the distribution's own archive-configuration package; installing
+# APT sources is its purpose (same as Ubuntu's ubuntu-keyring/sources setup).
+maluos-archive: package-installs-apt-sources *

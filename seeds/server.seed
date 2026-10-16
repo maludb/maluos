@@ -1,0 +1,6 @@
+# maluos-server: headless memory host. PostgreSQL 18 + the MaluDB stack.
+maluos-base
+postgresql-18
+postgresql-18-maludb-core
+maludb-mc2dbd
+?postgresql-client-18

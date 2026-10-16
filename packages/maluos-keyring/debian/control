@@ -1,0 +1,17 @@
+Source: maluos-keyring
+Section: misc
+Priority: important
+Maintainer: Edward Honour <ed@maludb.org>
+Build-Depends: debhelper-compat (= 13), gnupg
+Standards-Version: 4.6.2
+Homepage: https://github.com/maludb/maluos
+Rules-Requires-Root: no
+
+Package: maluos-keyring
+Architecture: all
+Multi-Arch: foreign
+Depends: ${misc:Depends}
+Description: GnuPG archive key of the MaluOS package repository
+ The MaluOS repository digitally signs its Release files. This package
+ contains the archive key used for that, installed where APT's
+ Signed-By option expects it (/usr/share/keyrings).

@@ -1,0 +1,13 @@
+build/
+*.deb
+*.ddeb
+*.changes
+*.buildinfo
+packages/*/debian/*.debhelper*
+packages/*/debian/*.substvars
+packages/*/debian/.debhelper/
+packages/*/debian/files
+packages/*/debian/tmp/
+packages/*/debian/maluos-*/
+packages/maluos-archive/sources/*.sources
+packages/maluos-meta/debian/control

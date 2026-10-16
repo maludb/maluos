@@ -1,0 +1,6 @@
+# MaluOS package repository. Installed by the maluos-archive package.
+Types: deb
+URIs: @MALUOS_APT_URL@
+Suites: @MALUOS_SUITE@
+Components: main
+Signed-By: /usr/share/keyrings/maluos-archive-keyring.gpg

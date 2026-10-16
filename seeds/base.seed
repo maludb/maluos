@@ -1,0 +1,10 @@
+# maluos-base: identity of a MaluOS system. Every variant depends on this.
+maluos-keyring
+maluos-archive
+ca-certificates
+curl
+gnupg
+jq
+sudo
+openssh-server
+?unattended-upgrades

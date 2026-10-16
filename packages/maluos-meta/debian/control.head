@@ -1,0 +1,8 @@
+Source: maluos-meta
+Section: metapackages
+Priority: optional
+Maintainer: Edward Honour <ed@maludb.org>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.6.2
+Homepage: https://github.com/maludb/maluos
+Rules-Requires-Root: no

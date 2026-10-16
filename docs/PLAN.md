@@ -1,0 +1,49 @@
+# MaluOS project plan
+
+MaluOS is an Ubuntu 26.04 LTS derivative for humans and AI agents, centred on
+the MaluDB memory database. The engine lives in maludb/maludb-core-26; this
+repository is the distribution layer.
+
+## Framing decisions
+
+- **Derivative, not a true fork.** Packages come from the Ubuntu archive plus
+  PGDG; MaluOS adds a signed repository, metapackages, branding, defaults,
+  installer configuration and first-boot provisioning (the Pop!_OS / Mint model).
+- **Server first, desktop later.** The memory host is headless; the desktop
+  variant waits until the server variant is stable.
+- **Trademark.** No "Ubuntu" in product name or branding; rebrand os-release,
+  grub, motd and plymouth before any public ISO.
+- **Architectures.** amd64 first; arm64 once the repo builds both.
+- **Package hosting.** Self-hosted aptly repository, signed with the MaluOS
+  archive key. PGDG is referenced as a second source, not mirrored (revisit for
+  offline ISO installs in Phase 3).
+- **Kernel and Secure Boot.** Use Ubuntu's signed kernel and shim unchanged.
+
+## Phases
+
+| Phase | Goal | Status |
+|---|---|---|
+| 0 | Repo layout, decisions | done 2026-10-16 |
+| 1 | Signed package repository; one command installs the MaluDB stack on clean 26.04 | done 2026-10-16 (see phase1-repository.md) |
+| 2 | First bootable ISO by remastering Ubuntu Server 26.04.1 with autoinstall + MaluOS pool + grub branding | next |
+| 3 | Own ISO pipeline: mmdebstrap rootfs from seeds, casper, squashfs, grub-mkrescue; also qcow2/raw cloud image | |
+| 4 | First boot: PG18 cluster, maludb bootstrap, first tenant/principal, enrollment token; all via cloud-init | |
+| 5 | CI: package builds on every push; ISO boot tests on GitHub runners (KVM available there, not on the dev host) | ongoing |
+| 6+ | Agent-native features | after 1-5 green |
+
+### Phase 6+ candidates
+
+- Agent identity as a system concept: Unix user + maludb principal + polkit rules + scope grants.
+- Sandboxed agent execution profiles (systemd-nspawn, bubblewrap, Landlock) shipped as units.
+- MCP broker and mc2dbd as socket-activated system services; `maluctl` to enroll agents, grant scopes, inspect memory.
+- journald/audit events ingested into memory as episodes.
+- Secrets via systemd-creds.
+- Optional local inference packages wired to maludb_modeld.
+- Desktop variant with an agent-aware session.
+
+## Open items
+
+- Public hosting for the repository (apt.maludb.org is the placeholder baked into maluos-archive).
+- Production signing key custody: the Phase 1 key is an unprotected dev key in the maintainer's GnuPG keyring.
+- Fix the maludb-mc2dbd OS user / PG user mismatch (maludb-core-26 PR #1) in Phase 4, where the OS owns provisioning.
+- Release cadence: track Ubuntu point releases or dated MaluOS builds.

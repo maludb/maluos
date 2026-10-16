@@ -1,0 +1,18 @@
+#!/usr/bin/make -f
+# MALUOS_APT_URL and MALUOS_SUITE may be set in the environment at build time
+# (tests build a variant pointing at a local server).
+MALUOS_APT_URL ?= https://apt.maludb.org/maluos
+MALUOS_SUITE   ?= resolute
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	for f in sources/*.sources.in; do \
+	  sed -e 's|@MALUOS_APT_URL@|$(MALUOS_APT_URL)|g' \
+	      -e 's|@MALUOS_SUITE@|$(MALUOS_SUITE)|g' \
+	      $$f > $${f%.in}; \
+	done
+
+override_dh_auto_clean:
+	rm -f sources/*.sources

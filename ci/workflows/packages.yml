@@ -1,0 +1,13 @@
+# Copy to .github/workflows/ when the repo is on GitHub.
+name: packages
+on: [push, pull_request]
+jobs:
+  build:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y devscripts debhelper lintian gnupg
+      - name: build (public key must be committed)
+        run: scripts/build-packages.sh
+      - uses: actions/upload-artifact@v4
+        with: { name: debs, path: build/*.deb }
