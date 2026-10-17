@@ -1,0 +1,15 @@
+#!/bin/sh
+set -e
+case "$1" in
+    remove|abort-install|disappear)
+        dpkg-divert --package maluos-branding --remove --rename \
+            --divert /usr/lib/os-release.ubuntu /usr/lib/os-release
+        if [ -r /usr/lib/os-release ]; then
+            . /usr/lib/os-release
+            printf '%s \\n \\l\n\n' "$PRETTY_NAME" > /etc/issue
+            printf '%s\n' "$PRETTY_NAME" > /etc/issue.net
+        fi
+        ;;
+esac
+#DEBHELPER#
+exit 0

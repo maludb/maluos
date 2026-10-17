@@ -11,6 +11,9 @@ autoinstall:
     - storage
     - identity
     - ssh
+  source:
+    id: maluos-server
+    search_drivers: true
   locale: en_US.UTF-8
   keyboard:
     layout: us

@@ -1,7 +1,10 @@
 #!/bin/bash
-# Phase 2: remaster the Ubuntu Server 26.04.1 ISO into a MaluOS Server ISO.
+# Build the MaluOS Server ISO: the Ubuntu Server 26.04.1 live installer
+# environment, unchanged, plus the MaluOS root filesystem (built from the
+# seeds by image/build-rootfs.sh) as the default install source.
 #
 # Adds to the stock image:
+#   /casper/maluos-server.squashfs   the MaluOS rootfs, default entry in install-sources.yaml
 #   /maluos/apt/                 the published MaluOS repository (dists, pool, bootstrap)
 #   /maluos/pgdg.sources         PGDG source file (same content as maluos-archive ships)
 #   /maluos/nocloud-auto/        unattended autoinstall (user-data, meta-data)
@@ -70,6 +73,29 @@ PY
     head -1 "$d/user-data" | grep -qx '#cloud-config' || { echo "user-data must start with #cloud-config" >&2; exit 1; }
 done
 
+# --- install source: the MaluOS rootfs squashfs ----------------------------
+IMG=$ROOT/build/image/maluos-server
+[ -f "$IMG.squashfs" ] || { echo "no $IMG.squashfs; run sudo image/build-rootfs.sh" >&2; exit 1; }
+mkdir -p "$STAGE/casper"
+cp "$IMG.size" "$STAGE/casper/maluos-server.size"
+cp "$IMG.manifest" "$STAGE/casper/maluos-server.manifest"
+xorriso -osirrox on -indev "$BASE" -extract /casper/install-sources.yaml "$STAGE/casper/install-sources.yaml" >/dev/null 2>&1
+chmod u+w "$STAGE/casper/install-sources.yaml"
+python3 - "$STAGE/casper/install-sources.yaml" "$(cat "$IMG.size")" <<'PY'
+import sys, yaml
+path, size = sys.argv[1], int(sys.argv[2])
+d = yaml.safe_load(open(path))
+for s in d["sources"]:
+    s.pop("default", None)
+d["sources"].insert(0, {
+    "default": True, "id": "maluos-server", "variant": "server", "type": "fsimage",
+    "path": "maluos-server.squashfs", "size": size, "locale_support": "locale-only",
+    "name": {"en": "MaluOS Server"},
+    "description": {"en": "MaluOS 26.04: Ubuntu 26.04 base with PostgreSQL 18 and the MaluDB memory core preinstalled."},
+})
+yaml.safe_dump(d, open(path, "w"), sort_keys=False, allow_unicode=True)
+PY
+
 # --- grub ----------------------------------------------------------------
 if [ $TEST = 1 ]; then
     sed -e 's/@TIMEOUT@/3/; s/@DEFAULT@/1/; s/@EXTRA_ARGS@/console=ttyS0,115200n8 /' "$ROOT/iso/grub.cfg.in"
@@ -80,8 +106,9 @@ fi > "$STAGE/boot/grub/grub.cfg"
 # --- md5sum.txt: drop replaced entry, add new files ------------------------
 xorriso -osirrox on -indev "$BASE" -extract /md5sum.txt "$STAGE/md5sum.txt" >/dev/null 2>&1
 chmod u+w "$STAGE/md5sum.txt"
-grep -v ' ./boot/grub/grub.cfg$' "$STAGE/md5sum.txt" > "$STAGE/md5sum.new"
-( cd "$STAGE" && find ./boot/grub/grub.cfg ./maluos -type f -exec md5sum {} + ) >> "$STAGE/md5sum.new"
+grep -vE ' ./(boot/grub/grub.cfg|casper/install-sources.yaml)$' "$STAGE/md5sum.txt" > "$STAGE/md5sum.new"
+( cd "$STAGE" && find ./boot/grub/grub.cfg ./maluos ./casper -type f -exec md5sum {} + ) >> "$STAGE/md5sum.new"
+echo "$(md5sum < "$IMG.squashfs" | cut -d' ' -f1)  ./casper/maluos-server.squashfs" >> "$STAGE/md5sum.new"
 mv "$STAGE/md5sum.new" "$STAGE/md5sum.txt"
 
 # --- assemble ------------------------------------------------------------
@@ -92,6 +119,10 @@ xorriso -indev "$BASE" -outdev "$OUT" \
     -volid "$VOLID" \
     -overwrite on \
     -map "$STAGE/maluos" /maluos \
+    -map "$IMG.squashfs" /casper/maluos-server.squashfs \
+    -map "$STAGE/casper/maluos-server.size" /casper/maluos-server.size \
+    -map "$STAGE/casper/maluos-server.manifest" /casper/maluos-server.manifest \
+    -map "$STAGE/casper/install-sources.yaml" /casper/install-sources.yaml \
     -map "$STAGE/boot/grub/grub.cfg" /boot/grub/grub.cfg \
     -map "$STAGE/md5sum.txt" /md5sum.txt \
     -commit 2>&1 | grep -vE '^xorriso : UPDATE|^(Drive|Media) ' || true

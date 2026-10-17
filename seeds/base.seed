@@ -1,6 +1,7 @@
 # maluos-base: identity of a MaluOS system. Every variant depends on this.
 maluos-keyring
 maluos-archive
+maluos-branding
 ca-certificates
 curl
 gnupg

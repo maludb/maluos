@@ -1,0 +1,5 @@
+files/usr/lib/os-release      usr/lib
+files/etc/maluos-release      etc
+files/etc/update-motd.d/05-maluos etc/update-motd.d
+files/etc/issue               usr/share/maluos-branding
+files/etc/issue.net           usr/share/maluos-branding

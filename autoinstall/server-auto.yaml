@@ -3,6 +3,9 @@ autoinstall:
   version: 1
   refresh-installer:
     update: false
+  source:
+    id: maluos-server
+    search_drivers: true
   locale: en_US.UTF-8
   keyboard:
     layout: us

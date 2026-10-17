@@ -1,0 +1,19 @@
+Source: maluos-branding
+Section: misc
+Priority: important
+Maintainer: Edward Honour <ed@maludb.org>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.6.2
+Homepage: https://github.com/maludb/maluos
+Rules-Requires-Root: no
+
+Package: maluos-branding
+Architecture: all
+Multi-Arch: foreign
+Depends: ${misc:Depends}
+Description: MaluOS identity: os-release, issue and message of the day
+ Diverts /usr/lib/os-release and writes /etc/issue and /etc/issue.net,
+ so base-files upgrades keep working. os-release keeps
+ ID=ubuntu and ID_LIKE=debian for tool compatibility (cloud-init,
+ curtin, apt-add-repository, PGDG); NAME, PRETTY_NAME and VARIANT say
+ MaluOS. Also ships /etc/maluos-release and a short motd banner.

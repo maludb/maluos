@@ -1,0 +1,14 @@
+PRETTY_NAME="MaluOS 26.04 LTS"
+NAME="MaluOS"
+VERSION_ID="26.04"
+VERSION="26.04 LTS (Resolute Raccoon)"
+VERSION_CODENAME=resolute
+ID=ubuntu
+ID_LIKE=debian
+VARIANT="MaluOS"
+VARIANT_ID=maluos
+HOME_URL="https://maludb.org/"
+SUPPORT_URL="https://github.com/maludb/maluos"
+BUG_REPORT_URL="https://github.com/maludb/maluos/issues"
+UBUNTU_CODENAME=resolute
+LOGO=ubuntu-logo

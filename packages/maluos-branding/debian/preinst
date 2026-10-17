@@ -1,0 +1,10 @@
+#!/bin/sh
+set -e
+case "$1" in
+    install|upgrade)
+        dpkg-divert --package maluos-branding --add --rename \
+            --divert /usr/lib/os-release.ubuntu /usr/lib/os-release
+        ;;
+esac
+#DEBHELPER#
+exit 0

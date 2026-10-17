@@ -1,0 +1,13 @@
+#!/bin/sh
+# /etc/issue and /etc/issue.net are conffiles of base-files; diverting
+# conffiles confuses dpkg on base-files upgrades, so we overwrite them here
+# instead (a legitimate local modification that base-files upgrades keep).
+set -e
+case "$1" in
+    configure)
+        cp /usr/share/maluos-branding/issue /etc/issue
+        cp /usr/share/maluos-branding/issue.net /etc/issue.net
+        ;;
+esac
+#DEBHELPER#
+exit 0

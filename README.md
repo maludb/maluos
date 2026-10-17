@@ -24,7 +24,8 @@ tests/         install tests (clean mmdebstrap chroot)
 ci/            GitHub Actions
 autoinstall/   subiquity autoinstall templates             (Phase 2+)
 firstboot/     first-boot provisioning                      (Phase 4)
-iso/           ISO build scripts                            (Phase 2/3)
+image/         rootfs + cloud image builders from the seeds (Phase 3)
+iso/           ISO build: Ubuntu live installer + MaluOS rootfs (Phase 2/3)
 docs/          plan and design notes
 ```
 

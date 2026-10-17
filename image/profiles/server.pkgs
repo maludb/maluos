@@ -1,0 +1,18 @@
+# Packages installed into the MaluOS Server root filesystem, on top of the
+# Ubuntu bootstrap. One per line; '#' comments. Metapackages come from the
+# seeds via the MaluOS repository.
+ubuntu-server-minimal
+maluos-server
+linux-generic
+grub-pc-bin
+grub-efi-amd64-signed
+shim-signed
+grub2-common
+efibootmgr
+cloud-init
+cloud-guest-utils
+openssh-server
+locales
+tzdata
+less
+vim-tiny
