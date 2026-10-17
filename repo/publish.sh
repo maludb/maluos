@@ -9,7 +9,7 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 . "$ROOT/repo/config.env"
 BUILD=${BUILD_DIR:-$ROOT/build}
 
-debs=( "$BUILD"/*.deb "$@" )
+debs=( "$BUILD"/*.deb "$ROOT"/vendor/maludb/*.deb "$@" )
 aptly repo add -force-replace "$MALUOS_APTLY_REPO" "${debs[@]}"
 
 if aptly publish list -raw | grep -q "^\. $MALUOS_SUITE$"; then

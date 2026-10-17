@@ -1,25 +1,35 @@
 #!/bin/sh
 # Runs INSIDE the bootstrap chroot (mmdebstrap customize hook).
-# Arguments: MALUOS_REPO_URL (reachable from the chroot), suite.
+# Arguments: MALUOS_REPO_URL (reachable from the chroot), suite, flat (0/1:
+# 1 = unsigned flat repository, trusted; used by CI where no signing key exists).
 # Installs the MaluOS repository configuration and the profile packages,
 # then cleans the rootfs for imaging.
 set -eu
-REPO_URL=$1; SUITE=$2
+REPO_URL=$1; SUITE=$2; FLAT=${3:-0}
 export DEBIAN_FRONTEND=noninteractive LC_ALL=C.UTF-8
 APT='apt-get -y -q -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold'
 
 printf '#!/bin/sh\nexit 101\n' > /usr/sbin/policy-rc.d; chmod +x /usr/sbin/policy-rc.d
-# apt verifies signatures as the _apt user: the keyring must be world-readable
-# and outside the 0700 staging directory.
-install -d -m 0755 /etc/apt/keyrings
-install -m 0644 /tmp/stage/maluos-archive-keyring.gpg /etc/apt/keyrings/maluos-build-keyring.gpg
-cat > /etc/apt/sources.list.d/maluos-build.sources <<SRC
+if [ "$FLAT" = 1 ]; then
+    cat > /etc/apt/sources.list.d/maluos-build.sources <<SRC
+Types: deb
+URIs: $REPO_URL
+Suites: ./
+Trusted: yes
+SRC
+else
+    # apt verifies signatures as the _apt user: the keyring must be world-readable
+    # and outside the 0700 staging directory.
+    install -d -m 0755 /etc/apt/keyrings
+    install -m 0644 /tmp/stage/maluos-archive-keyring.gpg /etc/apt/keyrings/maluos-build-keyring.gpg
+    cat > /etc/apt/sources.list.d/maluos-build.sources <<SRC
 Types: deb
 URIs: $REPO_URL
 Suites: $SUITE
 Components: main
 Signed-By: /etc/apt/keyrings/maluos-build-keyring.gpg
 SRC
+fi
 apt-get update -q
 # PGDG key arrives with postgresql-client-common; maluos-archive then adds pgdg.sources.
 $APT install --no-install-recommends postgresql-client-common

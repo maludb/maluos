@@ -1,5 +1,6 @@
 build/
-*.deb
+/*.deb
+build/**/*.deb
 *.ddeb
 *.changes
 *.buildinfo

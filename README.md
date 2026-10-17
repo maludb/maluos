@@ -21,7 +21,7 @@ seeds/         package lists per variant; metapackage Depends are generated from
 repo/          aptly configuration and publish scripts
 scripts/       build helpers and the client bootstrap installer
 tests/         install tests (clean mmdebstrap chroot)
-ci/            GitHub Actions
+ci/            CI build scripts (flat repo, in-container build); workflows in .github/
 autoinstall/   subiquity autoinstall templates             (Phase 2+)
 firstboot/     first-boot provisioning                      (Phase 4)
 image/         rootfs + cloud image builders from the seeds (Phase 3)
@@ -54,6 +54,16 @@ scripts/jobs.sh                 # what is running; scripts/jobs.sh <name> for st
 
 Logs land in build/logs/<name>.log. Run interactive sessions themselves
 inside tmux (`tmux new -s maluos`, reattach with `tmux attach -t maluos`).
+
+## CI
+
+- `packages`: every push and pull request builds all packages with lintian
+  in an ubuntu:26.04 container and uploads the .debs.
+- `images`: on main (image-affecting paths) and on demand: packages, rootfs,
+  squashfs and qcow2 are built in a privileged ubuntu:26.04 container from an
+  unsigned flat repo (no signing key in CI), then the qcow2 is boot-tested on
+  BIOS and UEFI with KVM and uploaded. The manual run can also build the ISO.
+- The MaluDB engine packages come from vendor/maludb/ (see its README).
 
 ## Quick start (client)
 
