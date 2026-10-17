@@ -43,10 +43,21 @@ GRUB
 
 echo "== installing grub (BIOS + UEFI)"
 for d in dev dev/pts proc sys run; do mount --bind "/$d" "$MNT/$d"; done
-chroot "$MNT" grub-install --target=i386-pc --no-floppy "$LOOP" >/dev/null 2>&1
-chroot "$MNT" grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=maluos \
-       --removable --no-nvram --uefi-secure-boot >/dev/null 2>&1
-chroot "$MNT" update-grub >/dev/null 2>&1
+chroot "$MNT" grub-install --target=i386-pc --no-floppy "$LOOP" 2>&1 | grep -viE '^Installing|^Installation finished|^$' || true
+# Default (non --removable) install: EFI/ubuntu with shim, grub and the stub
+# cfg that the signed grub's embedded config expects, plus (GRUB 2.14 default,
+# --no-extra-removable to opt out) the EFI/BOOT fallback for firmware without
+# a boot entry. Plain --removable only writes EFI/BOOT, which the signed grub
+# ignores and drops to a prompt.
+chroot "$MNT" grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=ubuntu \
+       --no-nvram --uefi-secure-boot 2>&1 | grep -viE '^Installing|^Installation finished|^$' || true
+test -f "$MNT/boot/efi/EFI/ubuntu/grub.cfg" || { echo "EFI/ubuntu/grub.cfg missing" >&2; exit 1; }
+# Booted through the fallback path, the signed grub reads $cmdpath/grub.cfg,
+# i.e. EFI/BOOT/grub.cfg. Make sure the stub is there too.
+mkdir -p "$MNT/boot/efi/EFI/BOOT"
+cp "$MNT/boot/efi/EFI/ubuntu/grub.cfg" "$MNT/boot/efi/EFI/BOOT/grub.cfg"
+echo "-- ESP contents:"; ( cd "$MNT/boot/efi" && find . -type f | sort | sed 's/^/   /' )
+chroot "$MNT" update-grub 2>&1 | grep -iE "error|warn" || true
 umount -R "$MNT"; losetup -d "$LOOP"; LOOP=""
 
 echo "== converting to qcow2"

@@ -70,10 +70,15 @@ what "MaluOS" means.
 - Rootfs: 434 packages, 1.9 GB uncompressed, 1.2 GB squashfs. PostgreSQL
   18.6 cluster 18/main is created at build time, so the service is up on
   first boot.
-- Cloud image: tests/qcow2-boot-test.sh PASS on BIOS under QEMU/TCG:
-  MaluOS identity, all MaluOS and MaluDB packages, postgresql@18-main
-  active, maludb_core available, growpart to 20 GB, apt-get update clean,
-  cloud-init done.
+- Cloud image: tests/qcow2-boot-test.sh PASS on BIOS and on UEFI (OVMF)
+  under QEMU/TCG: MaluOS identity, all MaluOS and MaluDB packages,
+  postgresql@18-main active, maludb_core available, growpart to 20 GB,
+  apt-get update clean, cloud-init done.
+- UEFI lesson: Ubuntu's signed grubx64.efi has an embedded config that reads
+  EFI/ubuntu/grub.cfg on the ESP. grub-install must use bootloader-id
+  `ubuntu` and the default (non --removable) layout; GRUB 2.14 adds the
+  EFI/BOOT fallback by itself. `--removable` alone writes only EFI/BOOT and
+  the signed grub drops to a prompt.
 - ISO: 4.1 GB, maluos-server.squashfs is the default install source; both
   boot images replayed. End-to-end install test still needs a KVM host
   (see phase2-iso.md for the emulation limitation).
