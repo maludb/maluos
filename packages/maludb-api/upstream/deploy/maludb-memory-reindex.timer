@@ -1,0 +1,22 @@
+# Companion timer for maludb-memory-reindex.service — drives the periodic
+# document/note reindex sweep. See maludb-memory-reindex.service for install.
+#
+# Cadence is intentionally modest: reindexing only matters as the SVPOR
+# vocabulary grows or to fix a weak initial extraction, and last_indexed stops
+# the sweep from redoing fresh documents. Document reindex calls a model per
+# document, so keep the cadence/limit conservative to bound cost. Tune to taste.
+
+[Unit]
+Description=Periodic MaluDB document/note reindex sweep
+
+[Timer]
+# Every 6 hours, on the hour.
+OnCalendar=00/6:00
+# Catch up one missed run after downtime instead of waiting for the next slot.
+Persistent=true
+# Jitter so many hosts don't hit the API in lockstep.
+RandomizedDelaySec=300
+Unit=maludb-memory-reindex.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,11 @@
+[Unit]
+Description=Periodic MaluDB skill-reindex sweep
+
+[Timer]
+OnCalendar=*:5/15
+Persistent=true
+RandomizedDelaySec=60
+Unit=maludb-skill-reindex.service
+
+[Install]
+WantedBy=timers.target

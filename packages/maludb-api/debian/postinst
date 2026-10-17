@@ -1,0 +1,17 @@
+#!/bin/sh
+set -e
+case "$1" in
+    configure)
+        if ! getent passwd maludb-api >/dev/null; then
+            adduser --system --group --no-create-home --home /var/lib/maludb-api \
+                    --shell /usr/sbin/nologin maludb-api
+        fi
+        install -d -o maludb-api -g maludb-api -m 0750 /var/lib/maludb-api /var/log/maludb-api
+        chown root:maludb-api /etc/maludb/maludb-api.env /etc/maludb/embedding-worker.env \
+              /etc/maludb/skill-reindex.env /etc/maludb/memory-reindex.env
+        chmod 0640 /etc/maludb/maludb-api.env /etc/maludb/embedding-worker.env \
+              /etc/maludb/skill-reindex.env /etc/maludb/memory-reindex.env
+        ;;
+esac
+#DEBHELPER#
+exit 0

@@ -1,0 +1,34 @@
+# systemd unit for the MaluDB document/note reindex sweep — the cron half of
+# the maludb_core 0.100.0 background reindex (DB contract: maludb_core
+# docs/document-reindex.md). Type=oneshot: it POSTs one batch to the API and
+# exits; the companion .timer drives the cadence.
+#
+# Install:
+#   sudo cp deploy/maludb-memory-reindex.service /etc/systemd/system/
+#   sudo cp deploy/maludb-memory-reindex.timer   /etc/systemd/system/
+#   sudo install -D deploy/memory-reindex.env.example /etc/maludb/memory-reindex.env
+#   sudo $EDITOR /etc/maludb/memory-reindex.env     # set MALU_API_URL + MALU_TOKEN
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now maludb-memory-reindex.timer
+#   systemctl start maludb-memory-reindex.service    # optional: run one now
+#
+# The sweep reindexes the TOKEN OWNER's tenant (single-tenant MVP). For more
+# tenants, run one timer per tenant token (a drop-in instance), or move to a
+# multi-tenant sweep. Unlike skills, document reindex REQUIRES an `extract`
+# model configured for the token's user; documents with none are skipped.
+
+[Unit]
+Description=MaluDB document/note reindex sweep (one batch)
+After=network-online.target maludb-api.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Required: MALU_API_URL + MALU_TOKEN (+ optional MALU_REINDEX_LIMIT,
+# MALU_REINDEX_SOURCE_TYPE). Holds a token, so keep it root-owned 0600.
+EnvironmentFile=/etc/maludb/memory-reindex.env
+# curl -f makes an HTTP >=400 a nonzero exit, so a failed sweep shows as a
+# failed unit (visible in `systemctl status` / journal) rather than passing.
+ExecStart=/bin/sh -c 'curl -fsS -X POST \
+  -H "Authorization: Bearer $MALU_TOKEN" \
+  "$MALU_API_URL/v1/memory/reindex/run?limit=${MALU_REINDEX_LIMIT:-32}${MALU_REINDEX_SOURCE_TYPE:+&source_type=$MALU_REINDEX_SOURCE_TYPE}"'

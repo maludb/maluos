@@ -1,0 +1,24 @@
+Source: maludb-api
+Section: database
+Priority: optional
+Maintainer: Edward Honour <ed@maludb.org>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.6.2
+Homepage: https://github.com/maludb/maludb-python-api-server
+Rules-Requires-Root: no
+
+Package: maludb-api
+Architecture: all
+Depends: ${misc:Depends}, adduser, python3 (>= 3.12), python3-fastapi, python3-uvicorn, python3-psycopg,
+ python3-python-multipart, python3-httpx, python3-cryptography, curl
+Recommends: postgresql-18-maludb-core, maluos-firstboot, python3-cryptography
+Description: MaluDB API server (FastAPI) as a system service
+ The MaluDB Python API server: a REST/JSON gateway over a MaluDB memory
+ database (subjects, memories, documents, episodes, skills, principals,
+ MCP, model prompts). Tokens are minted against PostgreSQL logins and
+ kept in a local auth store. Runs as the maludb-api system user on
+ 127.0.0.1:8000 by default; configuration in /etc/maludb/maludb-api.env.
+ .
+ Ships the periodic embedding and reindex sweeps as timers, and a MaluOS
+ first-boot component that gives the tenant a database password, seals
+ the auth store, mints the tenant's API token and enables the sweeps.

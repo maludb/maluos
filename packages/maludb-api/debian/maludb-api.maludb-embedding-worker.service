@@ -1,0 +1,9 @@
+[Unit]
+Description=MaluDB embedding-worker sweep (one batch)
+After=network-online.target maludb-api.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/maludb/embedding-worker.env
+ExecStart=/bin/sh -c 'curl -fsS -X POST -H "Authorization: Bearer $MALU_TOKEN" "$MALU_API_URL/v1/memory/embeddings/run?limit=${MALU_EMBED_LIMIT:-64}"'

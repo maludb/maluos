@@ -247,6 +247,34 @@ def ensure_operators(db, tenant, users):
         log(f"operator roles: {', '.join(users)}")
 
 
+COMPONENTS_DIR = "/usr/lib/maluos/components"
+
+
+def run_components(cfg, db, tenant):
+    """Run /usr/lib/maluos/components/*.py in name order. Each defines
+    provision(ctx) and returns a JSON-able summary or None (not applicable)."""
+    import importlib.util, glob
+    results = {}
+    wanted = cfg.get("components") or {}
+    ctx = {"cfg": cfg, "db": db, "tenant": tenant, "log": log, "psql": psql, "exists": exists,
+           "qi": qi, "ql": ql, "secrets_dir": SECRETS_DIR, "set_env": set_env, "read_env_file": read_env_file}
+    os.makedirs(SECRETS_DIR, mode=0o700, exist_ok=True)
+    for path in sorted(glob.glob(os.path.join(COMPONENTS_DIR, "*.py"))):
+        name = os.path.basename(path)[:-3].split("-", 1)[-1]
+        if wanted.get(name, {}).get("enabled", True) is False:
+            log(f"component {name}: disabled by configuration"); continue
+        spec = importlib.util.spec_from_file_location(f"maluos_component_{name}", path)
+        mod = importlib.util.module_from_spec(spec)
+        try:
+            spec.loader.exec_module(mod)
+            log(f"component {name}: provisioning")
+            results[name] = mod.provision(ctx)
+        except Exception as e:  # one failing component must not block the others
+            log(f"component {name}: FAILED: {e!r}")
+            results[name] = {"error": repr(e)}
+    return results
+
+
 def provision(force=False):
     if os.geteuid() != 0:
         sys.exit("must run as root")
@@ -262,12 +290,13 @@ def provision(force=False):
     url, listener_user = ensure_listener(cfg, db)
     ops = operator_users(cfg.get("operators", "auto"))
     ensure_operators(db, tenant, ops)
+    components = run_components(cfg, db, tenant)
     os.makedirs(STATE_DIR, exist_ok=True)
     summary = {"provisioned_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                "database": db, "maludb_core": version, "tenant": tenant,
                "admin_principal": cfg["admin_principal"]["ref"], "listener": url,
                "listener_user": listener_user, "token_file": TOKEN_FILE if os.path.exists(TOKEN_FILE) else None,
-               "operators": ops}
+               "operators": ops, "components": components}
     with open(DONE, "w") as f:
         json.dump(summary, f, indent=2); f.write("\n")
     log("done: " + json.dumps(summary))

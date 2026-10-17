@@ -1,0 +1,21 @@
+# Companion timer for maludb-embedding-worker.service — drains the entity-card
+# embedding queue periodically. See maludb-embedding-worker.service for install.
+#
+# More frequent than the reindex sweeps: cards are cheap to embed and the queue
+# fills from every ingest and every skill/document reindex, so draining often
+# keeps semantic jumps fresh. last_indexed has no role here — the queue itself
+# (malu$embedding_dirty) is the work list, and the claim auto-skips unchanged
+# cards, so an empty run is nearly free.
+
+[Unit]
+Description=Periodic MaluDB entity-card embedding sweep
+
+[Timer]
+# Every 15 minutes.
+OnCalendar=*:0/15
+Persistent=true
+RandomizedDelaySec=60
+Unit=maludb-embedding-worker.service
+
+[Install]
+WantedBy=timers.target

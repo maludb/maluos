@@ -1,0 +1,3 @@
+# maluos-api: the MaluDB Python API server (REST/JSON + MCP) as a system service.
+maluos-base
+maludb-api

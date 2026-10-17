@@ -1,0 +1,11 @@
+[Unit]
+Description=Periodic MaluDB embedding-worker sweep
+
+[Timer]
+OnCalendar=*:0/15
+Persistent=true
+RandomizedDelaySec=60
+Unit=maludb-embedding-worker.service
+
+[Install]
+WantedBy=timers.target

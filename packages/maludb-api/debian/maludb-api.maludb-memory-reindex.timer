@@ -1,0 +1,11 @@
+[Unit]
+Description=Periodic MaluDB memory-reindex sweep
+
+[Timer]
+OnCalendar=*:10/15
+Persistent=true
+RandomizedDelaySec=60
+Unit=maludb-memory-reindex.service
+
+[Install]
+WantedBy=timers.target

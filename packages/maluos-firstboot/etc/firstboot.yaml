@@ -30,3 +30,9 @@ listener:
 # schema on their search_path. "auto" = every human account (uid 1000-59999
 # with a login shell) present at provisioning time; or a list of names.
 operators: auto
+
+# Components: packages that ship /usr/lib/maluos/components/<nn>-<name>.py run
+# after the core provisioning, in name order. Disable one with enabled: false.
+components:
+  maludb-api:
+    enabled: true

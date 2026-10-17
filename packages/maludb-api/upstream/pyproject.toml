@@ -1,0 +1,32 @@
+[project]
+name = "maludb-api"
+version = "0.4.1"
+description = "MaluDB API server — Python FastAPI edition (maludb_core 0.96.0 and later; tested on 0.105.3)"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "psycopg[binary]>=3.2",
+    "python-multipart>=0.0.9",
+    "httpx>=0.27",
+    "cryptography>=42",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.5",
+]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

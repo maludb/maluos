@@ -1,0 +1,29 @@
+# systemd unit for the MaluDB entity-card embedding worker — drains the
+# maludb_core 0.95.0 embedding dirty queue (the long-deferred consumer; this
+# is what turns on semantic `similar_to` jumps for documents AND skills).
+# Type=oneshot: it POSTs one batch to the API and exits; the .timer drives it.
+#
+# Install:
+#   sudo cp deploy/maludb-embedding-worker.service /etc/systemd/system/
+#   sudo cp deploy/maludb-embedding-worker.timer   /etc/systemd/system/
+#   sudo install -D deploy/embedding-worker.env.example /etc/maludb/embedding-worker.env
+#   sudo $EDITOR /etc/maludb/embedding-worker.env   # set MALU_API_URL + MALU_TOKEN
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now maludb-embedding-worker.timer
+#
+# Reindexes nothing on its own — it embeds cards that ingest + the skill/
+# document reindex sweeps marked dirty. The token's user must have an `embed`
+# model configured (or MALUDB_EMBED_* env on the API host); otherwise the
+# endpoint returns early (the deterministic fallback isn't persisted).
+
+[Unit]
+Description=MaluDB entity-card embedding worker (one batch)
+After=network-online.target maludb-api.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/maludb/embedding-worker.env
+ExecStart=/bin/sh -c 'curl -fsS -X POST \
+  -H "Authorization: Bearer $MALU_TOKEN" \
+  "$MALU_API_URL/v1/memory/embeddings/run?limit=${MALU_EMBED_LIMIT:-64}"'

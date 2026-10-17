@@ -1,0 +1,5 @@
+repository: https://github.com/maludb/maludb-python-api-server
+ref: main
+commit: 87fc7c1
+version: 0.4.1
+vendored: 2026-10-17

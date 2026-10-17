@@ -1,0 +1,33 @@
+# systemd unit for the MaluDB skill-reindex sweep — the cron half of the
+# maludb_core 0.99.0 background reindex (DB contract: maludb_core
+# docs/skill-reindex.md). Type=oneshot: it POSTs one batch to the API and
+# exits; the companion .timer drives the cadence.
+#
+# Install:
+#   sudo cp deploy/maludb-skill-reindex.service /etc/systemd/system/
+#   sudo cp deploy/maludb-skill-reindex.timer   /etc/systemd/system/
+#   sudo install -D deploy/skill-reindex.env.example /etc/maludb/skill-reindex.env
+#   sudo $EDITOR /etc/maludb/skill-reindex.env      # set MALU_API_URL + MALU_TOKEN
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now maludb-skill-reindex.timer
+#   systemctl start maludb-skill-reindex.service     # optional: run one now
+#
+# The sweep reindexes the TOKEN OWNER's tenant (single-tenant MVP). For more
+# tenants, run one timer per tenant token (a drop-in instance), or move to a
+# multi-tenant sweep.
+
+[Unit]
+Description=MaluDB skill reindex sweep (one batch)
+After=network-online.target maludb-api.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Required: MALU_API_URL + MALU_TOKEN (+ optional MALU_REINDEX_LIMIT). Holds a
+# token, so keep it root-owned 0600 and out of git.
+EnvironmentFile=/etc/maludb/skill-reindex.env
+# curl -f makes an HTTP >=400 a nonzero exit, so a failed sweep shows as a
+# failed unit (visible in `systemctl status` / journal) rather than passing.
+ExecStart=/bin/sh -c 'curl -fsS -X POST \
+  -H "Authorization: Bearer $MALU_TOKEN" \
+  "$MALU_API_URL/v1/skills/reindex/run?limit=${MALU_REINDEX_LIMIT:-32}"'

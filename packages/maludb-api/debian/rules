@@ -1,0 +1,12 @@
+#!/usr/bin/make -f
+%:
+	dh $@
+
+override_dh_installsystemd:
+	dh_installsystemd --name=maludb-api maludb-api.service
+	dh_installsystemd --name=maludb-embedding-worker --no-enable --no-start maludb-embedding-worker.timer
+	dh_installsystemd --name=maludb-skill-reindex --no-enable --no-start maludb-skill-reindex.timer
+	dh_installsystemd --name=maludb-memory-reindex --no-enable --no-start maludb-memory-reindex.timer
+
+override_dh_auto_clean:
+	find upstream -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true

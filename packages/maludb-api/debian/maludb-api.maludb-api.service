@@ -1,0 +1,36 @@
+[Unit]
+Description=MaluDB API server (FastAPI/uvicorn)
+Documentation=https://github.com/maludb/maludb-python-api-server
+After=network-online.target postgresql.service
+Wants=network-online.target postgresql.service
+
+[Service]
+Type=simple
+User=maludb-api
+Group=maludb-api
+WorkingDirectory=/usr/lib/maludb-api
+EnvironmentFile=/etc/maludb/maludb-api.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/usr/bin/python3 -m uvicorn app.main:app --host ${MALUDB_API_HOST} --port ${MALUDB_API_PORT} --workers ${MALUDB_API_WORKERS}
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=3
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+SystemCallArchitectures=native
+ReadWritePaths=/var/lib/maludb-api /var/log/maludb-api
+
+[Install]
+WantedBy=multi-user.target

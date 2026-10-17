@@ -1,0 +1,40 @@
+# systemd unit for the MaluDB API server.
+#
+# Install:
+#   sudo cp deploy/maludb-api.service /etc/systemd/system/maludb-api.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now maludb-api
+#
+# Adjust User/Group/paths if your checkout lives elsewhere or runs as another user.
+
+[Unit]
+Description=MaluDB API server (FastAPI/uvicorn)
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=maludb
+Group=maludb
+WorkingDirectory=/home/maludb/maludb-python-api-server
+
+# Optional env file (the leading "-" means "don't fail if it's missing").
+# Put any non-default MALUDB_* variables here; keep it out of git (it may hold secrets).
+EnvironmentFile=-/home/maludb/maludb-python-api-server/config/maludb.env
+
+# Bind 0.0.0.0 to serve the LAN directly AND a reverse proxy. If the reverse proxy
+# is the only front door, tighten this to 127.0.0.1 so uvicorn isn't exposed.
+# No --reload in production; use --workers for concurrency.
+ExecStart=/home/maludb/maludb-python-api-server/.venv/bin/uvicorn app.main:app \
+          --host 0.0.0.0 --port 8000 --workers 2
+
+# `systemctl reload` → SIGHUP to the uvicorn master, which gracefully restarts
+# the workers (picking up new code) without dropping the listening socket.
+# Requires --workers above; without it there is no master to receive the signal.
+ExecReload=/bin/kill -HUP $MAINPID
+
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

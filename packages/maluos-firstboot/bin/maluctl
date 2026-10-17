@@ -3,6 +3,7 @@
 
   maluctl status                      provisioning, database, tenant, listener
   maluctl token [rotate]              print (or rotate) the MCP listener bearer token
+  maluctl token api                   print the tenant's MaluDB API token
   maluctl principal list              principals in the tenant
   maluctl principal add REF [--kind agent|human] [--name NAME] [--home SCOPE]
   maluctl provision [--force]         (re)run first-boot provisioning now
@@ -45,11 +46,21 @@ def cmd_status(_):
         print(f"listener:    {st['listener']}  {h}  (user {st.get('listener_user')})")
         print(f"token:       {'sudo maluctl token' if st.get('token_file') else 'none (unauthenticated)'}")
     print(f"operators:   {', '.join(st.get('operators') or []) or '-'}")
+    for name, r in (st.get("components") or {}).items():
+        if r is None: continue
+        if "error" in r: print(f"component:   {name}  FAILED {r['error'][:80]}"); continue
+        extra = f"  {r.get('url')}" if r.get("url") else ""
+        print(f"component:   {name}  {'ok' if r.get('healthy', True) else 'unhealthy'}{extra}")
     return 0
 
 
 def cmd_token(args):
     need_root()
+    if args[:1] == ["api"]:
+        f = os.path.join(mp.SECRETS_DIR, "api.token")
+        if not os.path.exists(f):
+            print("no API token (maludb-api not installed or not provisioned)", file=sys.stderr); return 1
+        print(open(f).read().strip()); return 0
     if args[:1] == ["rotate"]:
         token = secrets.token_hex(32)
         with open(os.open(mp.TOKEN_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:

@@ -1,2 +1,3 @@
 base|Minimal MaluOS system|The identity of a MaluOS system: repository configuration, keyring and the baseline tools every MaluOS variant carries. Every other MaluOS metapackage depends on this one.
 server|MaluOS memory server|A headless MaluOS memory host: PostgreSQL 18 with the MaluDB memory core extension and the MC2DB MCP listener.
+api|MaluDB API server|The MaluDB Python API server: REST/JSON and MCP access to a MaluDB memory database, with token minting and the periodic embedding and reindex sweeps. Provisioned on first boot.

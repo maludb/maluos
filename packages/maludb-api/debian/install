@@ -1,0 +1,8 @@
+upstream/app                         usr/lib/maludb-api
+upstream/config                      usr/lib/maludb-api
+upstream/VENDORED                    usr/lib/maludb-api
+etc/maludb-api.env                   etc/maludb
+etc/embedding-worker.env             etc/maludb
+etc/skill-reindex.env                etc/maludb
+etc/memory-reindex.env               etc/maludb
+components/50-maludb-api.py          usr/lib/maluos/components

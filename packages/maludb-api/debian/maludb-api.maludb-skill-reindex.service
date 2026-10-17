@@ -1,0 +1,9 @@
+[Unit]
+Description=MaluDB skill-reindex sweep (one batch)
+After=network-online.target maludb-api.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/maludb/skill-reindex.env
+ExecStart=/bin/sh -c 'curl -fsS -X POST -H "Authorization: Bearer $MALU_TOKEN" "$MALU_API_URL/v1/skills/reindex/run?limit=${MALU_REINDEX_LIMIT:-32}"'

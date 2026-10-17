@@ -3,6 +3,7 @@
 # seeds via the MaluOS repository.
 ubuntu-server-minimal
 maluos-server
+maluos-api
 linux-generic
 grub-pc-bin
 grub-efi-amd64-signed

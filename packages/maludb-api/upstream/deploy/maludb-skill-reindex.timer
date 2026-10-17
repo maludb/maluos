@@ -1,0 +1,21 @@
+# Companion timer for maludb-skill-reindex.service — drives the periodic
+# skill-reindex sweep. See maludb-skill-reindex.service for install steps.
+#
+# Cadence is intentionally modest: reindexing only matters as the SVPOR
+# vocabulary grows or to fix a weak initial extraction, and last_indexed
+# stops the sweep from redoing fresh skills. Tune OnCalendar to taste.
+
+[Unit]
+Description=Periodic MaluDB skill reindex sweep
+
+[Timer]
+# Every 30 minutes (at :00 and :30).
+OnCalendar=*:0/30
+# Catch up one missed run after downtime instead of waiting for the next slot.
+Persistent=true
+# Jitter so many hosts don't hit the API in lockstep.
+RandomizedDelaySec=120
+Unit=maludb-skill-reindex.service
+
+[Install]
+WantedBy=timers.target

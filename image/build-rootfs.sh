@@ -28,7 +28,7 @@ cp "$ROOT/image/stage-packages.sh" "$STAGE/"
 mkdir -p "$OUT"
 # An aborted earlier run can leave proc/sys/dev mounts under the target.
 if [ -d "$ROOTFS" ]; then
-    findmnt -rn -o TARGET | grep -F "$ROOTFS/" | sort -r | while read -r m; do umount -l "$m" 2>/dev/null || true; done
+    { findmnt -rn -o TARGET | grep -F "$ROOTFS/" || true; } | sort -r | while read -r m; do umount -l "$m" 2>/dev/null || true; done
     rm -rf "$ROOTFS"
 fi
 

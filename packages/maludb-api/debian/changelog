@@ -1,0 +1,28 @@
+maludb-api (0.4.1maluos4) resolute; urgency=medium
+
+  * First-boot component: MALUDB_STORE_KEY is a Fernet key; replace an
+    invalid one at provisioning time.
+
+ -- Edward Honour <ed@maludb.org>  Sat, 17 Oct 2026 21:55:56 +0000
+
+maludb-api (0.4.1maluos3) resolute; urgency=medium
+
+  * First-boot component: mint the token with pg_dbname/pg_user/pg_password.
+
+ -- Edward Honour <ed@maludb.org>  Sat, 17 Oct 2026 21:22:13 +0000
+
+maludb-api (0.4.1maluos2) resolute; urgency=medium
+
+  * Depend on python3-python-multipart (FastAPI's multipart parser);
+    python3-multipart is an unrelated project with the same module name.
+  * Run uvicorn as python3 -m uvicorn.
+
+ -- Edward Honour <ed@maludb.org>  Sat, 17 Oct 2026 20:56:59 +0000
+
+maludb-api (0.4.1maluos1) resolute; urgency=medium
+
+  * Package upstream 0.4.1 (commit 87fc7c1) for MaluOS: system user,
+    hardened unit on 127.0.0.1:8000, /etc/maludb/maludb-api.env, auth
+    store in /var/lib/maludb-api, sweeps as timers, first-boot component.
+
+ -- Edward Honour <ed@maludb.org>  Sat, 17 Oct 2026 20:26:41 +0000
