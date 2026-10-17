@@ -1,3 +1,9 @@
+maluos-meta (0.1.2) resolute; urgency=medium
+
+  * maluos-server depends on maluos-firstboot.
+
+ -- Edward Honour <ed@maludb.org>  Sat, 17 Oct 2026 09:32:51 +0000
+
 maluos-meta (0.1.1) resolute; urgency=medium
 
   * maluos-base depends on maluos-branding.

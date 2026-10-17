@@ -1,0 +1,96 @@
+#!/usr/bin/python3
+"""maluctl: MaluOS system tool.
+
+  maluctl status                      provisioning, database, tenant, listener
+  maluctl token [rotate]              print (or rotate) the MCP listener bearer token
+  maluctl principal list              principals in the tenant
+  maluctl principal add REF [--kind agent|human] [--name NAME] [--home SCOPE]
+  maluctl provision [--force]         (re)run first-boot provisioning now
+"""
+import json, os, secrets, subprocess, sys, urllib.request
+sys.path.insert(0, "/usr/lib/maluos")
+import maluos_provision as mp
+
+
+def need_root():
+    if os.geteuid() != 0:
+        sys.exit("maluctl: run with sudo")
+
+
+def state():
+    return json.load(open(mp.DONE)) if os.path.exists(mp.DONE) else None
+
+
+def cmd_status(_):
+    st = state()
+    if not st:
+        print("provisioned: no  (systemctl status maluos-firstboot)"); return 1
+    print(f"provisioned: {st['provisioned_at']}")
+    print(f"database:    {st['database']}  (maludb_core {st.get('maludb_core')})")
+    print(f"tenant:      {st['tenant']}")
+    print(f"principal:   {st['admin_principal']}")
+    if os.geteuid() == 0:
+        try:
+            n = mp.psql(f"SET ROLE {mp.qi(st['tenant'])}; SET search_path TO {mp.qi(st['tenant'])}, maludb_core, public; "
+                        f"SELECT count(*) FROM maludb_principal;", st["database"])
+            print(f"principals:  {n}")
+        except Exception as e:
+            print(f"principals:  ? ({e})")
+    if st.get("listener"):
+        try:
+            with urllib.request.urlopen(st["listener"] + "/healthz", timeout=3) as r:
+                h = "ok" if r.status == 200 else f"http {r.status}"
+        except Exception as e:
+            h = f"down ({e.__class__.__name__})"
+        print(f"listener:    {st['listener']}  {h}  (user {st.get('listener_user')})")
+        print(f"token:       {'sudo maluctl token' if st.get('token_file') else 'none (unauthenticated)'}")
+    print(f"operators:   {', '.join(st.get('operators') or []) or '-'}")
+    return 0
+
+
+def cmd_token(args):
+    need_root()
+    if args[:1] == ["rotate"]:
+        token = secrets.token_hex(32)
+        with open(os.open(mp.TOKEN_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
+            f.write(token + "\n")
+        lines = mp.set_env(mp.read_env_file(mp.LISTENER_CONF), "BEARER_TOKEN", token)
+        with open(os.open(mp.LISTENER_CONF, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
+            f.write("\n".join(lines) + "\n")
+        subprocess.run(["systemctl", "restart", mp.LISTENER_UNIT], check=False)
+        print(token); return 0
+    if not os.path.exists(mp.TOKEN_FILE):
+        print("no token (listener unauthenticated or not provisioned)", file=sys.stderr); return 1
+    print(open(mp.TOKEN_FILE).read().strip()); return 0
+
+
+def cmd_principal(args):
+    need_root()
+    st = state() or sys.exit("not provisioned")
+    db, t = st["database"], st["tenant"]
+    pre = f"SET ROLE {mp.qi(t)}; SET search_path TO {mp.qi(t)}, maludb_core, public; "
+    if args[:1] == ["list"]:
+        print(mp.psql(pre + "SELECT principal_ref || '  ' || kind || '  ' || coalesce(display_name,'') || '  home=' || coalesce(home_scope,'') FROM maludb_principal ORDER BY 1;", db) or "(none)")
+        return 0
+    if args[:1] == ["add"] and len(args) >= 2:
+        ref, kind, name, home = args[1], "agent", args[1], args[1]
+        it = iter(args[2:])
+        for a in it:
+            if a == "--kind": kind = next(it)
+            elif a == "--name": name = next(it)
+            elif a == "--home": home = next(it)
+        mp.ensure_principal(db, t, {"ref": ref, "kind": kind, "display_name": name, "home_scope": home})
+        return 0
+    print(__doc__); return 2
+
+
+def cmd_provision(args):
+    need_root()
+    return mp.provision(force="--force" in args)
+
+
+if __name__ == "__main__":
+    cmds = {"status": cmd_status, "token": cmd_token, "principal": cmd_principal, "provision": cmd_provision}
+    if len(sys.argv) < 2 or sys.argv[1] not in cmds:
+        print(__doc__); sys.exit(2)
+    sys.exit(cmds[sys.argv[1]](sys.argv[2:]))

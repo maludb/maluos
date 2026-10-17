@@ -1,0 +1,10 @@
+#!/bin/sh
+[ -r /var/lib/maluos/firstboot/done ] || { printf '  MaluDB: not provisioned yet (maluos-firstboot pending or failed; see: systemctl status maluos-firstboot)\n\n'; exit 0; }
+python3 - <<'PY' 2>/dev/null
+import json
+d = json.load(open('/var/lib/maluos/firstboot/done'))
+print(f"  MaluDB: database {d['database']}, tenant {d['tenant']}, principal {d['admin_principal']}")
+if d.get('listener'):
+    print(f"  MCP listener: {d['listener']}  (token: sudo maluctl token)")
+print()
+PY

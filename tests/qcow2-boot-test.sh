@@ -51,6 +51,19 @@ sudo -n -u postgres psql -Atc "select 1 from pg_available_extensions where name=
 df -h / | tail -1 | awk '{print "  root: " $2 " total, " $4 " free (growpart)"}'
 sudo -n apt-get update -q >/dev/null 2>&1 && echo "  ok   apt-get update clean" || echo "  warn apt-get update had errors"
 cloud-init status | sed 's/^/  /'
+# --- first-boot provisioning (Phase 4)
+for i in $(seq 1 60); do [ -f /var/lib/maluos/firstboot/done ] && break; sleep 5; done
+[ "$(systemctl show -p Result --value maluos-firstboot)" = success ] && echo "  ok   maluos-firstboot result=success" || { echo "  FAIL maluos-firstboot: $(systemctl show -p Result --value maluos-firstboot)"; sudo -n journalctl -u maluos-firstboot --no-pager | tail -15; fail=1; }
+sudo -n test -f /var/lib/maluos/firstboot/done && echo "  ok   firstboot done file" || { echo "  FAIL no done file"; fail=1; }
+sudo -n -u postgres psql -Atd maludb -c "select extversion from pg_extension where extname='maludb_core'" | grep -qE '^[0-9]' && echo "  ok   maludb database with maludb_core" || { echo "  FAIL maludb database"; fail=1; }
+sudo -n -u postgres psql -Atd maludb -c "select 1 from pg_namespace where nspname='maluos'" | grep -q 1 && echo "  ok   tenant schema maluos" || { echo "  FAIL tenant schema"; fail=1; }
+sudo -n -u postgres psql -Atd maludb -c "set role maluos; set search_path to maluos, maludb_core, public; select principal_ref from maludb_principal" | grep -q 'human:admin' && echo "  ok   admin principal" || { echo "  FAIL admin principal"; fail=1; }
+systemctl is-active --quiet maludb-mc2dbd && echo "  ok   maludb-mc2dbd active" || { echo "  FAIL maludb-mc2dbd: $(systemctl is-active maludb-mc2dbd)"; sudo -n journalctl -u maludb-mc2dbd --no-pager | tail -8; fail=1; }
+curl -fsS --max-time 5 http://127.0.0.1:5329/healthz >/dev/null && echo "  ok   listener /healthz" || { echo "  FAIL listener /healthz"; fail=1; }
+tok=$(sudo -n maluctl token 2>/dev/null); [ ${#tok} -ge 32 ] && echo "  ok   listener token present" || { echo "  FAIL token"; fail=1; }
+curl -fsS --max-time 5 -H "Authorization: Bearer $tok" -X POST http://127.0.0.1:5329/ -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | grep -q '"tools"' && echo "  ok   MCP tools/list with token" || echo "  warn MCP tools/list did not return tools"
+psql -Atd maludb -c "select current_user" 2>/dev/null | grep -q maluos && echo "  ok   operator psql peer login" || echo "  warn operator psql login failed"
+sudo -n maluctl status | sed 's/^/  maluctl: /'
 exit $fail
 REMOTE
 rc=${PIPESTATUS[0]}

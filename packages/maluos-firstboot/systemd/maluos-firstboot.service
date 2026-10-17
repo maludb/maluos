@@ -1,0 +1,18 @@
+[Unit]
+Description=MaluOS first-boot provisioning (MaluDB database, tenant, listener)
+Documentation=https://github.com/maludb/maluos
+ConditionPathExists=!/var/lib/maluos/firstboot/done
+After=network-online.target postgresql.service cloud-config.service
+Wants=network-online.target postgresql.service
+Before=cloud-final.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/maluos/firstboot
+TimeoutStartSec=15min
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target

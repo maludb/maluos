@@ -1,0 +1,23 @@
+Source: maluos-firstboot
+Section: admin
+Priority: optional
+Maintainer: Edward Honour <ed@maludb.org>
+Build-Depends: debhelper-compat (= 13), dh-python, python3
+Standards-Version: 4.6.2
+Homepage: https://github.com/maludb/maluos
+Rules-Requires-Root: no
+
+Package: maluos-firstboot
+Architecture: all
+Depends: ${misc:Depends}, python3, python3-yaml, postgresql-common, curl
+Recommends: maludb-mc2dbd, postgresql-18-maludb-core
+Description: MaluOS first-boot provisioning and the maluctl tool
+ On the first boot of a MaluOS system, maluos-firstboot.service creates
+ the MaluDB database with the maludb_core extension, a tenant schema
+ (enable_memory_schema), an administrator principal, PostgreSQL roles
+ for the MC2DB listener and for the operator users, generates the
+ listener bearer token and starts the listener. Configuration comes
+ from /etc/maluos/firstboot.yaml, which cloud-init user-data may write.
+ .
+ maluctl shows status, prints or rotates the listener token, manages
+ principals and re-runs provisioning idempotently.

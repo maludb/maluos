@@ -1,0 +1,6 @@
+lib/firstboot          usr/lib/maluos
+lib/maluos_provision.py usr/lib/maluos
+bin/maluctl            usr/bin
+etc/firstboot.yaml     etc/maluos
+motd/06-maluos-status  etc/update-motd.d
+systemd/maluos-firstboot.service usr/lib/systemd/system

@@ -1,0 +1,32 @@
+# MaluOS first-boot provisioning. Read once by maluos-firstboot.service and
+# by `maluctl provision`. cloud-init user-data may overwrite this file
+# (write_files) before the service runs. Every step is idempotent.
+
+# PostgreSQL database that holds the MaluDB engine.
+database: maludb
+
+# Tenant: a PostgreSQL role and schema initialised with enable_memory_schema.
+tenant:
+  name: maluos
+
+# The first principal inside the tenant (docs/principal-scoping.md).
+admin_principal:
+  ref: human:admin
+  kind: human
+  display_name: Administrator
+  home_scope: org
+
+# MC2DB listener (maludb-mc2dbd): MCP over HTTP for agents.
+listener:
+  enabled: true
+  host: 127.0.0.1
+  port: 5329
+  # generate = random 64-hex token on first boot (stored in
+  # /var/lib/maluos/secrets/mc2dbd.token, root only; `sudo maluctl token`);
+  # none = unauthenticated listener (development only); or a literal token.
+  token: generate
+
+# OS users that get a PostgreSQL superuser login (peer auth) with the tenant
+# schema on their search_path. "auto" = every human account (uid 1000-59999
+# with a login shell) present at provisioning time; or a list of names.
+operators: auto

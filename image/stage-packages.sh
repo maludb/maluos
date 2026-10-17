@@ -28,6 +28,12 @@ apt-get update -q
 # shellcheck disable=SC2046
 $APT install $(grep -vE '^\s*(#|$)' /tmp/stage/profile.pkgs)
 
+# PostgreSQL cluster port: the build chroot shares the host's network namespace,
+# so pg_createcluster skips 5432 when the host runs PostgreSQL. Pin it.
+for f in /etc/postgresql/*/main/postgresql.conf; do
+    [ -f "$f" ] && sed -i 's/^port = .*/port = 5432/' "$f"
+done
+
 # --- clean for imaging ---------------------------------------------------
 rm -f /etc/apt/sources.list.d/maluos-build.sources /etc/apt/keyrings/maluos-build-keyring.gpg
 sed -i '/^Enabled:/d; $a Enabled: no' /etc/apt/sources.list.d/maluos.sources   # no public mirror yet
