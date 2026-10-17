@@ -65,6 +65,14 @@ mkdir -p "$MNT/boot/efi/EFI/BOOT"
 cp "$MNT/boot/efi/EFI/ubuntu/grub.cfg" "$MNT/boot/efi/EFI/BOOT/grub.cfg"
 echo "-- ESP contents:"; ( cd "$MNT/boot/efi" && find . -type f | sort | sed 's/^/   /' )
 chroot "$MNT" update-grub 2>&1 | grep -iE "error|warn" || true
+# grub-mkconfig falls back to the build-time device name (root=/dev/loopXp3)
+# when grub-probe cannot resolve the filesystem UUID, as happens inside
+# containers. Pin root= to the UUID and make sure the result never names a
+# loop device.
+ROOT_UUID=$(blkid -s UUID -o value "${LOOP}p3")
+sed -i -E "s|root=/dev/loop[0-9]+p3|root=UUID=$ROOT_UUID|g; s|set root='hd0,gpt3'|search --no-floppy --fs-uuid --set=root $ROOT_UUID|g" "$MNT/boot/grub/grub.cfg"
+grep -q "root=UUID=$ROOT_UUID" "$MNT/boot/grub/grub.cfg" || { echo "grub.cfg has no root=UUID=$ROOT_UUID" >&2; exit 1; }
+! grep -q '/dev/loop' "$MNT/boot/grub/grub.cfg" || { echo "grub.cfg still references a loop device" >&2; exit 1; }
 umount -R "$MNT"; losetup -d "$LOOP"; LOOP=""
 
 echo "== converting to qcow2"
