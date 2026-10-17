@@ -12,3 +12,4 @@ packages/*/debian/maluos-*/
 packages/maluos-archive/sources/*.sources
 packages/maluos-meta/debian/control
 iso-cache/
+build/logs/

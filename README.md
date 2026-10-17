@@ -39,6 +39,22 @@ repo/serve.sh           # serve the repo on http://127.0.0.1:8080
 sudo tests/chroot-install-test.sh
 ```
 
+## Long builds
+
+Rootfs, image and VM tests take minutes to hours. Run them as transient
+systemd units so they survive a dropped SSH or Claude Code session:
+
+```
+scripts/run-detached.sh rootfs sudo image/build-rootfs.sh
+scripts/run-detached.sh qcow2  sudo image/build-qcow2.sh
+scripts/run-detached.sh iso    iso/build-iso.sh
+scripts/run-detached.sh test-qcow2 tests/qcow2-boot-test.sh
+scripts/jobs.sh                 # what is running; scripts/jobs.sh <name> for status + log tail
+```
+
+Logs land in build/logs/<name>.log. Run interactive sessions themselves
+inside tmux (`tmux new -s maluos`, reattach with `tmux attach -t maluos`).
+
 ## Quick start (client)
 
 ```

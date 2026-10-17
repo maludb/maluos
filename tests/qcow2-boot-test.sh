@@ -4,7 +4,7 @@
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 WORK=${WORK:-/var/tmp/maluos-qcow2-test}; SSHPORT=${SSHPORT:-2223}; BOOT_TIMEOUT=${BOOT_TIMEOUT:-1500}
-IMG=${1:-$ROOT/build/image/maluos-server-26.04-amd64.qcow2}
+IMG=$(readlink -f "${1:-$ROOT/build/image/maluos-server-26.04-amd64.qcow2}")
 UEFI=0; [ "${2:-}" = --uefi ] && UEFI=1
 ACCEL=$([ -w /dev/kvm ] && echo kvm || echo tcg)
 mkdir -p "$WORK"; cd "$WORK"
