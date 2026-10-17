@@ -22,6 +22,13 @@ sgdisk -n1:0:+1M  -t1:EF02 -c1:bios_grub \
        -n2:0:+256M -t2:EF00 -c2:ESP \
        -n3:0:0     -t3:8304 -c3:maluos-root "$RAW" >/dev/null
 LOOP=$(losetup --find --show --partscan "$RAW")
+# Inside containers devtmpfs does not create the partition nodes; make them.
+for sysp in /sys/block/$(basename "$LOOP")/$(basename "$LOOP")p*; do
+    [ -e "$sysp" ] || continue
+    dev=/dev/$(basename "$sysp")
+    if [ ! -e "$dev" ]; then IFS=: read -r maj min < "$sysp/dev"; mknod "$dev" b "$maj" "$min"; fi
+done
+[ -e "${LOOP}p3" ] || { echo "partition nodes for $LOOP missing" >&2; exit 1; }
 mkfs.vfat -F32 -n ESP "${LOOP}p2" >/dev/null
 mkfs.ext4 -q -L maluos-root "${LOOP}p3"
 
