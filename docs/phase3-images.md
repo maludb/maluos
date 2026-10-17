@@ -83,6 +83,20 @@ what "MaluOS" means.
   boot images replayed. End-to-end install test still needs a KVM host
   (see phase2-iso.md for the emulation limitation).
 
+## Signed ISO pool (found by the first external install, 2026-10-17)
+
+Ubuntu 26.04 ISOs sign their on-disc package pool with a one-time key that
+exists only in the stock squashfs's /etc/apt/sources.list.d/cdrom.sources
+(embedded Signed-By). Subiquity's configure_apt step keeps that file when
+present; otherwise it writes an unsigned file:///cdrom source and apt-get
+update fails, which aborts the install while the user is still on the
+identity screen. The ISO build now takes cdrom.sources from the base ISO's
+squashfs and ships it as a layer (maluos-server.cdrom.squashfs, catalogue
+type fsimage-layered, curtin stacks it on maluos-server.squashfs); the
+rootfs squashfs is unchanged and subiquity removes the file after install.
+`sudo tests/iso-apt-check.sh` replays the installer's apt step against the
+ISO in about a minute and must PASS before an ISO is published.
+
 ## Open
 
 - Branding of the live installer environment itself (still Ubuntu).

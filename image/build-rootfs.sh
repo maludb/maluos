@@ -51,6 +51,6 @@ chroot "$ROOTFS" dpkg-query -W -f='${Package}\t${Version}\n' > "$OUT/$NAME.manif
 du -sb --apparent-size "$ROOTFS" | cut -f1 > "$OUT/$NAME.size"
 rm -f "$OUT/$NAME.squashfs"
 mksquashfs "$ROOTFS" "$OUT/$NAME.squashfs" -comp xz -b 1M -Xdict-size 100% -noappend -quiet -no-progress
-chown "$(stat -c %u:%g "$ROOT")" "$OUT"/$NAME.{manifest,size,squashfs,mmdebstrap.log}
+chown "$(stat -c %u:%g "$ROOT")" "$OUT" "$OUT"/$NAME.{manifest,size,squashfs,mmdebstrap.log}
 echo "packages: $(wc -l < "$OUT/$NAME.manifest")   uncompressed: $(numfmt --to=iec "$(cat "$OUT/$NAME.size")")   squashfs: $(du -h "$OUT/$NAME.squashfs" | cut -f1)"
 grep -E '^(maluos-|postgresql-18|linux-image-generic|cloud-init)' "$OUT/$NAME.manifest"

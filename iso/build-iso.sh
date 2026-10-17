@@ -4,7 +4,8 @@
 # seeds by image/build-rootfs.sh) as the default install source.
 #
 # Adds to the stock image:
-#   /casper/maluos-server.squashfs   the MaluOS rootfs, default entry in install-sources.yaml
+#   /casper/maluos-server.squashfs        the MaluOS rootfs
+#   /casper/maluos-server.cdrom.squashfs  layer with the base ISO's signed-pool cdrom.sources (default, fsimage-layered)
 #   /maluos/apt/                 the published MaluOS repository (dists, pool, bootstrap)
 #   /maluos/pgdg.sources         PGDG source file (same content as maluos-archive ships)
 #   /maluos/nocloud-auto/        unattended autoinstall (user-data, meta-data)
@@ -50,9 +51,10 @@ keys="[]"
 if [ -n "$SSHKEY" ]; then
     keys=$(python3 -c 'import json,sys; print(json.dumps([l.strip() for l in open(sys.argv[1]) if l.strip()]))' "$SSHKEY")
 fi
+AUTOINSTALL_DIR=${AUTOINSTALL_DIR:-$ROOT/autoinstall}   # override for experiments
 for v in auto interactive; do
     d="$STAGE/maluos/nocloud-$v"; mkdir -p "$d"
-    python3 - "$ROOT/autoinstall/server-$v.yaml" "$ROOT/autoinstall/late-commands.yaml" "$keys" > "$d/user-data" <<'PY'
+    python3 - "$AUTOINSTALL_DIR/server-$v.yaml" "$AUTOINSTALL_DIR/late-commands.yaml" "$keys" > "$d/user-data" <<'PY'
 import sys
 main, late, keys = open(sys.argv[1]).read(), open(sys.argv[2]).read(), sys.argv[3]
 main = main.replace("@AUTHORIZED_KEYS@", keys)
@@ -77,6 +79,23 @@ done
 IMG=$ROOT/build/image/maluos-server
 [ -f "$IMG.squashfs" ] || { echo "no $IMG.squashfs; run sudo image/build-rootfs.sh" >&2; exit 1; }
 mkdir -p "$STAGE/casper"
+# Ubuntu 26.04 ISOs sign the on-disc package pool with a one-time key. The
+# stock squashfs ships etc/apt/sources.list.d/cdrom.sources with that key
+# embedded and subiquity relies on it: without the file it writes an
+# unsigned reference to the pool, apt rejects it and the install fails in
+# configure_apt. Take the file from the base ISO's squashfs and ship it as a
+# squashfs *layer* on top of ours (curtin's fsimage-layered: the name
+# maluos-server.cdrom.squashfs stacks on maluos-server.squashfs), so the
+# rootfs squashfs stays untouched. Subiquity deletes cdrom.sources from the
+# installed system afterwards.
+xorriso -osirrox on -indev "$BASE" -extract /casper/ubuntu-server-minimal.squashfs "$STAGE/base.squashfs" >/dev/null 2>&1
+unsquashfs -q -n -d "$STAGE/base" "$STAGE/base.squashfs" etc/apt/sources.list.d/cdrom.sources >/dev/null 2>&1
+CDROM_SRC=$STAGE/base/etc/apt/sources.list.d/cdrom.sources
+[ -s "$CDROM_SRC" ] || { echo "base ISO squashfs has no cdrom.sources; cannot build an installable ISO" >&2; exit 1; }
+rm -f "$STAGE/base.squashfs"
+mkdir -p "$STAGE/layer/etc/apt/sources.list.d"; cp "$CDROM_SRC" "$STAGE/layer/etc/apt/sources.list.d/"
+LAYER_SQUASH=$STAGE/casper/maluos-server.cdrom.squashfs
+mksquashfs "$STAGE/layer" "$LAYER_SQUASH" -comp xz -quiet -no-progress -noappend >/dev/null
 cp "$IMG.size" "$STAGE/casper/maluos-server.size"
 cp "$IMG.manifest" "$STAGE/casper/maluos-server.manifest"
 xorriso -osirrox on -indev "$BASE" -extract /casper/install-sources.yaml "$STAGE/casper/install-sources.yaml" >/dev/null 2>&1
@@ -88,8 +107,8 @@ d = yaml.safe_load(open(path))
 for s in d["sources"]:
     s.pop("default", None)
 d["sources"].insert(0, {
-    "default": True, "id": "maluos-server", "variant": "server", "type": "fsimage",
-    "path": "maluos-server.squashfs", "size": size, "locale_support": "locale-only",
+    "default": True, "id": "maluos-server", "variant": "server", "type": "fsimage-layered",
+    "path": "maluos-server.cdrom.squashfs", "size": size, "locale_support": "locale-only",
     "name": {"en": "MaluOS Server"},
     "description": {"en": "MaluOS 26.04: Ubuntu 26.04 base with PostgreSQL 18 and the MaluDB memory core preinstalled."},
 })
@@ -98,7 +117,8 @@ PY
 
 # --- grub ----------------------------------------------------------------
 if [ $TEST = 1 ]; then
-    sed -e 's/@TIMEOUT@/3/; s/@DEFAULT@/1/; s/@EXTRA_ARGS@/console=ttyS0,115200n8 /' "$ROOT/iso/grub.cfg.in"
+    # TEST_DEFAULT: 1 = automated entry (default), 0 = guided entry
+    sed -e "s/@TIMEOUT@/3/; s/@DEFAULT@/${TEST_DEFAULT:-1}/; s/@EXTRA_ARGS@/console=ttyS0,115200n8 /" "$ROOT/iso/grub.cfg.in"
 else
     sed -e 's/@TIMEOUT@/30/; s/@DEFAULT@/0/; s/@EXTRA_ARGS@//' "$ROOT/iso/grub.cfg.in"
 fi > "$STAGE/boot/grub/grub.cfg"
@@ -120,6 +140,7 @@ xorriso -indev "$BASE" -outdev "$OUT" \
     -overwrite on \
     -map "$STAGE/maluos" /maluos \
     -map "$IMG.squashfs" /casper/maluos-server.squashfs \
+    -map "$LAYER_SQUASH" /casper/maluos-server.cdrom.squashfs \
     -map "$STAGE/casper/maluos-server.size" /casper/maluos-server.size \
     -map "$STAGE/casper/maluos-server.manifest" /casper/maluos-server.manifest \
     -map "$STAGE/casper/install-sources.yaml" /casper/install-sources.yaml \
