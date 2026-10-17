@@ -29,7 +29,8 @@ repository is the distribution layer.
 | 3 | Own rootfs from seeds (mmdebstrap) as ISO install source + qcow2 cloud image; branding package; offline install | rootfs + qcow2 + ISO built 2026-10-17; qcow2 boot test PASS (see phase3-images.md) |
 | 4 | First boot: maludb database, tenant, admin principal, listener role + token, operator logins; configured by /etc/maluos/firstboot.yaml (cloud-init writable); maluctl | done 2026-10-17, boot test PASS (see phase4-firstboot.md) |
 | 5 | CI: package builds on every push; ISO boot tests on GitHub runners (KVM available there, not on the dev host) | ongoing |
-| 6+ | Agent-native features | after 1-5 green |
+| 6 | Inference gateway: scheduled GPU access, local-to-cloud routing, OS-held credentials per user/agent, usage ledger | requirements drafted 2026-10-17 (phase6-inference-gateway.md) |
+| 7+ | Further agent-native features (sandboxing, journal to memory, desktop) | |
 
 ### Phase 6+ candidates
 
