@@ -10,7 +10,7 @@ STEP=${1:-all}
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
 apt-get install -y -q --no-install-recommends \
-    devscripts debhelper dh-python lintian dpkg-dev gnupg python3 python3-yaml ca-certificates curl \
+    build-essential devscripts debhelper dh-python lintian dpkg-dev gnupg python3 python3-yaml ca-certificates curl \
     mmdebstrap squashfs-tools xorriso qemu-utils dosfstools gdisk rsync fdisk e2fsprogs \
     util-linux mount grub-common >/dev/null
 export PATH=/usr/sbin:/sbin:$PATH
