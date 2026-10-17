@@ -28,7 +28,7 @@ repository is the distribution layer.
 | 2 | First bootable ISO by remastering Ubuntu Server 26.04.1 with autoinstall + MaluOS pool + grub branding | built 2026-10-16 (see phase2-iso.md) |
 | 3 | Own rootfs from seeds (mmdebstrap) as ISO install source + qcow2 cloud image; branding package; offline install | rootfs + qcow2 + ISO built 2026-10-17; qcow2 boot test PASS (see phase3-images.md) |
 | 4 | First boot: maludb database, tenant, admin principal, listener role + token, operator logins; configured by /etc/maluos/firstboot.yaml (cloud-init writable); maluctl | done 2026-10-17, boot test PASS (see phase4-firstboot.md) |
-| 5 | CI: package builds on every push; ISO boot tests on GitHub runners (KVM available there, not on the dev host) | ongoing |
+| 5 | CI: packages on every push/PR; rootfs + qcow2 built in a container and boot-tested on BIOS and UEFI under KVM on GitHub runners; ISO on demand | done 2026-10-17, both workflows green |
 | 6 | Inference gateway: scheduled GPU access, local-to-cloud routing, OS-held credentials per user/agent, usage ledger | requirements drafted 2026-10-17 (phase6-inference-gateway.md) |
 | 7+ | Further agent-native features (sandboxing, journal to memory, desktop) | |
 
