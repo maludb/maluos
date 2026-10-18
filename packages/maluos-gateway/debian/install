@@ -1,0 +1,8 @@
+lib/maluos_gateway/*.py            usr/lib/maluos/maluos_gateway
+lib/maluctl.d/gateway.py           usr/lib/maluos/maluctl.d
+components/45-maluos-gateway.py    usr/lib/maluos/components
+bin/maluos-ollama-install          usr/lib/maluos
+share/schema.sql                   usr/share/maluos-gateway
+share/ollama.service               usr/share/maluos-gateway
+share/ollama.env                   usr/share/maluos-gateway
+etc/gateway.yaml                   etc/maluos

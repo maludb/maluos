@@ -37,6 +37,12 @@ components:
   # The secret vault (package maluos-vault): per-user credentials and the ledger.
   maluos-vault:
     enabled: true
+  # The inference gateway (package maluos-gateway). Ollama itself is installed
+  # on demand: set ollama.install: true (and ollama.pull) here or in
+  # /etc/maluos/gateway.yaml; `sudo maluctl gateway ollama install` later.
+  maluos-gateway:
+    enabled: true
+    # ollama: {install: true, pull: [llama3.2:3b, nomic-embed-text], keep_warm: [llama3.2:3b]}
   maludb-api:
     enabled: true
   # The Business OS kernel (package maludb-os-core). Names: <domain>, os.<domain>,

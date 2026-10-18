@@ -50,6 +50,17 @@ vault's database role and tables, starts the socket, imports the listener
 token.
 
 
+### maluos-gateway (package maluos-gateway, in maluos-server)
+
+The inference gateway of Phase 6 slice 2 (docs/phase6-slice2-gateway.md):
+OpenAI and Ollama APIs on a socket, the GPU scheduler, the catalogue of
+tiers and aliases, the engine queue worker. Component 45-maluos-gateway
+creates the role and tables, seeds the catalogue when empty, registers the
+MCP tool maluos.model_status, makes the gateway a vault broker, starts the
+socket, and optionally installs Ollama and pulls models (ollama.install /
+ollama.pull in /etc/maluos/gateway.yaml or components.maluos-gateway.ollama
+in firstboot.yaml).
+
 ### maludb-api (package maludb-api, metapackage maluos-api)
 
 The MaluDB Python API server (github.com/maludb/maludb-python-api-server),

@@ -1,3 +1,10 @@
+maluos-firstboot (0.1.6) resolute; urgency=medium
+
+  * firstboot.yaml: maluos-gateway component entry; MALUOS_STATE_DIR
+    override for tests.
+
+ -- Edward Honour <ed@maludb.org>  Sun, 18 Oct 2026 14:06:06 +0000
+
 maluos-firstboot (0.1.5) resolute; urgency=medium
 
   * maluctl: plugin subcommands from /usr/lib/maluos/maluctl.d; every

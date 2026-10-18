@@ -1,0 +1,27 @@
+Source: maluos-gateway
+Section: admin
+Priority: optional
+Maintainer: Edward Honour <ed@maludb.org>
+Build-Depends: debhelper-compat (= 13), dh-python, python3
+Standards-Version: 4.6.2
+Homepage: https://github.com/maludb/maluos
+Rules-Requires-Root: no
+
+Package: maluos-gateway
+Architecture: all
+Depends: ${misc:Depends}, adduser, python3 (>= 3.12), python3-aiohttp, python3-psycopg, python3-yaml,
+ systemd (>= 250), curl, zstd, maluos-firstboot (>= 0.1.5), maluos-vault (>= 0.1.0)
+Recommends: postgresql-18-maludb-core, maludb-mc2dbd
+Description: MaluOS inference gateway: one door to local and cloud models
+ A daemon on a Unix socket (and optionally a token-protected TCP port) that
+ serves the OpenAI and Ollama APIs, identifies callers by their Linux uid
+ (peer credentials) and MaluDB principal, resolves tiers and aliases to
+ backend models under per-principal policy, schedules the single local GPU
+ (priority classes, fairness between principals, model affinity, expected
+ wait) and records every call in the ledger. Drains the MaluDB engine's
+ model request queue as batch work and exposes maluos.model_status as an
+ MCP tool on the listener.
+ .
+ Ships `maluctl gateway`, a pinned installer for Ollama as a localhost-only
+ service, a mock backend for tests, and the first-boot component that
+ provisions the gateway. Phase 6 slice 2 of MaluOS.

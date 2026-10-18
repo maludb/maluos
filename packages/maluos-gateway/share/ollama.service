@@ -1,0 +1,21 @@
+[Unit]
+Description=Ollama (managed by MaluOS maluos-gateway)
+After=network-online.target
+
+[Service]
+Type=simple
+User=ollama
+Group=ollama
+EnvironmentFile=/etc/maluos/ollama.env
+ExecStart=/usr/local/bin/ollama serve
+Restart=always
+RestartSec=3
+# The gateway is the only intended client; keep Ollama on localhost (OLLAMA_HOST).
+NoNewPrivileges=yes
+ProtectSystem=full
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/ollama
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,19 @@
+# MaluOS inference gateway (maluos-gateway). database and tenant are written by
+# first boot. The catalogue (tiers, aliases, classes, policies, backends) lives in
+# the database: `maluctl gateway catalog`. Defaults are documented in
+# docs/phase6-slice2-gateway.md.
+tcp:
+  enabled: false          # bearer-token listener for clients that cannot reach the socket
+  host: 127.0.0.1
+  port: 11435
+identities: {}            # linux user -> principal ref, when not user:<name>
+ollama:
+  url: http://127.0.0.1:11434
+  keep_alive: 30m
+  max_concurrent: 1       # generations in flight on the GPU
+  keep_warm: []           # models to keep resident, e.g. [llama3.1:8b]
+  pull: []                # models to pull at provisioning
+  install: false          # download and install Ollama at first boot (needs network)
+engine_queue:
+  enabled: true           # drain the engine's malu$model_request queue as batch work
+  class: batch

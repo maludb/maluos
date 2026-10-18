@@ -9,7 +9,7 @@ run is idempotent and `maluctl provision` can repeat it at any time.
 import json, os, pwd, re, secrets, shutil, subprocess, sys, time, urllib.request
 
 CONFIG = "/etc/maluos/firstboot.yaml"
-STATE_DIR = "/var/lib/maluos/firstboot"
+STATE_DIR = os.environ.get("MALUOS_STATE_DIR", "/var/lib/maluos/firstboot")  # override for tests
 DONE = os.path.join(STATE_DIR, "done")
 SECRETS_DIR = "/var/lib/maluos/secrets"
 TOKEN_FILE = os.path.join(SECRETS_DIR, "mc2dbd.token")

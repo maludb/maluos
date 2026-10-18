@@ -1,0 +1,13 @@
+#!/bin/sh
+set -e
+case "$1" in
+    configure)
+        if ! getent passwd maluos-gateway >/dev/null; then
+            adduser --system --group --no-create-home --home /var/lib/maluos-gateway \
+                    --shell /usr/sbin/nologin maluos-gateway
+        fi
+        install -d -o maluos-gateway -g maluos-gateway -m 0750 /var/lib/maluos-gateway
+        ;;
+esac
+#DEBHELPER#
+exit 0

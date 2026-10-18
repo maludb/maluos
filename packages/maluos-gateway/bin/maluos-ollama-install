@@ -1,0 +1,43 @@
+#!/bin/bash
+# Install Ollama from the official release tarball, pinned and checksummed, as
+# a localhost-only system service the gateway supervises.
+#   maluos-ollama-install [--version vX.Y.Z]
+set -euo pipefail
+PINNED=v0.40.6
+PINNED_SHA_amd64=c164ab8b1b28e2a247c29719b8e404c423c5b83ae64c3ab4e59d50c7ff7fc5e0
+VERSION=$PINNED
+while [ $# -gt 0 ]; do case "$1" in --version) VERSION=${2:-$PINNED}; shift 2;; *) echo "usage: $0 [--version vX.Y.Z]" >&2; exit 2;; esac; done
+[ -n "$VERSION" ] || VERSION=$PINNED
+[ "$(id -u)" = 0 ] || { echo "run as root" >&2; exit 1; }
+ARCH=$(dpkg --print-architecture)
+case "$ARCH" in amd64|arm64) ;; *) echo "unsupported architecture $ARCH" >&2; exit 1;; esac
+ASSET=ollama-linux-$ARCH.tar.zst
+BASE=https://github.com/ollama/ollama/releases/download/$VERSION
+tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+echo "== downloading Ollama $VERSION ($ASSET)"
+curl -fL --retry 3 --progress-bar -o "$tmp/$ASSET" "$BASE/$ASSET"
+if [ "$VERSION" = "$PINNED" ] && [ "$ARCH" = amd64 ]; then
+    expected=$PINNED_SHA_amd64
+else
+    curl -fsSL --retry 3 -o "$tmp/sha256sum.txt" "$BASE/sha256sum.txt"
+    expected=$(grep -E " \./?$ASSET\$" "$tmp/sha256sum.txt" | awk '{print $1}')
+    [ -n "$expected" ] || { echo "no checksum for $ASSET in the release" >&2; exit 1; }
+fi
+actual=$(sha256sum "$tmp/$ASSET" | awk '{print $1}')
+[ "$actual" = "$expected" ] || { echo "checksum mismatch: $actual != $expected" >&2; exit 1; }
+echo "== checksum ok; extracting to /usr/local"
+mkdir -p /usr/local
+tar --zstd -xf "$tmp/$ASSET" -C /usr/local
+echo "$VERSION" > /usr/local/lib/ollama/MALUOS_VERSION 2>/dev/null || true
+if ! getent passwd ollama >/dev/null; then
+    adduser --system --group --no-create-home --home /var/lib/ollama --shell /usr/sbin/nologin ollama
+fi
+for g in render video; do getent group $g >/dev/null && adduser ollama $g >/dev/null 2>&1 || true; done
+install -d -o ollama -g ollama -m 0750 /var/lib/ollama /var/lib/ollama/models
+[ -f /etc/maluos/ollama.env ] || install -m 0644 /usr/share/maluos-gateway/ollama.env /etc/maluos/ollama.env
+install -m 0644 /usr/share/maluos-gateway/ollama.service /etc/systemd/system/ollama.service
+systemctl daemon-reload
+systemctl enable --now ollama.service
+for i in $(seq 1 30); do curl -fsS --max-time 2 http://127.0.0.1:11434/api/version >/dev/null 2>&1 && break; sleep 1; done
+echo "== ollama $(/usr/local/bin/ollama --version 2>/dev/null | tail -1) at http://127.0.0.1:11434 ($(systemctl is-active ollama.service))"
+echo "   models: maluctl gateway ollama pull MODEL; GPU: check 'journalctl -u ollama' for the detected devices"

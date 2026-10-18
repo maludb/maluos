@@ -1,0 +1,41 @@
+[Unit]
+Description=MaluOS inference gateway
+Documentation=https://github.com/maludb/maluos
+Requires=maluos-gateway.socket
+After=maluos-gateway.socket postgresql.service maluos-vault.socket network-online.target
+
+[Service]
+Type=simple
+User=maluos-gateway
+Group=maluos-gateway
+WorkingDirectory=/usr/lib/maluos
+Environment=PYTHONPATH=/usr/lib/maluos
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 -s -m maluos_gateway
+ExecReload=/bin/kill -HUP $MAINPID
+StateDirectory=maluos-gateway
+Restart=on-failure
+RestartSec=2
+
+# Hardening: talks to PostgreSQL and the vault over Unix sockets and to model
+# backends over TCP; nothing writable but its state directory.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+CapabilityBoundingSet=
