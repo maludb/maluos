@@ -46,8 +46,10 @@ Component 40-maluos-vault runs before the others and gives them
 `ctx["store_secret"](name, value, kind=, provider=, env_var=)`, which keeps
 a copy of a provisioning credential in the shared `system` compartment.
 Seals the master key with systemd-creds (TPM when present), creates the
-vault's database role and tables, starts the socket, imports the listener
-token.
+vault's database role and tables (including `maluos_record_episode`, the
+daemons' only path into memory), starts the socket, imports the listener
+token. Slice 4 adds delegation, export/import and alerts
+(docs/phase6-slice4-operations.md).
 
 
 ### maluos-gateway (package maluos-gateway, in maluos-server)
@@ -59,7 +61,9 @@ creates the role and tables, seeds the catalogue when empty, registers the
 MCP tool maluos.model_status, makes the gateway a vault broker, starts the
 socket, and optionally installs Ollama and pulls models (ollama.install /
 ollama.pull in /etc/maluos/gateway.yaml or components.maluos-gateway.ollama
-in firstboot.yaml).
+in firstboot.yaml). Cloud rungs, budgets and alerts are in slices 3 and 4
+(docs/phase6-slice3-routing.md, phase6-slice4-operations.md); alert hooks go
+in /etc/maluos/alert-hooks.d.
 
 ### maludb-api (package maludb-api, metapackage maluos-api)
 
