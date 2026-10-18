@@ -32,7 +32,8 @@ repository is the distribution layer.
 | 6 | Inference gateway: scheduled GPU access, local-to-cloud routing, OS-held credentials per user/agent, usage ledger | requirements 2026-10-17 (phase6-inference-gateway.md); slice 1 vault + ledger done 2026-10-18 (phase6-slice1-vault.md); slice 2 gateway + scheduler + local Ollama done 2026-10-18 (phase6-slice2-gateway.md); slice 3 routing + cloud done 2026-10-18 (phase6-slice3-routing.md); slice 4 degradation, alerts, delegation, export done 2026-10-18 (phase6-slice4-operations.md); later: quality judge, multi-host |
 | 7 | Components (snap-like selection, Route B native packages): maludb-api done 2026-10-17, Business OS kernel done 2026-10-18 (boot test PASS); applications next; ISO catalogue layers and maluctl selector (docs/components.md) | in progress |
 | 8 | Agents as system entities: `maluctl agent create` (user, principal, identity, compartment, policy, token, hardened unit) | done 2026-10-18 (docs/agents.md); polkit and nspawn/bubblewrap sandboxes later |
-| 9+ | Further agent-native features (journal to memory, quality judge, multi-host) and the desktop variant | |
+| 9 | Editions, the Ubuntu Pro model: Community free, Professional per machine (esm, models, compliance, audit, backup, support), Enterprise per fleet (fleet, sso, scheduler); entitlements by token, services additive | requirements drafted 2026-10-18 (phase9-editions.md) |
+| 10+ | Further agent-native features (journal to memory, quality judge) and the desktop variant | |
 
 ### Phase 6+ candidates
 
