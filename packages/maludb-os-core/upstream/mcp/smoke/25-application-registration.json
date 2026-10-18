@@ -1,0 +1,10 @@
+[
+ {"tool": "application_save", "args": {"name": "SMOKE {{run}} Registered", "app_key": "smoker{{code}}", "category": "other",
+   "location": "1", "owner_department": "4", "url": "http://smoker.invalid", "sso_path": "/sso", "scope_kind": "location"}},
+ {"lookup": {"app": "SELECT id FROM applications WHERE name = 'SMOKE {{run}} Registered' AND location_id = 1 AND owner_department_id = 4"}},
+ {"tool": "application_endpoint_save", "args": {"application": "{{app}}", "name": "Records MCP", "kind": "mcp",
+   "url": "http://smoker.invalid/mcp/records", "auth_kind": "bearer", "agent_reachable": "1", "mcp_surface_version": "1.0"}},
+ {"lookup": {"ep": "SELECT id FROM application_endpoints WHERE application_id = {{app}} AND name = 'Records MCP' AND kind = 'mcp'"}},
+ {"tool": "application_endpoint_remove", "args": {"endpoint": "{{ep}}", "application": "{{app}}", "confirmed": true}},
+ {"lookup": {"gone": "SELECT 'yes' WHERE NOT EXISTS (SELECT 1 FROM application_endpoints WHERE id = {{ep}} AND status = 'active')"}}
+]

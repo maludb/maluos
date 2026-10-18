@@ -1,0 +1,245 @@
+[
+ {
+  "tool": "department_save",
+  "args": {
+   "name": "SMOKE {{run}} Dept",
+   "description": "Smoke department"
+  }
+ },
+ {
+  "tool": "department_add_member",
+  "args": {
+   "department": "SMOKE {{run}} Dept",
+   "member": "Sam Okafor"
+  }
+ },
+ {
+  "tool": "department_remove_member",
+  "args": {
+   "department": "SMOKE {{run}} Dept",
+   "member": "Sam Okafor"
+  }
+ },
+ {
+  "tool": "department_delete",
+  "args": {
+   "department": "SMOKE {{run}} Dept",
+   "confirmed": true
+  }
+ },
+ {
+  "tool": "module_grant_set",
+  "args": {
+   "member": "Sam Okafor",
+   "module": "locations",
+   "access": "read"
+  }
+ },
+ {
+  "tool": "module_grant_revoke",
+  "args": {
+   "member": "Sam Okafor",
+   "module": "locations"
+  }
+ },
+ {
+  "tool": "location_save",
+  "args": {
+   "name": "SMOKE {{run}} Desk",
+   "kind": "desk",
+   "parent_location": "1",
+   "description": "Smoke desk",
+   "owner": "Sam Okafor"
+  }
+ },
+ {
+  "lookup": {
+   "loc": "SELECT id FROM locations WHERE name = 'SMOKE {{run}} Desk'"
+  }
+ },
+ {
+  "tool": "location_rename",
+  "args": {
+   "location": "{{loc}}",
+   "name": "SMOKE {{run}} Desk B"
+  }
+ },
+ {
+  "tool": "location_add_resident",
+  "args": {
+   "location": "{{loc}}",
+   "member": "Sam Okafor"
+  }
+ },
+ {
+  "tool": "location_remove_resident",
+  "args": {
+   "location": "{{loc}}",
+   "member": "Sam Okafor"
+  }
+ },
+ {
+  "tool": "location_retire",
+  "args": {
+   "location": "{{loc}}",
+   "confirmed": true
+  }
+ },
+ {
+  "tool": "location_delete",
+  "args": {
+   "location": "{{loc}}",
+   "confirmed": true
+  }
+ },
+ {
+  "tool": "application_save",
+  "args": {
+   "name": "SMOKE {{run}} App",
+   "app_key": "smoke{{code}}",
+   "category": "other",
+   "description": "Smoke application",
+   "location": "1"
+  }
+ },
+ {
+  "lookup": {
+   "app": "SELECT id FROM applications WHERE name = 'SMOKE {{run}} App'"
+  }
+ },
+ {
+  "tool": "application_access_grant",
+  "args": {
+   "application": "{{app}}",
+   "member": "Sam Okafor",
+   "capability": "read",
+   "note": "smoke"
+  }
+ },
+ {
+  "lookup": {
+   "acc": "SELECT id FROM application_access WHERE application_id = {{app}} ORDER BY id DESC LIMIT 1"
+  }
+ },
+ {
+  "tool": "application_access_revoke",
+  "args": {
+   "application_access": "{{acc}}",
+   "confirmed": true
+  }
+ },
+ {
+  "tool": "application_health_check",
+  "args": {
+   "application": "{{app}}"
+  }
+ },
+ {
+  "tool": "application_set_status",
+  "args": {
+   "application": "{{app}}",
+   "status": "retired",
+   "confirmed": true
+  }
+ },
+ {
+  "tool": "system_prompt_save",
+  "args": {
+   "prompt_key": "smoke_{{code}}",
+   "name": "SMOKE {{run}} Prompt",
+   "description": "Smoke prompt"
+  }
+ },
+ {
+  "lookup": {
+   "sp": "SELECT id FROM system_prompts WHERE name = 'SMOKE {{run}} Prompt'"
+  }
+ },
+ {
+  "tool": "system_prompt_version_create",
+  "args": {
+   "system_prompt": "{{sp}}",
+   "body": "You are a smoke test.",
+   "change_note": "smoke"
+  }
+ },
+ {
+  "tool": "system_prompt_archive",
+  "args": {
+   "system_prompt": "{{sp}}",
+   "archived": "1",
+   "confirmed": true
+  }
+ },
+ {
+  "tool": "model_save",
+  "args": {
+   "model_key": "smoke-{{code}}",
+   "display_name": "SMOKE {{run}} Model",
+   "provider": "local",
+   "provider_model_id": "smoke",
+   "harness": "openai_compatible",
+   "endpoint_url": "http://127.0.0.1:9/v1",
+   "confirmed": true
+  }
+ },
+ {
+  "lookup": {
+   "model": "SELECT id FROM ai_models WHERE model_key = 'smoke-{{code}}'"
+  }
+ },
+ {
+  "tool": "model_set_status",
+  "args": {
+   "model": "{{model}}",
+   "status": "retired",
+   "confirmed": true
+  }
+ },
+ {
+  "tool": "agent_suspend",
+  "args": {
+   "agent": "Ledger Bot",
+   "reason": "smoke",
+   "confirmed": true
+  }
+ },
+ {
+  "tool": "agent_reinstate",
+  "args": {
+   "agent": "Ledger Bot"
+  }
+ },
+ {
+  "tool": "performance_review_create",
+  "args": {
+   "member": "Ledger Bot",
+   "period": "2026-09",
+   "rating": "3",
+   "summary": "Smoke review"
+  }
+ },
+ {
+  "tool": "escalation_raise",
+  "args": {
+   "reason_kind": "other",
+   "summary": "SMOKE {{run}} escalation"
+  }
+ },
+ {
+  "lookup": {
+   "esc": "SELECT id FROM escalations WHERE summary = 'SMOKE {{run}} escalation'"
+  }
+ },
+ {
+  "tool": "escalation_resolve",
+  "args": {
+   "escalation": "{{esc}}",
+   "note": "smoke"
+  }
+ },
+ {
+  "tool": "mcp_token_create",
+  "args": {}
+ }
+]

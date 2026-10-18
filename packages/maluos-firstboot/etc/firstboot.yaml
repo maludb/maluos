@@ -36,3 +36,16 @@ operators: auto
 components:
   maludb-api:
     enabled: true
+  # The Business OS kernel (package maludb-os-core). Names: <domain>, os.<domain>,
+  # app.<domain>, one per application later. Use http on a LAN, https behind a
+  # TLS proxy. The first super-admin's password is generated unless given and
+  # kept in /var/lib/maluos/secrets/business-os/admin-password.
+  maludb-os-core:
+    enabled: true
+    domain: maluos.local
+    scheme: http
+    admin_email: admin@maluos.local
+    admin_name: Administrator
+    # admin_password: change-me
+    # anthropic_api_key: ...
+    # openrouter_api_key: ...

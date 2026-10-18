@@ -1,0 +1,4883 @@
+{
+    "generated_from": "docs/business-os-action-manifest.md",
+    "generated_at": "2026-09-29T15:12:42+00:00",
+    "screens": {
+        "dashboard": {
+            "screen": "dashboard",
+            "url": "/",
+            "section": "Home",
+            "when": "the business overview: the counts, then the agent workforce — picture, name, department, model and what each is doing right now",
+            "params": [],
+            "built": true,
+            "stub": false
+        },
+        "launch": {
+            "screen": "launch",
+            "url": "/launch/{application}",
+            "section": "Home",
+            "when": "to open an application signed in through the platform (A3): the hand-off token is minted and the browser sent to the application's sign-on path",
+            "params": [],
+            "built": false,
+            "stub": false
+        },
+        "launcher": {
+            "screen": "launcher",
+            "url": "/launcher",
+            "section": "Home",
+            "when": "the person face's home (app.<domain>, A2 2026-09-22): the applications they may open, one card each, and the operating system for a super-admin",
+            "params": [],
+            "built": true,
+            "stub": false
+        },
+        "search": {
+            "screen": "search",
+            "url": "/search",
+            "section": "Home",
+            "when": "to search across all records",
+            "params": [
+                "q",
+                "type"
+            ],
+            "built": false,
+            "stub": false
+        },
+        "notifications": {
+            "screen": "notifications",
+            "url": "/notifications",
+            "section": "Home",
+            "when": "to read their notifications",
+            "params": [
+                "unread"
+            ],
+            "built": false,
+            "stub": false
+        },
+        "activity": {
+            "screen": "activity",
+            "url": "/activity",
+            "section": "Home",
+            "when": "to see recent activity, or one record's history",
+            "params": [
+                "entity_type",
+                "entity_id",
+                "member",
+                "source",
+                "period"
+            ],
+            "built": true,
+            "stub": false
+        },
+        "team-list": {
+            "screen": "team-list",
+            "url": "/team/",
+            "section": "Team, access & settings",
+            "when": "who works here, human and AI",
+            "params": [
+                "department",
+                "kind",
+                "role"
+            ],
+            "built": true,
+            "stub": false
+        },
+        "member-view": {
+            "screen": "member-view",
+            "url": "/team/{id}",
+            "section": "Team, access & settings",
+            "when": "one person's role, departments, access, reviews",
+            "params": [],
+            "built": true,
+            "stub": false
+        },
+        "member-edit": {
+            "screen": "member-edit",
+            "url": "/team/{id}/edit",
+            "section": "Team, access & settings",
+            "when": "to change someone's role, departments or module access",
+            "params": [],
+            "built": true,
+            "stub": false
+        },
+        "invitations": {
+            "screen": "invitations",
+            "url": "/team/invitations",
+            "section": "Team, access & settings",
+            "when": "to invite people and manage pending invites",
+            "params": [],
+            "built": true,
+            "stub": false
+        },
+        "departments-list": {
+            "screen": "departments-list",
+            "url": "/team/departments",
+            "section": "Team, access & settings",
+            "when": "the departments, including the four standing ones (Front Office, HR, Accounting, Audit) and who reports to whom",
+            "params": [],
+            "built": true,
+            "stub": false
+        },
+        "department-add": {
+            "screen": "department-add",
+            "url": "/team/departments/new",
+            "section": "Team, access & settings",
+            "when": "to create a department",
+            "params": [],
+            "built": true,
+            "stub": false
+        },
+        "department-view": {
+            "screen": "department-view",
+            "url": "/team/departments/{id}",
+            "section": "Team, access & settings",
+            "when": "one department: manager, members, handbook",
+            "params": [],
+            "built": true,
+            "stub": false
+        },
+        "department-edit": {
+            "screen": "department-edit",
+            "url": "/team/departments/{id}/edit",
+            "section": "Team, access & settings",
+            "when": "to edit a department",
+            "params": [],
+            "built": true,
+            "stub": false
+        },
+        "external-access": {
+            "screen": "external-access",
+            "url": "/team/external",
+            "section": "Team, access & settings",
+            "when": "who outside the business can see what",
+            "params": [],
+            "built": false,
+            "stub": false
+        },
+        "settings": {
+            "screen": "settings",
+            "url": "/settings",
+            "section": "Team, access & settings",
+            "when": "their own profile, notifications, security, tokens",
+            "params": [
+                "section"
+            ],
+            "built": true,
+            "stub": false
+        },
+        "settings-2fa": {
+            "screen": "settings-2fa",
+            "url": "/settings/2fa",
+            "section": "Team, access & settings",
+            "when": "to set up authenticator 2FA",
+            "params": [],
+            "built": false,
+            "stub": false
+        },
+        "business-settings": {
+            "screen": "business-settings",
+            "url": "/settings/business",
+            "section": "Team, access & settings",
+            "when": "business name, currency, timezone, fiscal year, defaults",
+            "params": [],
+            "built": true,
+            "stub": false
+        },
+        "email-settings": {
+            "screen": "email-settings",
+            "url": "/settings/email",
+            "section": "Team, access & settings",
+            "when": "bounced and suppressed email addresses",
+            "params": [],
+            "built": false,
+            "stub": false
+        },
+        "backups-settings": {
+            "screen": "backups-settings",
+            "url": "/settings/backups",
+            "section": "Team, access & settings",
+            "when": "backups and restore rehearsals",
+            "params": [],
+            "built": false,
+            "stub": false
+        },
+        "exports-settings": {
+            "screen": "exports-settings",
+            "url": "/settings/exports",
+            "section": "Team, access & settings",
+            "when": "to export all the business's data",
+            "params": [],
+            "built": false,
+            "stub": false
+        },
+        "agents-list": {
+            "screen": "agents-list",
+            "url": "/agents/",
+            "section": "Agents (HR)",
+            "when": "the AI agents we employ",
+            "params": [
+                "department",
+                "status"
+            ],
+            "built": true,
+            "stub": false
+        },
+        "agent-hire": {
+            "screen": "agent-hire",
+            "url": "/agents/new",
+            "section": "Agents (HR)",
+            "when": "to hire an agent",
+            "params": [
+                "department",
+                "job_title"
+            ],
+            "built": true,
+            "stub": false
+        },
+        "agent-view": {
+            "screen": "agent-view",
+            "url": "/agents/{id}",
+            "section": "Agents (HR)",
+            "when": "one agent: job, tools, duties, roster, performance, spend, evals",
+            "params": [
+                "tab",
+                "roster"
+            ],
+            "built": true,
+            "stub": false
+        },
+        "agent-edit": {
+            "screen": "agent-edit",
+            "url": "/agents/{id}/edit",
+            "section": "Agents (HR)",
+            "when": "to change an agent's job description, model, tools, duties or budget (creates a new version)",
+            "params": [],
+            "built": true,
+            "stub": false
+        },
+        "agent-versions": {
+            "screen": "agent-versions",
+            "url": "/agents/versions?agent={id}",
+            "section": "Agents (HR)",
+            "when": "an agent's configuration history and eval gates",
+            "params": [],
+            "built": true,
+            "stub": false
+        },
+        "escalations": {
+            "screen": "escalations",
+            "url": "/agents/escalations",
+            "section": "Agents (HR)",
+            "when": "escalations raised by agents",
+            "params": [
+                "agent",
+                "open"
+            ],
+            "built": true,
+            "stub": false
+        },
+        "review-add": {
+            "screen": "review-add",
+            "url": "/team/reviews/new?member={id}",
+            "section": "Agents (HR)",
+            "when": "to write a performance review for a person or agent",
+            "params": [],
+            "built": true,
+            "stub": false
+        },
+        "system-prompts": {
+            "screen": "system-prompts",
+            "url": "/settings/prompts",
+            "section": "Agents (HR)",
+            "when": "the prompt library: reusable system prompts and their versions",
+            "params": [
+                "role"
+            ],
+            "built": true,
+            "stub": false
+        },
+        "system-prompt-add": {
+            "screen": "system-prompt-add",
+            "url": "/settings/prompts/new",
+            "section": "Agents (HR)",
+            "when": "to write a new prompt",
+            "params": [],
+            "built": true,
+            "stub": false
+        },
+        "system-prompt-view": {
+            "screen": "system-prompt-view",
+            "url": "/settings/prompts/{id}",
+            "section": "Agents (HR)",
+            "when": "one prompt: its versions, who uses it, and the text of each",
+            "params": [],
+            "built": true,
+            "stub": false
+        },
+        "locations-list": {
+            "screen": "locations-list",
+            "url": "/locations/",
+            "section": "Estate: buildings, offices & desks (and the task queue)",
+            "when": "Work Locations: the whole estate — every building, the offices inside each, desks, who's online, and the sites the business trades from",
+            "params": [
+                "kind",
+                "parent",
+                "online"
+            ],
+            "built": true,
+            "stub": false
+        },
+        "location-add": {
+            "screen": "location-add",
+            "url": "/locations/new",
+            "section": "Estate: buildings, offices & desks (and the task queue)",
+            "when": "to add a building, an office (VM) or a desk",
+            "params": [
+                "kind",
+                "parent"
+            ],
+            "built": true,
+            "stub": false
+        },
+        "location-edit": {
+            "screen": "location-edit",
+            "url": "/locations/{id}/edit",
+            "section": "Estate: buildings, offices & desks (and the task queue)",
+            "when": "to edit a location's name, parent, description or specs",
+            "params": [],
+            "built": true,
+            "stub": false
+        },
+        "location-view": {
+            "screen": "location-view",
+            "url": "/locations/{id}",
+            "section": "Estate: buildings, offices & desks (and the task queue)",
+            "when": "one location: specs, residents, office manager, applications, departments, queue",
+            "params": [],
+            "built": true,
+            "stub": false
+        },
+        "location-tasks": {
+            "screen": "location-tasks",
+            "url": "/locations/tasks",
+            "section": "Estate: buildings, offices & desks (and the task queue)",
+            "when": "cross-location tasks",
+            "params": [
+                "mine",
+                "target",
+                "status"
+            ],
+            "built": false,
+            "stub": false
+        },
+        "location-task-add": {
+            "screen": "location-task-add",
+            "url": "/locations/tasks/new",
+            "section": "Estate: buildings, offices & desks (and the task queue)",
+            "when": "to ask another location to do something",
+            "params": [
+                "target",
+                "task_type"
+            ],
+            "built": false,
+            "stub": false
+        },
+        "location-task-view": {
+            "screen": "location-task-view",
+            "url": "/locations/tasks/{id}",
+            "section": "Estate: buildings, offices & desks (and the task queue)",
+            "when": "one task's status and result",
+            "params": [],
+            "built": false,
+            "stub": false
+        },
+        "desk-permissions": {
+            "screen": "desk-permissions",
+            "url": "/locations/{id}/permissions",
+            "section": "Estate: buildings, offices & desks (and the task queue)",
+            "when": "who may send tasks to a desk",
+            "params": [],
+            "built": false,
+            "stub": false
+        },
+        "applications-list": {
+            "screen": "applications-list",
+            "url": "/applications/",
+            "section": "Applications",
+            "when": "the inventory: every application the business could run, by business area, what runs highlighted",
+            "params": [
+                "area",
+                "department",
+                "health",
+                "gaps",
+                "active",
+                "retired"
+            ],
+            "built": true,
+            "stub": false
+        },
+        "application-add": {
+            "screen": "application-add",
+            "url": "/applications/new",
+            "section": "Applications",
+            "when": "to register an application",
+            "params": [
+                "category",
+                "location",
+                "department"
+            ],
+            "built": true,
+            "stub": false
+        },
+        "application-view": {
+            "screen": "application-view",
+            "url": "/applications/{id}",
+            "section": "Applications",
+            "when": "one application: office, super, endpoints, access, the sites or departments it serves and its roles, expertise (its expert agent and skills), cost, health",
+            "params": [
+                "tab"
+            ],
+            "built": true,
+            "stub": false
+        },
+        "application-edit": {
+            "screen": "application-edit",
+            "url": "/applications/{id}/edit",
+            "section": "Applications",
+            "when": "to edit an application's details, office, owner or cost link",
+            "params": [],
+            "built": true,
+            "stub": false
+        },
+        "application-endpoint-add": {
+            "screen": "application-endpoint-add",
+            "url": "/applications/endpoints/new?application={id}",
+            "section": "Applications",
+            "when": "to add an endpoint agents or people use to reach it",
+            "params": [],
+            "built": true,
+            "stub": false
+        },
+        "application-endpoint-edit": {
+            "screen": "application-endpoint-edit",
+            "url": "/applications/endpoints/{id}/edit",
+            "section": "Applications",
+            "when": "to edit an endpoint or point it at a different secret",
+            "params": [],
+            "built": true,
+            "stub": false
+        },
+        "application-access": {
+            "screen": "application-access",
+            "url": "/applications/access?application={id}",
+            "section": "Applications",
+            "when": "who and which departments may use it, at what capability",
+            "params": [],
+            "built": true,
+            "stub": false
+        },
+        "approvals": {
+            "screen": "approvals",
+            "url": "/approvals/",
+            "section": "Approvals",
+            "when": "what waits for their approval, or requests they made",
+            "params": [
+                "role",
+                "status"
+            ],
+            "built": true,
+            "stub": false
+        },
+        "approval-view": {
+            "screen": "approval-view",
+            "url": "/approvals/{id}",
+            "section": "Approvals",
+            "when": "one request: the action, parameters, amount, requester, the agent run behind it",
+            "params": [],
+            "built": true,
+            "stub": false
+        },
+        "approval-policies-settings": {
+            "screen": "approval-policies-settings",
+            "url": "/settings/approval-policies",
+            "section": "Approvals",
+            "when": "which actions need approval, for whom, above what amount",
+            "params": [],
+            "built": true,
+            "stub": false
+        },
+        "approval-policy-add": {
+            "screen": "approval-policy-add",
+            "url": "/settings/approval-policies/new",
+            "section": "Approvals",
+            "when": "to add a policy",
+            "params": [],
+            "built": true,
+            "stub": false
+        },
+        "approval-policy-edit": {
+            "screen": "approval-policy-edit",
+            "url": "/settings/approval-policies/{id}/edit",
+            "section": "Approvals",
+            "when": "to edit a policy",
+            "params": [],
+            "built": true,
+            "stub": false
+        },
+        "prompt-log": {
+            "screen": "prompt-log",
+            "url": "/ai/prompt-log",
+            "section": "AI: prompt log, models & evals",
+            "when": "model calls",
+            "params": [
+                "agent",
+                "status",
+                "request_id",
+                "run",
+                "period"
+            ],
+            "built": true,
+            "stub": false
+        },
+        "prompt-log-view": {
+            "screen": "prompt-log-view",
+            "url": "/ai/prompt-log/{id}",
+            "section": "AI: prompt log, models & evals",
+            "when": "one call's full prompt and response",
+            "params": [],
+            "built": true,
+            "stub": false
+        },
+        "agent-run-view": {
+            "screen": "agent-run-view",
+            "url": "/ai/runs/{id}",
+            "section": "AI: prompt log, models & evals",
+            "when": "one agent run: calls, actions, cost",
+            "params": [],
+            "built": true,
+            "stub": false
+        },
+        "ai-spend": {
+            "screen": "ai-spend",
+            "url": "/ai/spend",
+            "section": "AI: prompt log, models & evals",
+            "when": "AI cost, tokens, latency and cache savings",
+            "params": [
+                "period",
+                "group_by"
+            ],
+            "built": true,
+            "stub": false
+        },
+        "ai-statements": {
+            "screen": "ai-statements",
+            "url": "/ai/spend/statements",
+            "section": "AI: prompt log, models & evals",
+            "when": "the ledger's period statements (A5): each month open or closed, its lines per provider, model, department, agent and application; download as CSV or JSON",
+            "params": [
+                "period"
+            ],
+            "built": true,
+            "stub": false
+        },
+        "models-settings": {
+            "screen": "models-settings",
+            "url": "/settings/models",
+            "section": "AI: prompt log, models & evals",
+            "when": "the model registry and harnesses",
+            "params": [],
+            "built": true,
+            "stub": false
+        },
+        "model-add": {
+            "screen": "model-add",
+            "url": "/settings/models/new",
+            "section": "AI: prompt log, models & evals",
+            "when": "to register a model",
+            "params": [],
+            "built": true,
+            "stub": false
+        },
+        "model-edit": {
+            "screen": "model-edit",
+            "url": "/settings/models/{id}/edit",
+            "section": "AI: prompt log, models & evals",
+            "when": "to edit a model's prices or status",
+            "params": [],
+            "built": true,
+            "stub": false
+        },
+        "eval-sets": {
+            "screen": "eval-sets",
+            "url": "/ai/evals",
+            "section": "AI: prompt log, models & evals",
+            "when": "eval sets per agent or role",
+            "params": [],
+            "built": true,
+            "stub": false
+        },
+        "eval-set-add": {
+            "screen": "eval-set-add",
+            "url": "/ai/evals/new",
+            "section": "AI: prompt log, models & evals",
+            "when": "to create an eval set",
+            "params": [
+                "agent",
+                "role"
+            ],
+            "built": true,
+            "stub": false
+        },
+        "eval-set-view": {
+            "screen": "eval-set-view",
+            "url": "/ai/evals/{id}",
+            "section": "AI: prompt log, models & evals",
+            "when": "one eval set: cases, runs, trend",
+            "params": [],
+            "built": true,
+            "stub": false
+        },
+        "eval-case-add": {
+            "screen": "eval-case-add",
+            "url": "/ai/evals/{id}/cases/new",
+            "section": "AI: prompt log, models & evals",
+            "when": "to write an eval case",
+            "params": [
+                "from_ledger",
+                "from_run"
+            ],
+            "built": false,
+            "stub": false
+        },
+        "eval-case-edit": {
+            "screen": "eval-case-edit",
+            "url": "/ai/evals/cases/{id}/edit",
+            "section": "AI: prompt log, models & evals",
+            "when": "to edit an eval case",
+            "params": [],
+            "built": true,
+            "stub": false
+        },
+        "eval-run-view": {
+            "screen": "eval-run-view",
+            "url": "/ai/evals/runs/{id}",
+            "section": "AI: prompt log, models & evals",
+            "when": "one eval run's per-case results",
+            "params": [],
+            "built": true,
+            "stub": false
+        },
+        "audit": {
+            "screen": "audit",
+            "url": "/ai/audit",
+            "section": "AI: prompt log, models & evals",
+            "when": "what the Auditor found: findings on agent work, open eval alerts, graded real runs — in shadow, what it would have done",
+            "params": [],
+            "built": true,
+            "stub": false
+        },
+        "system": {
+            "screen": "system",
+            "url": "/ai/system",
+            "section": "AI: prompt log, models & evals",
+            "when": "the Sysadmin's view of the server: health probes, open events from the logs and guardrails (redacted), its recent decisions",
+            "params": [
+                "status"
+            ],
+            "built": true,
+            "stub": false
+        },
+        "graded-traces": {
+            "screen": "graded-traces",
+            "url": "/ai/evals/traces",
+            "section": "AI: prompt log, models & evals",
+            "when": "production traces graded by continuous evals",
+            "params": [
+                "agent",
+                "failed"
+            ],
+            "built": true,
+            "stub": false
+        },
+        "ai-usage-postings": {
+            "screen": "ai-usage-postings",
+            "url": "/ai/spend/postings",
+            "section": "AI: prompt log, models & evals",
+            "when": "AI spend posted to the books per period, and what is still unposted",
+            "params": [
+                "period",
+                "status"
+            ],
+            "built": false,
+            "stub": false
+        },
+        "eval-watch": {
+            "screen": "eval-watch",
+            "url": "/ai/evals/watch",
+            "section": "AI: prompt log, models & evals",
+            "when": "the Audit department's watch: standing schedules and open degradation alerts",
+            "params": [
+                "agent",
+                "severity",
+                "status"
+            ],
+            "built": true,
+            "stub": false
+        },
+        "eval-schedule-add": {
+            "screen": "eval-schedule-add",
+            "url": "/ai/evals/{id}/schedule",
+            "section": "AI: prompt log, models & evals",
+            "when": "to put an eval set on a standing schedule",
+            "params": [],
+            "built": false,
+            "stub": false
+        },
+        "eval-alert-view": {
+            "screen": "eval-alert-view",
+            "url": "/ai/evals/alerts/{id}",
+            "section": "AI: prompt log, models & evals",
+            "when": "one alert: scores against baseline, the run behind it, what was done",
+            "params": [],
+            "built": true,
+            "stub": false
+        }
+    },
+    "actions": {
+        "notification_mark_read": {
+            "action": "notification_mark_read",
+            "section": "Home",
+            "endpoint": "/notifications/read.php",
+            "params": [
+                {
+                    "name": "notification",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "mark unread",
+            "confirm": false,
+            "approval": null,
+            "log_event": "notification.mark_read",
+            "who": "own",
+            "built": true
+        },
+        "notification_mark_all_read": {
+            "action": "notification_mark_all_read",
+            "section": "Home",
+            "endpoint": "/notifications/read-all.php",
+            "params": [
+                {
+                    "name": "kind",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "mark those unread",
+            "confirm": false,
+            "approval": null,
+            "log_event": "notification.mark_all_read",
+            "who": "all",
+            "built": false
+        },
+        "notification_preference_set": {
+            "action": "notification_preference_set",
+            "section": "Home",
+            "endpoint": "/notifications/preference.php",
+            "params": [
+                {
+                    "name": "kind",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "channel",
+                    "required": true,
+                    "repeated": false,
+                    "hint": "in_app/email/digest/off"
+                }
+            ],
+            "undo": "restore prior",
+            "confirm": false,
+            "approval": null,
+            "log_event": "notification_preference.set",
+            "who": "all",
+            "built": false
+        },
+        "invitation_send": {
+            "action": "invitation_send",
+            "section": "Team, access & settings",
+            "endpoint": "/team/invitations/save.php",
+            "params": [
+                {
+                    "name": "email",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "business_role",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "department",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "message",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "revoke invite",
+            "confirm": false,
+            "approval": "send",
+            "log_event": "invitation.send",
+            "who": "admin (super for the super-admin role)",
+            "built": true
+        },
+        "invitation_resend": {
+            "action": "invitation_resend",
+            "section": "Team, access & settings",
+            "endpoint": "/team/invitations/resend.php",
+            "params": [
+                {
+                    "name": "invitation",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": null,
+            "confirm": false,
+            "approval": "send",
+            "log_event": "invitation.send",
+            "who": "admin",
+            "built": true
+        },
+        "invitation_revoke": {
+            "action": "invitation_revoke",
+            "section": "Team, access & settings",
+            "endpoint": "/team/invitations/revoke.php",
+            "params": [
+                {
+                    "name": "invitation",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": null,
+            "confirm": true,
+            "approval": null,
+            "log_event": "invitation.revoke",
+            "who": "admin",
+            "built": true
+        },
+        "member_set_role": {
+            "action": "member_set_role",
+            "section": "Team, access & settings",
+            "endpoint": "/team/role.php",
+            "params": [
+                {
+                    "name": "member",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "business_role",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "restore prior",
+            "confirm": true,
+            "approval": null,
+            "log_event": "member.set_role",
+            "who": "super",
+            "built": true
+        },
+        "member_update": {
+            "action": "member_update",
+            "section": "Team, access & settings",
+            "endpoint": "/team/update.php",
+            "params": [
+                {
+                    "name": "member",
+                    "required": true,
+                    "repeated": false,
+                    "hint": "a person — agents are maintained in Agent HR"
+                },
+                {
+                    "name": "display_name",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "job_title",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "phone",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "timezone",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "an IANA name"
+                }
+            ],
+            "undo": "restore prior",
+            "confirm": false,
+            "approval": null,
+            "log_event": "member.update",
+            "who": "admin",
+            "built": true
+        },
+        "member_suspend": {
+            "action": "member_suspend",
+            "section": "Team, access & settings",
+            "endpoint": "/team/suspend.php",
+            "params": [
+                {
+                    "name": "member",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "reason",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "reinstate",
+            "confirm": true,
+            "approval": null,
+            "log_event": "member.suspend",
+            "who": "super",
+            "built": true
+        },
+        "member_reinstate": {
+            "action": "member_reinstate",
+            "section": "Team, access & settings",
+            "endpoint": "/team/reinstate.php",
+            "params": [
+                {
+                    "name": "member",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "suspend again",
+            "confirm": false,
+            "approval": null,
+            "log_event": "member.reinstate",
+            "who": "super",
+            "built": true
+        },
+        "module_grant_set": {
+            "action": "module_grant_set",
+            "section": "Team, access & settings",
+            "endpoint": "/team/grant.php",
+            "params": [
+                {
+                    "name": "member",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "module",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "access",
+                    "required": true,
+                    "repeated": false,
+                    "hint": "read/write"
+                }
+            ],
+            "undo": "restore prior",
+            "confirm": false,
+            "approval": null,
+            "log_event": "module_grant.set",
+            "who": "admin",
+            "built": true
+        },
+        "module_grant_revoke": {
+            "action": "module_grant_revoke",
+            "section": "Team, access & settings",
+            "endpoint": "/team/grant-revoke.php",
+            "params": [
+                {
+                    "name": "member",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "module",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "grant again",
+            "confirm": false,
+            "approval": null,
+            "log_event": "module_grant.revoke",
+            "who": "admin",
+            "built": true
+        },
+        "department_save": {
+            "action": "department_save",
+            "section": "Team, access & settings",
+            "endpoint": "/team/departments/save.php",
+            "params": [
+                {
+                    "name": "name",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "department",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "description",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "handbook_markdown",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "parent_id",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "manager_member_id",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "home_location_id",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "monthly_budget_amount",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "budget_currency",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "restore prior / delete new",
+            "confirm": false,
+            "approval": null,
+            "log_event": "department.save",
+            "who": "admin",
+            "built": true
+        },
+        "department_add_member": {
+            "action": "department_add_member",
+            "section": "Team, access & settings",
+            "endpoint": "/team/departments/member-add.php",
+            "params": [
+                {
+                    "name": "department",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "member",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "is_admin",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "is_primary",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "remove",
+            "confirm": false,
+            "approval": null,
+            "log_event": "department_member.create",
+            "who": "admin",
+            "built": true
+        },
+        "department_remove_member": {
+            "action": "department_remove_member",
+            "section": "Team, access & settings",
+            "endpoint": "/team/departments/member-remove.php",
+            "params": [
+                {
+                    "name": "department",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "member",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "add back",
+            "confirm": false,
+            "approval": null,
+            "log_event": "department_member.remove",
+            "who": "admin",
+            "built": true
+        },
+        "department_archive": {
+            "action": "department_archive",
+            "section": "Team, access & settings",
+            "endpoint": null,
+            "params": [
+                {
+                    "name": "department",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "archived",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "refused for any standing department"
+                }
+            ],
+            "undo": "toggle back",
+            "confirm": true,
+            "approval": null,
+            "log_event": "department.archive",
+            "who": "super",
+            "built": false
+        },
+        "department_delete": {
+            "action": "department_delete",
+            "section": "Team, access & settings",
+            "endpoint": "/team/departments/delete.php",
+            "params": [
+                {
+                    "name": "department",
+                    "required": true,
+                    "repeated": false,
+                    "hint": "only one nothing works in - never a standing department"
+                }
+            ],
+            "undo": null,
+            "confirm": true,
+            "approval": null,
+            "log_event": "department.delete",
+            "who": "super",
+            "built": true
+        },
+        "record_share_create": {
+            "action": "record_share_create",
+            "section": "Team, access & settings",
+            "endpoint": "/shares/save.php",
+            "params": [
+                {
+                    "name": "entity_type",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "entity",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "member",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "access",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "expires_at",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "revoke",
+            "confirm": false,
+            "approval": "send",
+            "log_event": "record_share.create",
+            "who": "admin",
+            "built": false
+        },
+        "record_share_revoke": {
+            "action": "record_share_revoke",
+            "section": "Team, access & settings",
+            "endpoint": "/shares/revoke.php",
+            "params": [
+                {
+                    "name": "share",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "share again",
+            "confirm": false,
+            "approval": null,
+            "log_event": "record_share.revoke",
+            "who": "admin",
+            "built": false
+        },
+        "profile_update": {
+            "action": "profile_update",
+            "section": "Team, access & settings",
+            "endpoint": "/settings/profile.php",
+            "params": [
+                {
+                    "name": "display_name",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "timezone",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "job_title",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "phone",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "restore prior",
+            "confirm": false,
+            "approval": null,
+            "log_event": "member.update",
+            "who": "all (own)",
+            "built": true
+        },
+        "member_default_application_set": {
+            "action": "member_default_application_set",
+            "section": "Team, access & settings",
+            "endpoint": "/settings/default-application.php",
+            "params": [
+                {
+                    "name": "member",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "omit for yourself"
+                },
+                {
+                    "name": "application",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "one the member holds — omit to clear"
+                },
+                {
+                    "name": "scope",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "a site or department they hold in it"
+                }
+            ],
+            "undo": "set the prior one",
+            "confirm": false,
+            "approval": null,
+            "log_event": "member.default_application_set",
+            "who": "all (own), admin",
+            "built": true
+        },
+        "channel_identity_link": {
+            "action": "channel_identity_link",
+            "section": "Team, access & settings",
+            "endpoint": "/settings/channels/link.php",
+            "params": [
+                {
+                    "name": "channel",
+                    "required": true,
+                    "repeated": false,
+                    "hint": "telegram or sms or email"
+                },
+                {
+                    "name": "address",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "a phone number with its country code for sms - an email address for email"
+                }
+            ],
+            "undo": "remove it",
+            "confirm": false,
+            "approval": "never delegable to agents",
+            "log_event": "channel_identity.link",
+            "who": "all (own)",
+            "built": true
+        },
+        "channel_identity_verify": {
+            "action": "channel_identity_verify",
+            "section": "Team, access & settings",
+            "endpoint": "/settings/channels/verify.php",
+            "params": [
+                {
+                    "name": "code",
+                    "required": true,
+                    "repeated": false,
+                    "hint": "the six digits texted or mailed to you"
+                },
+                {
+                    "name": "channel",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "sms or email - sms when left out"
+                }
+            ],
+            "undo": "remove it",
+            "confirm": false,
+            "approval": "never delegable to agents",
+            "log_event": "channel_identity.verify",
+            "who": "all (own)",
+            "built": true
+        },
+        "channel_identity_remove": {
+            "action": "channel_identity_remove",
+            "section": "Team, access & settings",
+            "endpoint": "/settings/channels/remove.php",
+            "params": [
+                {
+                    "name": "identity",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "link it again",
+            "confirm": true,
+            "approval": "never delegable to agents",
+            "log_event": "channel_identity.remove",
+            "who": "all (own)",
+            "built": true
+        },
+        "channel_identity_prefer": {
+            "action": "channel_identity_prefer",
+            "section": "Team, access & settings",
+            "endpoint": "/settings/channels/prefer.php",
+            "params": [
+                {
+                    "name": "identity",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "prefer the prior one",
+            "confirm": false,
+            "approval": "never delegable to agents",
+            "log_event": "channel_identity.prefer",
+            "who": "all (own)",
+            "built": true
+        },
+        "business_settings_update": {
+            "action": "business_settings_update",
+            "section": "Team, access & settings",
+            "endpoint": "/settings/business/save.php",
+            "params": [
+                {
+                    "name": "business_name",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "legal_name",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "base_currency",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "timezone",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "fiscal_year_start_month",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "default_payment_terms_days",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "deal_quiet_days",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "prompt_payload_retention_days",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "restore prior",
+            "confirm": true,
+            "approval": null,
+            "log_event": "business_settings.update",
+            "who": "super",
+            "built": true
+        },
+        "business_logo_update": {
+            "action": "business_logo_update",
+            "section": "Team, access & settings",
+            "endpoint": "/settings/business/logo-save.php",
+            "params": [
+                {
+                    "name": "logo",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "an uploaded image — JPEG/PNG/GIF/WebP up to 2 MB; browser only"
+                },
+                {
+                    "name": "remove_logo",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "back to the standard logo"
+                }
+            ],
+            "undo": "upload the prior file",
+            "confirm": false,
+            "approval": null,
+            "log_event": "business_logo.update` / `business_logo.remove",
+            "who": "super",
+            "built": true
+        },
+        "mcp_token_create": {
+            "action": "mcp_token_create",
+            "section": "Team, access & settings",
+            "endpoint": "/settings/tokens/create.php",
+            "params": [
+                {
+                    "name": null,
+                    "note": "label (token shown once"
+                },
+                {
+                    "name": null,
+                    "note": "on screen only)"
+                }
+            ],
+            "undo": "revoke",
+            "confirm": false,
+            "approval": null,
+            "log_event": "token.create",
+            "who": "all (own)",
+            "built": true
+        },
+        "mcp_token_revoke": {
+            "action": "mcp_token_revoke",
+            "section": "Team, access & settings",
+            "endpoint": "/settings/tokens/revoke.php",
+            "params": [
+                {
+                    "name": "token",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": null,
+            "confirm": true,
+            "approval": null,
+            "log_event": "token.revoke",
+            "who": "own, super",
+            "built": true
+        },
+        "email_suppression_lift": {
+            "action": "email_suppression_lift",
+            "section": "Team, access & settings",
+            "endpoint": "/settings/email/lift.php",
+            "params": [
+                {
+                    "name": "email",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "suppress again",
+            "confirm": true,
+            "approval": null,
+            "log_event": "email_suppression.lift",
+            "who": "admin",
+            "built": false
+        },
+        "backup_run_now": {
+            "action": "backup_run_now",
+            "section": "Team, access & settings",
+            "endpoint": "/settings/backups/run.php",
+            "params": [],
+            "undo": null,
+            "confirm": false,
+            "approval": null,
+            "log_event": "backup_run.start",
+            "who": "super",
+            "built": false
+        },
+        "restore_rehearsal_record": {
+            "action": "restore_rehearsal_record",
+            "section": "Team, access & settings",
+            "endpoint": "/settings/backups/rehearsal-save.php",
+            "params": [
+                {
+                    "name": "backup",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "status",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "notes",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "delete it",
+            "confirm": false,
+            "approval": null,
+            "log_event": "restore_rehearsal.create",
+            "who": "super",
+            "built": false
+        },
+        "data_export_request": {
+            "action": "data_export_request",
+            "section": "Team, access & settings",
+            "endpoint": "/settings/exports/request.php",
+            "params": [
+                {
+                    "name": "includes",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "cancel if still queued",
+            "confirm": true,
+            "approval": null,
+            "log_event": "data_export.create",
+            "who": "super",
+            "built": false
+        },
+        "agent_hire": {
+            "action": "agent_hire",
+            "section": "Agents (HR)",
+            "endpoint": "/agents/hire.php",
+            "params": [
+                {
+                    "name": "name",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "job_title",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "department",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "manager",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "model",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "job_description",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "agent_kind",
+                    "required": true,
+                    "repeated": false,
+                    "hint": "orchestrator/subagent/voice"
+                },
+                {
+                    "name": "monthly_budget",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "tools",
+                    "required": false,
+                    "repeated": true,
+                    "hint": ""
+                },
+                {
+                    "name": "duties",
+                    "required": false,
+                    "repeated": true,
+                    "hint": ""
+                },
+                {
+                    "name": "home_location",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "subagents",
+                    "required": false,
+                    "repeated": true,
+                    "hint": "orchestrators only"
+                },
+                {
+                    "name": "description",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "role_key",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": null,
+                    "note": "phone_number (voice agents only"
+                },
+                {
+                    "name": null,
+                    "note": "E.164)"
+                },
+                {
+                    "name": null,
+                    "note": "profile_photo (an uploaded image — JPEG/PNG/GIF/WebP"
+                },
+                {
+                    "name": null,
+                    "note": "up to 2 MB)"
+                }
+            ],
+            "undo": "offboard the candidate",
+            "confirm": true,
+            "approval": null,
+            "log_event": "agent.hire",
+            "who": "mod:hr",
+            "built": true
+        },
+        "agent_update_config": {
+            "action": "agent_update_config",
+            "section": "Agents (HR)",
+            "endpoint": "/agents/config-save.php",
+            "params": [
+                {
+                    "name": "agent",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "job_description",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "model",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "tools",
+                    "required": false,
+                    "repeated": true,
+                    "hint": ""
+                },
+                {
+                    "name": null,
+                    "note": "duties[] (name"
+                },
+                {
+                    "name": "instructions",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": null,
+                    "note": "schedule)"
+                },
+                {
+                    "name": "monthly_budget",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "max_turns",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "run_timeout_seconds",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "change_note",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "description",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "role_key",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "phone_number",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "voice agents only"
+                },
+                {
+                    "name": "profile_photo",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "upload"
+                },
+                {
+                    "name": "remove_photo",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "discard the draft version",
+            "confirm": false,
+            "approval": null,
+            "log_event": "agent_config_version.create",
+            "who": "mod:hr, agent's manager",
+            "built": true
+        },
+        "agent_activate_version": {
+            "action": "agent_activate_version",
+            "section": "Agents (HR)",
+            "endpoint": "/agents/config-activate.php",
+            "params": [
+                {
+                    "name": "agent",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "version",
+                    "required": true,
+                    "repeated": false,
+                    "hint": "refused without a passing gating eval run"
+                }
+            ],
+            "undo": "activate the prior version",
+            "confirm": true,
+            "approval": null,
+            "log_event": "agent_config_version.activate",
+            "who": "mod:hr, agent's manager",
+            "built": true
+        },
+        "agent_set_manager": {
+            "action": "agent_set_manager",
+            "section": "Agents (HR)",
+            "endpoint": "/agents/manager.php",
+            "params": [
+                {
+                    "name": "agent",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "manager",
+                    "required": true,
+                    "repeated": false,
+                    "hint": "a human"
+                }
+            ],
+            "undo": "restore prior",
+            "confirm": false,
+            "approval": null,
+            "log_event": "agent.set_manager",
+            "who": "mod:hr",
+            "built": true
+        },
+        "agent_set_kind": {
+            "action": "agent_set_kind",
+            "section": "Agents (HR)",
+            "endpoint": "/agents/kind.php",
+            "params": [
+                {
+                    "name": "agent",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "agent_kind",
+                    "required": true,
+                    "repeated": false,
+                    "hint": "orchestrator or subagent or voice - refused while a live roster depends on it and an office manager must stay an orchestrator"
+                }
+            ],
+            "undo": "restore prior",
+            "confirm": false,
+            "approval": null,
+            "log_event": "agent.set_kind",
+            "who": "mod:hr",
+            "built": true
+        },
+        "agent_add_subagent": {
+            "action": "agent_add_subagent",
+            "section": "Agents (HR)",
+            "endpoint": "/agents/subagent-add.php",
+            "params": [
+                {
+                    "name": "agent",
+                    "required": true,
+                    "repeated": false,
+                    "hint": "an orchestrator"
+                },
+                {
+                    "name": "subagent",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "note",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "refused if either end is the wrong kind — delegation is one level deep"
+                }
+            ],
+            "undo": "remove it",
+            "confirm": false,
+            "approval": null,
+            "log_event": "agent_subagent.create",
+            "who": "mod:hr, agent's manager",
+            "built": true
+        },
+        "agent_remove_subagent": {
+            "action": "agent_remove_subagent",
+            "section": "Agents (HR)",
+            "endpoint": "/agents/subagent-remove.php",
+            "params": [
+                {
+                    "name": "agent",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "subagent",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "add it back",
+            "confirm": false,
+            "approval": null,
+            "log_event": "agent_subagent.remove",
+            "who": "mod:hr, agent's manager",
+            "built": true
+        },
+        "agent_run_duty_now": {
+            "action": "agent_run_duty_now",
+            "section": "Agents (HR)",
+            "endpoint": "/agents/run-duty.php",
+            "params": [
+                {
+                    "name": "agent",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "duty",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": null,
+            "confirm": false,
+            "approval": null,
+            "log_event": "agent_run.start",
+            "who": "agent's manager, mod:hr",
+            "built": true
+        },
+        "agent_run_start": {
+            "action": "agent_run_start",
+            "section": "Agents (HR)",
+            "endpoint": "/agents/run.php",
+            "params": [
+                {
+                    "name": "agent",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "instructions",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "cancel while running",
+            "confirm": false,
+            "approval": "never delegable to agents",
+            "log_event": "agent_run.start",
+            "who": "agent's manager, mod:hr",
+            "built": true
+        },
+        "agent_run_cancel": {
+            "action": "agent_run_cancel",
+            "section": "Agents (HR)",
+            "endpoint": "/agents/run-cancel.php",
+            "params": [
+                {
+                    "name": "agent_run",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": null,
+            "confirm": true,
+            "approval": null,
+            "log_event": "agent_run.cancel",
+            "who": "agent's manager, mod:hr",
+            "built": true
+        },
+        "agent_chat_send": {
+            "action": "agent_chat_send",
+            "section": "Agents (HR)",
+            "endpoint": "/agents/chat-send.php",
+            "params": [
+                {
+                    "name": "agent",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "message",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "conversation",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "one of yours with this agent - omit to start a new one"
+                }
+            ],
+            "undo": "cancel the run while it works",
+            "confirm": false,
+            "approval": "never delegable to agents; refused while the agent is busy",
+            "log_event": "agent_chat.send",
+            "who": "agent's manager, mod:hr",
+            "built": true
+        },
+        "agent_chat_rename": {
+            "action": "agent_chat_rename",
+            "section": "Agents (HR)",
+            "endpoint": "/agents/chat-rename.php",
+            "params": [
+                {
+                    "name": "conversation",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "title",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "rename it again",
+            "confirm": false,
+            "approval": "never delegable to agents",
+            "log_event": "agent_chat.rename",
+            "who": "the person the conversation belongs to",
+            "built": true
+        },
+        "agent_chat_archive": {
+            "action": "agent_chat_archive",
+            "section": "Agents (HR)",
+            "endpoint": "/agents/chat-archive.php",
+            "params": [
+                {
+                    "name": "conversation",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "archive",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "1 or 0 - default 1"
+                }
+            ],
+            "undo": "restore it",
+            "confirm": false,
+            "approval": "never delegable to agents",
+            "log_event": "agent_chat.archive",
+            "who": "the person the conversation belongs to",
+            "built": true
+        },
+        "agent_delegate": {
+            "action": "agent_delegate",
+            "section": "Agents (HR)",
+            "endpoint": "/agents/delegate.php",
+            "params": [
+                {
+                    "name": "subagent",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "instructions",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "reason",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "why this agent - required of a personal assistant"
+                },
+                {
+                    "name": "department",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "which of its departments - default its primary"
+                }
+            ],
+            "undo": "cancel the run",
+            "confirm": false,
+            "approval": null,
+            "log_event": "agent_run.delegate",
+            "who": "an orchestrator agent, for an agent on its roster (a tree since db/154: an orchestrator may be below it); an assistant only within its person's departments",
+            "built": true
+        },
+        "agent_principal_set": {
+            "action": "agent_principal_set",
+            "section": "Agents (HR)",
+            "endpoint": "/agents/principal.php",
+            "params": [
+                {
+                    "name": "agent",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "person",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "the person it serves - omit to end it"
+                }
+            ],
+            "undo": "set the prior person",
+            "confirm": false,
+            "approval": "never delegable to agents",
+            "log_event": "agent.principal_set",
+            "who": "super",
+            "built": true
+        },
+        "agent_lead_propose": {
+            "action": "agent_lead_propose",
+            "section": "Agents (HR)",
+            "endpoint": "/agents/leads/propose.php",
+            "params": [],
+            "undo": "decline them",
+            "confirm": false,
+            "approval": "never delegable to agents",
+            "log_event": "agent_lead.propose",
+            "who": "super",
+            "built": true
+        },
+        "agent_lead_confirm": {
+            "action": "agent_lead_confirm",
+            "section": "Agents (HR)",
+            "endpoint": "/agents/leads/confirm.php",
+            "params": [
+                {
+                    "name": "proposal",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "offboard the lead",
+            "confirm": true,
+            "approval": "never delegable to agents",
+            "log_event": "agent_lead.confirm",
+            "who": "super",
+            "built": true
+        },
+        "agent_lead_decline": {
+            "action": "agent_lead_decline",
+            "section": "Agents (HR)",
+            "endpoint": "/agents/leads/decline.php",
+            "params": [
+                {
+                    "name": "proposal",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "note",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "propose again",
+            "confirm": false,
+            "approval": "never delegable to agents",
+            "log_event": "agent_lead.decline",
+            "who": "super",
+            "built": true
+        },
+        "message_send": {
+            "action": "message_send",
+            "section": "Agents (HR)",
+            "endpoint": "/agents/messages/send.php",
+            "params": [
+                {
+                    "name": "to",
+                    "required": true,
+                    "repeated": false,
+                    "hint": "a member - id or name"
+                },
+                {
+                    "name": "body",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "subject",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "a new thread needs one"
+                },
+                {
+                    "name": "kind",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "request or result or question or decision_needed or fyi or reply - default fyi"
+                },
+                {
+                    "name": "thread",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "the thread to answer on"
+                },
+                {
+                    "name": "priority",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "normal or urgent"
+                }
+            ],
+            "undo": null,
+            "confirm": false,
+            "approval": null,
+            "log_event": "agent_message.send",
+            "who": "an agent in a run - to its orchestrator or its roster or a lead beside it; a person - to their own assistant",
+            "built": true
+        },
+        "message_done": {
+            "action": "message_done",
+            "section": "Agents (HR)",
+            "endpoint": "/agents/messages/done.php",
+            "params": [
+                {
+                    "name": "message",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "note",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": null,
+            "confirm": false,
+            "approval": null,
+            "log_event": "agent_message.done",
+            "who": "the message's recipient",
+            "built": true
+        },
+        "agent_suspend": {
+            "action": "agent_suspend",
+            "section": "Agents (HR)",
+            "endpoint": "/agents/suspend.php",
+            "params": [
+                {
+                    "name": "agent",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "reason",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "reinstate",
+            "confirm": true,
+            "approval": null,
+            "log_event": "agent.suspend",
+            "who": "mod:hr, agent's manager",
+            "built": true
+        },
+        "agent_reinstate": {
+            "action": "agent_reinstate",
+            "section": "Agents (HR)",
+            "endpoint": "/agents/reinstate.php",
+            "params": [
+                {
+                    "name": "agent",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "suspend again",
+            "confirm": false,
+            "approval": null,
+            "log_event": "agent.reinstate",
+            "who": "mod:hr",
+            "built": true
+        },
+        "agent_offboard": {
+            "action": "agent_offboard",
+            "section": "Agents (HR)",
+            "endpoint": "/agents/offboard.php",
+            "params": [
+                {
+                    "name": "agent",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "reason",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "revokes tokens and grants; trail kept"
+                }
+            ],
+            "undo": null,
+            "confirm": true,
+            "approval": null,
+            "log_event": "agent.offboard",
+            "who": "super",
+            "built": true
+        },
+        "escalation_raise": {
+            "action": "escalation_raise",
+            "section": "Agents (HR)",
+            "endpoint": "/agents/escalation-save.php",
+            "params": [
+                {
+                    "name": "reason_kind",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "summary",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "entity_type",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "entity",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "to_member",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "default: the agent's manager"
+                },
+                {
+                    "name": "open_ticket",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": null,
+            "confirm": false,
+            "approval": null,
+            "log_event": "agent_escalation.create",
+            "who": "agents only",
+            "built": true
+        },
+        "escalation_resolve": {
+            "action": "escalation_resolve",
+            "section": "Agents (HR)",
+            "endpoint": "/agents/escalation-resolve.php",
+            "params": [
+                {
+                    "name": "escalation",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "note",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "reopen",
+            "confirm": false,
+            "approval": null,
+            "log_event": "agent_escalation.resolve",
+            "who": "escalation recipient, agent's manager",
+            "built": true
+        },
+        "performance_review_create": {
+            "action": "performance_review_create",
+            "section": "Agents (HR)",
+            "endpoint": "/team/reviews/save.php",
+            "params": [
+                {
+                    "name": "member",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "period_start",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "period_end",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "rating",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "summary",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "metrics filled from records and activity"
+                }
+            ],
+            "undo": "delete it",
+            "confirm": false,
+            "approval": null,
+            "log_event": "performance_review.create",
+            "who": "mod:hr, manager",
+            "built": true
+        },
+        "system_prompt_save": {
+            "action": "system_prompt_save",
+            "section": "Agents (HR)",
+            "endpoint": "/settings/prompts/save.php",
+            "params": [
+                {
+                    "name": "prompt_key",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "name",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "system_prompt",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "the first version's text — required for a new prompt"
+                },
+                {
+                    "name": "description",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "role_key",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "prompt",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "the record's id when editing"
+                }
+            ],
+            "undo": "restore prior / delete new",
+            "confirm": false,
+            "approval": null,
+            "log_event": "system_prompt.save",
+            "who": "mod:hr",
+            "built": true
+        },
+        "system_prompt_version_create": {
+            "action": "system_prompt_version_create",
+            "section": "Agents (HR)",
+            "endpoint": "/settings/prompts/version-save.php",
+            "params": [
+                {
+                    "name": "system_prompt",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "body",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "change_note",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "a new version; existing versions are immutable"
+                }
+            ],
+            "undo": null,
+            "confirm": false,
+            "approval": null,
+            "log_event": "system_prompt_version.create",
+            "who": "mod:hr",
+            "built": true
+        },
+        "system_prompt_archive": {
+            "action": "system_prompt_archive",
+            "section": "Agents (HR)",
+            "endpoint": "/settings/prompts/archive.php",
+            "params": [
+                {
+                    "name": "system_prompt",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "archived",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "refused while a live agent configuration cites it"
+                }
+            ],
+            "undo": "toggle back",
+            "confirm": true,
+            "approval": null,
+            "log_event": "system_prompt.archive",
+            "who": "mod:hr",
+            "built": true
+        },
+        "location_task_create": {
+            "action": "location_task_create",
+            "section": "Estate: buildings, offices & desks (and the task queue)",
+            "endpoint": "/locations/tasks/save.php",
+            "params": [
+                {
+                    "name": "target_location",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "title",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "instructions",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "task_type",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": null,
+                    "note": "input refs"
+                },
+                {
+                    "name": "priority",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "cancel while queued",
+            "confirm": false,
+            "approval": null,
+            "log_event": "location_task.create",
+            "who": "insider",
+            "built": false
+        },
+        "location_task_cancel": {
+            "action": "location_task_cancel",
+            "section": "Estate: buildings, offices & desks (and the task queue)",
+            "endpoint": "/locations/tasks/cancel.php",
+            "params": [
+                {
+                    "name": "location_task",
+                    "required": true,
+                    "repeated": false,
+                    "hint": "queued or delivered"
+                }
+            ],
+            "undo": null,
+            "confirm": false,
+            "approval": null,
+            "log_event": "location_task.cancel",
+            "who": "own (requester), mod:locations",
+            "built": false
+        },
+        "location_task_retry": {
+            "action": "location_task_retry",
+            "section": "Estate: buildings, offices & desks (and the task queue)",
+            "endpoint": "/locations/tasks/retry.php",
+            "params": [
+                {
+                    "name": "location_task",
+                    "required": true,
+                    "repeated": false,
+                    "hint": "failed"
+                }
+            ],
+            "undo": "cancel the retry",
+            "confirm": false,
+            "approval": null,
+            "log_event": "location_task.retry",
+            "who": "own, mod:locations",
+            "built": false
+        },
+        "location_task_decide_consent": {
+            "action": "location_task_decide_consent",
+            "section": "Estate: buildings, offices & desks (and the task queue)",
+            "endpoint": "/locations/tasks/consent.php",
+            "params": [
+                {
+                    "name": "location_task",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "decision",
+                    "required": true,
+                    "repeated": false,
+                    "hint": "allow_once/allow_always/refuse"
+                }
+            ],
+            "undo": null,
+            "confirm": false,
+            "approval": null,
+            "log_event": "location_task.consent",
+            "who": "desk owner",
+            "built": false
+        },
+        "consent_grant_create": {
+            "action": "consent_grant_create",
+            "section": "Estate: buildings, offices & desks (and the task queue)",
+            "endpoint": "/locations/permissions/save.php",
+            "params": [
+                {
+                    "name": "desk",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "grantee_member",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "one of these is required"
+                },
+                {
+                    "name": "grantee_location",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "one of these is required"
+                },
+                {
+                    "name": "task_type",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "scope",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "expires_at",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "revoke",
+            "confirm": false,
+            "approval": null,
+            "log_event": "consent_grant.create",
+            "who": "desk owner",
+            "built": false
+        },
+        "consent_grant_revoke": {
+            "action": "consent_grant_revoke",
+            "section": "Estate: buildings, offices & desks (and the task queue)",
+            "endpoint": "/locations/permissions/revoke.php",
+            "params": [
+                {
+                    "name": "consent_grant",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "grant again",
+            "confirm": false,
+            "approval": null,
+            "log_event": "consent_grant.revoke",
+            "who": "desk owner, super",
+            "built": false
+        },
+        "location_set_office_manager": {
+            "action": "location_set_office_manager",
+            "section": "Estate: buildings, offices & desks (and the task queue)",
+            "endpoint": "/locations/office-manager.php",
+            "params": [
+                {
+                    "name": "location",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "agent",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "restore prior",
+            "confirm": false,
+            "approval": null,
+            "log_event": "location.set_office_manager",
+            "who": "mod:locations",
+            "built": true
+        },
+        "location_add_resident": {
+            "action": "location_add_resident",
+            "section": "Estate: buildings, offices & desks (and the task queue)",
+            "endpoint": "/locations/resident-add.php",
+            "params": [
+                {
+                    "name": "location",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "member",
+                    "required": true,
+                    "repeated": false,
+                    "hint": "human or agent"
+                },
+                {
+                    "name": "is_primary",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "remove",
+            "confirm": false,
+            "approval": null,
+            "log_event": "location_resident.create",
+            "who": "mod:locations",
+            "built": true
+        },
+        "location_remove_resident": {
+            "action": "location_remove_resident",
+            "section": "Estate: buildings, offices & desks (and the task queue)",
+            "endpoint": "/locations/resident-remove.php",
+            "params": [
+                {
+                    "name": "location",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "member",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "add back",
+            "confirm": false,
+            "approval": null,
+            "log_event": "location_resident.remove",
+            "who": "mod:locations",
+            "built": true
+        },
+        "location_save": {
+            "action": "location_save",
+            "section": "Estate: buildings, offices & desks (and the task queue)",
+            "endpoint": "/locations/save.php",
+            "params": [
+                {
+                    "name": "name",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "kind",
+                    "required": true,
+                    "repeated": false,
+                    "hint": "building/office/desk/site — a site is a place the business trades from: address and timezone only"
+                },
+                {
+                    "name": "parent_location_id",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "siting",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "onsite/offsite — required for an office or desk"
+                },
+                {
+                    "name": "description",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "owner_member_id",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "desks"
+                },
+                {
+                    "name": "platform",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "external_ref",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "hostname",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "ip_address",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "cpu_cores",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "memory_mb",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "storage_gb",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "is_always_on",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "address",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "sites"
+                },
+                {
+                    "name": "timezone",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "sites — an IANA name"
+                },
+                {
+                    "name": "location",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "restore prior / delete new",
+            "confirm": false,
+            "approval": null,
+            "log_event": "location.save",
+            "who": "mod:locations",
+            "built": true
+        },
+        "location_move": {
+            "action": "location_move",
+            "section": "Estate: buildings, offices & desks (and the task queue)",
+            "endpoint": "/locations/move.php",
+            "params": [
+                {
+                    "name": "location",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "parent_location",
+                    "required": true,
+                    "repeated": false,
+                    "hint": "an office moving to another building — never a site"
+                }
+            ],
+            "undo": "move back",
+            "confirm": false,
+            "approval": null,
+            "log_event": "location.move",
+            "who": "mod:locations",
+            "built": true
+        },
+        "location_rename": {
+            "action": "location_rename",
+            "section": "Estate: buildings, offices & desks (and the task queue)",
+            "endpoint": "/locations/rename.php",
+            "params": [
+                {
+                    "name": "location",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "name",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "restore prior",
+            "confirm": false,
+            "approval": null,
+            "log_event": "location.rename",
+            "who": "desk owner, admin",
+            "built": true
+        },
+        "location_add_department": {
+            "action": "location_add_department",
+            "section": "Estate: buildings, offices & desks (and the task queue)",
+            "endpoint": "/locations/department-add.php",
+            "params": [
+                {
+                    "name": "location",
+                    "required": true,
+                    "repeated": false,
+                    "hint": "an office"
+                },
+                {
+                    "name": "department",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "remove",
+            "confirm": false,
+            "approval": null,
+            "log_event": "department.set_home_location",
+            "who": "mod:locations, admin",
+            "built": true
+        },
+        "location_remove_department": {
+            "action": "location_remove_department",
+            "section": "Estate: buildings, offices & desks (and the task queue)",
+            "endpoint": "/locations/department-remove.php",
+            "params": [
+                {
+                    "name": "location",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "department",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "add it back",
+            "confirm": false,
+            "approval": null,
+            "log_event": "department.set_home_location",
+            "who": "mod:locations, admin",
+            "built": true
+        },
+        "location_retire": {
+            "action": "location_retire",
+            "section": "Estate: buildings, offices & desks (and the task queue)",
+            "endpoint": "/locations/retire.php",
+            "params": [
+                {
+                    "name": "location",
+                    "required": true,
+                    "repeated": false,
+                    "hint": "revokes the desk's token"
+                }
+            ],
+            "undo": null,
+            "confirm": true,
+            "approval": null,
+            "log_event": "location.retire",
+            "who": "desk owner, super",
+            "built": true
+        },
+        "location_delete": {
+            "action": "location_delete",
+            "section": "Estate: buildings, offices & desks (and the task queue)",
+            "endpoint": "/locations/delete.php",
+            "params": [
+                {
+                    "name": "location",
+                    "required": true,
+                    "repeated": false,
+                    "hint": "only one nothing points at"
+                }
+            ],
+            "undo": null,
+            "confirm": true,
+            "approval": null,
+            "log_event": "location.delete",
+            "who": "super",
+            "built": true
+        },
+        "application_save": {
+            "action": "application_save",
+            "section": "Applications",
+            "endpoint": "/applications/save.php",
+            "params": [
+                {
+                    "name": "name",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "app_key",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "category",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "description",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "vendor",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "is_self_hosted",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "location",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "owner_department",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "owner_member",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "url",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "sso_path",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "sso_logout_path",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "directory_writes",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "scope_kind",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "none/location/department — what one installation serves; frozen while it has scopes or grants"
+                },
+                {
+                    "name": "version",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "criticality",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "notes",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "business_area_id",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "catalog_key",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "an outside product of the application catalog - on create only"
+                },
+                {
+                    "name": "application",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "restore prior / delete new",
+            "confirm": false,
+            "approval": null,
+            "log_event": "application.save",
+            "who": "mod:applications",
+            "built": true
+        },
+        "application_set_status": {
+            "action": "application_set_status",
+            "section": "Applications",
+            "endpoint": "/applications/status.php",
+            "params": [
+                {
+                    "name": "application",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "status",
+                    "required": true,
+                    "repeated": false,
+                    "hint": "planned/active/degraded/retired"
+                }
+            ],
+            "undo": "restore prior",
+            "confirm": true,
+            "approval": null,
+            "log_event": "application.set_status",
+            "who": "mod:applications",
+            "built": true
+        },
+        "application_token_mint": {
+            "action": "application_token_mint",
+            "section": "Applications",
+            "endpoint": "/applications/token-mint.php",
+            "params": [
+                {
+                    "name": "application",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "revoke",
+            "confirm": false,
+            "approval": null,
+            "log_event": "application.token_mint",
+            "who": "super",
+            "built": true
+        },
+        "application_token_revoke": {
+            "action": "application_token_revoke",
+            "section": "Applications",
+            "endpoint": "/applications/token-revoke.php",
+            "params": [
+                {
+                    "name": "application",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "mint again",
+            "confirm": true,
+            "approval": null,
+            "log_event": "application.token_revoke",
+            "who": "super",
+            "built": true
+        },
+        "application_catalog_save": {
+            "action": "application_catalog_save",
+            "section": "Applications",
+            "endpoint": "/applications/catalog-save.php",
+            "params": [
+                {
+                    "name": "catalog_key",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "name",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "business_area",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "kind",
+                    "required": true,
+                    "repeated": false,
+                    "hint": "ours/external"
+                },
+                {
+                    "name": "description",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "icon",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "category",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "vendor",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "remove the entry",
+            "confirm": false,
+            "approval": null,
+            "log_event": "application_catalog.save",
+            "who": "super",
+            "built": true
+        },
+        "application_endpoint_save": {
+            "action": "application_endpoint_save",
+            "section": "Applications",
+            "endpoint": "/applications/endpoints/save.php",
+            "params": [
+                {
+                    "name": "application",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "name",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "kind",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "url",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "auth_kind",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "secret",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "by name; the value is never shown or logged"
+                },
+                {
+                    "name": "agent_reachable",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "mcp_surface_version",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "notes",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "endpoint",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "restore prior / delete new",
+            "confirm": false,
+            "approval": null,
+            "log_event": "application_endpoint.save",
+            "who": "mod:applications",
+            "built": true
+        },
+        "application_endpoint_remove": {
+            "action": "application_endpoint_remove",
+            "section": "Applications",
+            "endpoint": "/applications/endpoints/remove.php",
+            "params": [
+                {
+                    "name": "endpoint",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "application",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "add back",
+            "confirm": true,
+            "approval": null,
+            "log_event": "application_endpoint.remove",
+            "who": "mod:applications",
+            "built": true
+        },
+        "application_access_grant": {
+            "action": "application_access_grant",
+            "section": "Applications",
+            "endpoint": "/applications/access-grant.php",
+            "params": [
+                {
+                    "name": "application",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "member",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "one of these is required"
+                },
+                {
+                    "name": "department",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "one of these is required"
+                },
+                {
+                    "name": "residents",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "one of these is required"
+                },
+                {
+                    "name": "capability",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "read/write/admin — ignored when the application has roles"
+                },
+                {
+                    "name": "scope",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "the site or department on a scoped application"
+                },
+                {
+                    "name": "roles",
+                    "required": false,
+                    "repeated": true,
+                    "hint": "the application's own roles - several allowed; the grant amounts to the highest"
+                },
+                {
+                    "name": "expires_at",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "note",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "revoke",
+            "confirm": false,
+            "approval": null,
+            "log_event": "application_access.grant",
+            "who": "super",
+            "built": true
+        },
+        "application_access_revoke": {
+            "action": "application_access_revoke",
+            "section": "Applications",
+            "endpoint": "/applications/access-revoke.php",
+            "params": [
+                {
+                    "name": "application",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "application_access",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "grant again",
+            "confirm": true,
+            "approval": null,
+            "log_event": "application_access.revoke",
+            "who": "super",
+            "built": true
+        },
+        "application_access_change": {
+            "action": "application_access_change",
+            "section": "Applications",
+            "endpoint": "/applications/access-change.php",
+            "params": [
+                {
+                    "name": "application",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "application_access",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "roles",
+                    "required": false,
+                    "repeated": true,
+                    "hint": "the application's own roles - the whole new set"
+                },
+                {
+                    "name": "capability",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "read/write/admin — on an application without roles"
+                }
+            ],
+            "undo": "change it back",
+            "confirm": false,
+            "approval": null,
+            "log_event": "application_access.change",
+            "who": "super",
+            "built": true
+        },
+        "application_roles_set": {
+            "action": "application_roles_set",
+            "section": "Applications",
+            "endpoint": "/applications/roles-set.php",
+            "params": [
+                {
+                    "name": "application",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "roles",
+                    "required": true,
+                    "repeated": false,
+                    "hint": "by hand - only for an application that does not publish its roles; a JSON list of objects with key/name/capability/is_admin — exactly one is_admin; an empty list removes them all"
+                }
+            ],
+            "undo": "set the prior list",
+            "confirm": false,
+            "approval": "never delegable to agents",
+            "log_event": "application.roles_set",
+            "who": "super",
+            "built": true
+        },
+        "application_roles_refresh": {
+            "action": "application_roles_refresh",
+            "section": "Applications",
+            "endpoint": "/applications/roles-refresh.php",
+            "params": [
+                {
+                    "name": "application",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "refresh again",
+            "confirm": false,
+            "approval": "never delegable to agents",
+            "log_event": "application.roles_refresh",
+            "who": "super",
+            "built": true
+        },
+        "application_scope_add": {
+            "action": "application_scope_add",
+            "section": "Applications",
+            "endpoint": "/applications/scope-add.php",
+            "params": [
+                {
+                    "name": "application",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "location",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "a site — on an application scoped by location"
+                },
+                {
+                    "name": "department",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "on one scoped by department"
+                }
+            ],
+            "undo": "remove it",
+            "confirm": false,
+            "approval": null,
+            "log_event": "application_scope.add",
+            "who": "mod:applications",
+            "built": true
+        },
+        "application_scope_remove": {
+            "action": "application_scope_remove",
+            "section": "Applications",
+            "endpoint": "/applications/scope-remove.php",
+            "params": [
+                {
+                    "name": "application",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "scope",
+                    "required": true,
+                    "repeated": false,
+                    "hint": "every live grant on it is revoked"
+                }
+            ],
+            "undo": "add it back and grant again",
+            "confirm": true,
+            "approval": null,
+            "log_event": "application_scope.remove",
+            "who": "mod:applications",
+            "built": true
+        },
+        "application_sme_set": {
+            "action": "application_sme_set",
+            "section": "Applications",
+            "endpoint": "/applications/sme-set.php",
+            "params": [
+                {
+                    "name": "agent",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "an active agent - omit to clear the expert"
+                },
+                {
+                    "name": "application",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "set the prior expert",
+            "confirm": false,
+            "approval": null,
+            "log_event": "application.sme_set",
+            "who": "mod:applications",
+            "built": true
+        },
+        "application_health_check": {
+            "action": "application_health_check",
+            "section": "Applications",
+            "endpoint": "/applications/health-check.php",
+            "params": [
+                {
+                    "name": "application",
+                    "required": true,
+                    "repeated": false,
+                    "hint": "runs the check now"
+                }
+            ],
+            "undo": null,
+            "confirm": false,
+            "approval": null,
+            "log_event": "application.health_check",
+            "who": "insider",
+            "built": true
+        },
+        "approval_approve": {
+            "action": "approval_approve",
+            "section": "Approvals",
+            "endpoint": "/approvals/approve.php",
+            "params": [
+                {
+                    "name": "approval_request",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "note",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "then runs the stored action"
+                }
+            ],
+            "undo": null,
+            "confirm": true,
+            "approval": "never delegable to agents",
+            "log_event": "approval_request.approve",
+            "who": "the approver",
+            "built": true
+        },
+        "approval_reject": {
+            "action": "approval_reject",
+            "section": "Approvals",
+            "endpoint": "/approvals/reject.php",
+            "params": [
+                {
+                    "name": "approval_request",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "reason",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": null,
+            "confirm": false,
+            "approval": null,
+            "log_event": "approval_request.reject",
+            "who": "the approver",
+            "built": true
+        },
+        "approval_cancel": {
+            "action": "approval_cancel",
+            "section": "Approvals",
+            "endpoint": "/approvals/cancel.php",
+            "params": [
+                {
+                    "name": "approval_request",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": null,
+            "confirm": false,
+            "approval": null,
+            "log_event": "approval_request.cancel",
+            "who": "the requester",
+            "built": true
+        },
+        "approval_policy_save": {
+            "action": "approval_policy_save",
+            "section": "Approvals",
+            "endpoint": "/settings/approval-policies/save.php",
+            "params": [
+                {
+                    "name": "name",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "category",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "action_pattern",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "applies_to",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "agent",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "department",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "amount_threshold",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "currency",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "approver",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "expires_after_hours",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "policy",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "restore prior / delete new",
+            "confirm": true,
+            "approval": null,
+            "log_event": "approval_policy.save",
+            "who": "super",
+            "built": true
+        },
+        "approval_policy_set_active": {
+            "action": "approval_policy_set_active",
+            "section": "Approvals",
+            "endpoint": "/settings/approval-policies/active.php",
+            "params": [
+                {
+                    "name": "policy",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "active",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "toggle back",
+            "confirm": true,
+            "approval": null,
+            "log_event": "approval_policy.set_active",
+            "who": "super",
+            "built": true
+        },
+        "approval_policy_delete": {
+            "action": "approval_policy_delete",
+            "section": "Approvals",
+            "endpoint": "/settings/approval-policies/delete.php",
+            "params": [
+                {
+                    "name": "policy",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": null,
+            "confirm": true,
+            "approval": "delete",
+            "log_event": "approval_policy.delete",
+            "who": "super",
+            "built": true
+        },
+        "ai_period_rollup": {
+            "action": "ai_period_rollup",
+            "section": "AI: prompt log, models & evals",
+            "endpoint": "/ai/spend/rollup.php",
+            "params": [
+                {
+                    "name": "period",
+                    "required": true,
+                    "repeated": false,
+                    "hint": "YYYY-MM"
+                }
+            ],
+            "undo": "roll up again",
+            "confirm": false,
+            "approval": null,
+            "log_event": "ai_period.rollup",
+            "who": "mod:ledger",
+            "built": true
+        },
+        "ai_period_close": {
+            "action": "ai_period_close",
+            "section": "AI: prompt log, models & evals",
+            "endpoint": "/ai/spend/close.php",
+            "params": [
+                {
+                    "name": "period",
+                    "required": true,
+                    "repeated": false,
+                    "hint": "YYYY-MM"
+                },
+                {
+                    "name": "note",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "none — a closed month stays closed",
+            "confirm": true,
+            "approval": null,
+            "log_event": "ai_period.close",
+            "who": "super",
+            "built": true
+        },
+        "model_save": {
+            "action": "model_save",
+            "section": "AI: prompt log, models & evals",
+            "endpoint": "/settings/models/save.php",
+            "params": [
+                {
+                    "name": "model_key",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "display_name",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "provider",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "provider_model_id",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "harness",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "endpoint_url",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "context_window_tokens",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "prices",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "status",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "model",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "API key screen only"
+                }
+            ],
+            "undo": "restore prior / delete new",
+            "confirm": true,
+            "approval": null,
+            "log_event": "model.save",
+            "who": "super",
+            "built": true
+        },
+        "model_set_status": {
+            "action": "model_set_status",
+            "section": "AI: prompt log, models & evals",
+            "endpoint": "/settings/models/status.php",
+            "params": [
+                {
+                    "name": "model",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "status",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "restore prior",
+            "confirm": true,
+            "approval": null,
+            "log_event": "model.set_status",
+            "who": "super",
+            "built": true
+        },
+        "eval_set_save": {
+            "action": "eval_set_save",
+            "section": "AI: prompt log, models & evals",
+            "endpoint": "/ai/evals/save.php",
+            "params": [
+                {
+                    "name": "name",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "agent",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "one of these is required"
+                },
+                {
+                    "name": "role_key",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "one of these is required"
+                },
+                {
+                    "name": "department",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "pass_threshold",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "description",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "status",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "draft/active/retired"
+                },
+                {
+                    "name": "trace_checks",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "a JSON list of JEV checks the Auditor applies to sampled real runs — empty clears them"
+                },
+                {
+                    "name": "eval_set",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "restore prior / delete new",
+            "confirm": false,
+            "approval": null,
+            "log_event": "eval_set.save",
+            "who": "mod:evals",
+            "built": true
+        },
+        "eval_case_save": {
+            "action": "eval_case_save",
+            "section": "AI: prompt log, models & evals",
+            "endpoint": "/ai/evals/case-save.php",
+            "params": [
+                {
+                    "name": "eval_set",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "title",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "input",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "expected",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "rubric",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "grader",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "jev/rubric_llm/exact/programmatic/human — jev is the default"
+                },
+                {
+                    "name": "checks",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "a JSON list of JEV checks — required when grader is jev"
+                },
+                {
+                    "name": "weight",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "eval_case",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "restore prior / delete new",
+            "confirm": false,
+            "approval": null,
+            "log_event": "eval_case.save",
+            "who": "mod:evals",
+            "built": true
+        },
+        "eval_case_draft_checks": {
+            "action": "eval_case_draft_checks",
+            "section": "AI: prompt log, models & evals",
+            "endpoint": "/ai/evals/draft-checks.php",
+            "params": [
+                {
+                    "name": "eval_case",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "rubric",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "one property per line — a draft of JEV checks is returned and nothing is saved"
+                }
+            ],
+            "undo": null,
+            "confirm": false,
+            "approval": null,
+            "log_event": "eval_case.draft_checks",
+            "who": "mod:evals",
+            "built": true
+        },
+        "eval_case_promote_trace": {
+            "action": "eval_case_promote_trace",
+            "section": "AI: prompt log, models & evals",
+            "endpoint": "/ai/evals/promote.php",
+            "params": [
+                {
+                    "name": "ledger_entry",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "one of these is required"
+                },
+                {
+                    "name": "agent_run",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "one of these is required"
+                },
+                {
+                    "name": "eval_set",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "title",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "rubric",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "delete the case",
+            "confirm": false,
+            "approval": null,
+            "log_event": "eval_case.promote",
+            "who": "mod:evals, agent's manager",
+            "built": true
+        },
+        "eval_case_set_active": {
+            "action": "eval_case_set_active",
+            "section": "AI: prompt log, models & evals",
+            "endpoint": "/ai/evals/case-active.php",
+            "params": [
+                {
+                    "name": "eval_case",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "active",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "toggle back",
+            "confirm": false,
+            "approval": null,
+            "log_event": "eval_case.set_active",
+            "who": "mod:evals",
+            "built": true
+        },
+        "eval_run_start": {
+            "action": "eval_run_start",
+            "section": "AI: prompt log, models & evals",
+            "endpoint": "/ai/evals/run.php",
+            "params": [
+                {
+                    "name": "eval_set",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "agent",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "config_version",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "defaults to the active one — naming another weighs a change before it goes live"
+                },
+                {
+                    "name": "trigger",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "manual/change_control/hiring"
+                }
+            ],
+            "undo": "cancel while queued",
+            "confirm": false,
+            "approval": null,
+            "log_event": "eval_run.start",
+            "who": "mod:evals, agent's manager",
+            "built": true
+        },
+        "eval_result_grade": {
+            "action": "eval_result_grade",
+            "section": "AI: prompt log, models & evals",
+            "endpoint": "/ai/evals/grade.php",
+            "params": [
+                {
+                    "name": "eval_result",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "passed",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "score",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": null,
+                    "note": "notes (a human-graded case"
+                },
+                {
+                    "name": null,
+                    "note": "a JEV case JEV was unsure of"
+                },
+                {
+                    "name": null,
+                    "note": "or a spot-check of any JEV grade)"
+                }
+            ],
+            "undo": "restore prior grade",
+            "confirm": false,
+            "approval": null,
+            "log_event": "eval_result.grade",
+            "who": "mod:evals (humans only)",
+            "built": true
+        },
+        "eval_schedule_save": {
+            "action": "eval_schedule_save",
+            "section": "AI: prompt log, models & evals",
+            "endpoint": "/ai/evals/schedule-save.php",
+            "params": [
+                {
+                    "name": "eval_set",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "kind",
+                    "required": true,
+                    "repeated": false,
+                    "hint": "scheduled_run/trace_sampling"
+                },
+                {
+                    "name": "cadence",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "sample_size",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "regression_delta",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "active",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "schedule",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "restore prior / delete new",
+            "confirm": false,
+            "approval": null,
+            "log_event": "eval_schedule.save",
+            "who": "mod:evals",
+            "built": true
+        },
+        "system_event_set_status": {
+            "action": "system_event_set_status",
+            "section": "AI: prompt log, models & evals",
+            "endpoint": "/ai/system/event-status.php",
+            "params": [
+                {
+                    "name": "event",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "status",
+                    "required": true,
+                    "repeated": false,
+                    "hint": "open/acknowledged/resolved/muted"
+                },
+                {
+                    "name": "note",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "set the prior status",
+            "confirm": false,
+            "approval": null,
+            "log_event": "system_event.set_status",
+            "who": "super, admin",
+            "built": true
+        },
+        "system_one_set_mode": {
+            "action": "system_one_set_mode",
+            "section": "AI: prompt log, models & evals",
+            "endpoint": "/agents/system-one-mode.php",
+            "params": [
+                {
+                    "name": "agent",
+                    "required": true,
+                    "repeated": false,
+                    "hint": "a system_one agent"
+                },
+                {
+                    "name": "mode",
+                    "required": true,
+                    "repeated": false,
+                    "hint": "shadow/live"
+                }
+            ],
+            "undo": "set the other mode",
+            "confirm": true,
+            "approval": "never delegable to agents",
+            "log_event": "agent.system_one_mode",
+            "who": "super",
+            "built": true
+        },
+        "eval_alert_acknowledge": {
+            "action": "eval_alert_acknowledge",
+            "section": "AI: prompt log, models & evals",
+            "endpoint": "/ai/evals/alert-ack.php",
+            "params": [
+                {
+                    "name": "eval_alert",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "note",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "un-acknowledge",
+            "confirm": false,
+            "approval": null,
+            "log_event": "eval_alert.acknowledge",
+            "who": "mod:evals, agent's manager",
+            "built": true
+        },
+        "eval_alert_resolve": {
+            "action": "eval_alert_resolve",
+            "section": "AI: prompt log, models & evals",
+            "endpoint": "/ai/evals/alert-resolve.php",
+            "params": [
+                {
+                    "name": "eval_alert",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "resolution",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "reopen",
+            "confirm": false,
+            "approval": null,
+            "log_event": "eval_alert.resolve",
+            "who": "mod:evals, agent's manager",
+            "built": true
+        },
+        "run_verdict_set": {
+            "action": "run_verdict_set",
+            "section": "AI: prompt log, models & evals",
+            "endpoint": "/ai/verdict.php",
+            "params": [
+                {
+                    "name": "run",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "one of these is required"
+                },
+                {
+                    "name": "call",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "one of these is required"
+                },
+                {
+                    "name": "verdict",
+                    "required": true,
+                    "repeated": false,
+                    "hint": "good or bad"
+                },
+                {
+                    "name": "note",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "say it again to change it",
+            "confirm": false,
+            "approval": null,
+            "log_event": "run_verdict.set",
+            "who": "whoever may see the run (humans only)",
+            "built": true
+        },
+        "memory_remember": {
+            "action": "memory_remember",
+            "section": "Memory & skills *(approved 2026-09-19 — stage H1 of `docs/hermes-integration-plan.md`; built in H4 and H5)*",
+            "endpoint": "/memory/remember.php",
+            "params": [
+                {
+                    "name": "text",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "subject",
+                    "required": true,
+                    "repeated": false,
+                    "hint": "what it is about: one customer or vendor or process"
+                },
+                {
+                    "name": "scope",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "self/department/org; default self"
+                },
+                {
+                    "name": "department",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "supersede the note",
+            "confirm": false,
+            "approval": "department and org scope",
+            "log_event": "memory.remember",
+            "who": "any insider; agents: own scope free, wider scope by approval",
+            "built": true
+        },
+        "core_memory_set": {
+            "action": "core_memory_set",
+            "section": "Memory & skills *(approved 2026-09-19 — stage H1 of `docs/hermes-integration-plan.md`; built in H4 and H5)*",
+            "endpoint": "/memory/core-set.php",
+            "params": [
+                {
+                    "name": "key",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "value",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "member",
+                    "required": false,
+                    "repeated": false,
+                    "hint": "default: caller"
+                }
+            ],
+            "undo": "restore prior (superseded, never overwritten)",
+            "confirm": false,
+            "approval": null,
+            "log_event": "memory.core_set",
+            "who": "the member itself, its manager, mod:hr",
+            "built": true
+        },
+        "skill_propose": {
+            "action": "skill_propose",
+            "section": "Memory & skills *(approved 2026-09-19 — stage H1 of `docs/hermes-integration-plan.md`; built in H4 and H5)*",
+            "endpoint": "/skills/propose.php",
+            "params": [
+                {
+                    "name": "agent_run",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "skill_name",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "bundle",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "withdraw",
+            "confirm": false,
+            "approval": "always — the manager reads the diff",
+            "log_event": "skill.propose",
+            "who": "the runner, for the run's agent",
+            "built": true
+        },
+        "skill_proposal_decide": {
+            "action": "skill_proposal_decide",
+            "section": "Memory & skills *(approved 2026-09-19 — stage H1 of `docs/hermes-integration-plan.md`; built in H4 and H5)*",
+            "endpoint": "/skills/decide.php",
+            "params": [
+                {
+                    "name": "skill_proposal",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "decision",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "note",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": null,
+            "confirm": true,
+            "approval": "never delegable to agents",
+            "log_event": "skill.approve` / `skill.reject",
+            "who": "the agent's manager, mod:hr",
+            "built": true
+        },
+        "skill_assign": {
+            "action": "skill_assign",
+            "section": "Memory & skills *(approved 2026-09-19 — stage H1 of `docs/hermes-integration-plan.md`; built in H4 and H5)*",
+            "endpoint": "/skills/assign.php",
+            "params": [
+                {
+                    "name": "skill_name",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "scope_kind",
+                    "required": true,
+                    "repeated": false,
+                    "hint": "org/department/role/agent/application"
+                },
+                {
+                    "name": "department",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "role_key",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "agent",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "application",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "pinned_bundle_hash",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "revoke",
+            "confirm": false,
+            "approval": "never delegable to agents",
+            "log_event": "skill.assign",
+            "who": "mod:hr; dept-admin within their departments; mod:applications for an application",
+            "built": true
+        },
+        "skill_unassign": {
+            "action": "skill_unassign",
+            "section": "Memory & skills *(approved 2026-09-19 — stage H1 of `docs/hermes-integration-plan.md`; built in H4 and H5)*",
+            "endpoint": "/skills/unassign.php",
+            "params": [
+                {
+                    "name": "skill_assignment",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": "assign again",
+            "confirm": true,
+            "approval": "never delegable to agents",
+            "log_event": "skill.unassign",
+            "who": "mod:hr; dept-admin within their departments; mod:applications for an application",
+            "built": true
+        },
+        "skill_save": {
+            "action": "skill_save",
+            "section": "Memory & skills *(approved 2026-09-19 — stage H1 of `docs/hermes-integration-plan.md`; built in H4 and H5)*",
+            "endpoint": "/ai/skills/save.php",
+            "params": [
+                {
+                    "name": "name",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "description",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "body",
+                    "required": true,
+                    "repeated": false,
+                    "hint": "the instructions: SKILL.md after its frontmatter"
+                },
+                {
+                    "name": "files",
+                    "required": false,
+                    "repeated": true,
+                    "hint": "reference files - each a path and its text"
+                }
+            ],
+            "undo": "enable the previous version",
+            "confirm": false,
+            "approval": "never delegable to agents",
+            "log_event": "skill.save",
+            "who": "super",
+            "built": true
+        },
+        "skill_set_enabled": {
+            "action": "skill_set_enabled",
+            "section": "Memory & skills *(approved 2026-09-19 — stage H1 of `docs/hermes-integration-plan.md`; built in H4 and H5)*",
+            "endpoint": "/ai/skills/enabled.php",
+            "params": [
+                {
+                    "name": "name",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "skill",
+                    "required": true,
+                    "repeated": false,
+                    "hint": "the version's id"
+                },
+                {
+                    "name": "enabled",
+                    "required": true,
+                    "repeated": false,
+                    "hint": "1 or 0"
+                }
+            ],
+            "undo": "set it back",
+            "confirm": false,
+            "approval": "never delegable to agents",
+            "log_event": "skill.set_enabled",
+            "who": "super",
+            "built": true
+        }
+    }
+}

@@ -53,10 +53,57 @@ scram), seals the auth store with a generated MALUDB_STORE_KEY, restarts the
 service, mints the tenant's API token (/var/lib/maluos/secrets/api.token,
 `sudo maluctl token api`), and writes the token into the sweep env files.
 
+### maludb-os-core (package maludb-os-core, metapackage maluos-business-os)
+
+The MaluDB Business OS kernel (github.com/maludb/maludb-os-core), vendored
+at a pinned commit by scripts/vendor-maludb-os-core.sh. Route B, native:
+no container. The package builds the Composer dependencies, the Next.js
+front end and the Python virtual environment for the MCP servers and the
+agent runner at package build time (network needed then, not at install),
+and installs the kernel in /var/www as upstream expects, the eight systemd
+units disabled, the runner sandbox (bos-runner and bos-agent users,
+/usr/sbin/bos-agent-exec with its sudoers line), the PHP upload limits for
+whichever PHP Apache runs, and the localhost-only :8080 listener.
+
+Runtimes on Ubuntu 26.04: PHP 8.5 (the kernel lints clean and its Composer
+constraints admit it), Node 22, Python 3.14 (every requirement has wheels).
+
+First-boot module 60-maludb-os-core, a native port of maludb-os-docker's
+bos-init with PostgreSQL, the engine and the MaluDB API local:
+
+1. loopback names for <domain>, www, os and app so the kernel's own URLs resolve;
+2. the kernel's activity memory: database maludb_os_memory, role and schema
+   maludb_os_mem, memory schema enabled, a MaluDB API token minted for it;
+3. the kernel database maludb_os and every migration in order, with a
+   resumable ledger in /var/lib/maluos/business-os;
+4. passwords for app_rw, app_records_ro, app_activity_ro and app_runner;
+5. config/.env, web/.env.local and /etc/business-os/runner.env rendered
+   from generated secrets (kept under /var/lib/maluos/secrets/business-os);
+6. the Apache vhosts rendered for the domain, the web drop-in, the units
+   enabled, the PHP API health-checked;
+7. the first super-admin (password generated unless configured), the first
+   model registry row, the cron jobs, the kernel's Installer and JEV agents.
+
+Settings in firstboot.yaml under components.maludb-os-core: domain, scheme,
+admin_email, admin_name, admin_password, model_key, model_name,
+model_provider_id, anthropic_api_key, openrouter_api_key, malumail_api_key.
+
+Status 2026-10-18: boot test PASS (44 checks) on the cloud image under
+QEMU/TCG: first boot provisions the kernel end to end (memory database,
+API token, kernel database with all 184 migrations, Apache vhosts, the
+eight units, the first super-admin, model row, cron, the kernel's agents);
+the PHP API, the login page through Apache, the landing page, the four MCP
+servers and the agent runner with its three harnesses all answer. Under
+emulation provisioning takes about 25 minutes (the first-boot unit allows
+two hours; provisioning resumes on the next boot if interrupted); under KVM
+it is a couple of minutes.
+
+Not yet in this component: the default applications (Help Desk, Spaces,
+HR, Projects) and the integration plugin, which the kernel installs from
+git; the Claude CLI for the agent harness; Hermes. These follow as the next
+slice, vendored for offline installs.
+
 ## Planned
 
-- maluos-business-os: the kernel (PHP 8.5, Node 22, the Python MCP servers
-  in a vendored virtual environment) with a module reproducing the docker
-  install's bos-init natively; applications through the kernel's own
-  installer, the defaults vendored for offline installs.
+- The default applications and the integration plugin as components.
 - The ISO catalogue layers and the `maluctl component` selector.

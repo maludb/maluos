@@ -1,0 +1,23 @@
+[Unit]
+Description=Business OS agent runner (runner API :8815, ledger proxy :8816)
+After=network.target postgresql.service
+
+[Service]
+User=bos-runner
+Group=bos-runner
+SupplementaryGroups=bos-agent
+WorkingDirectory=/var/www/mcp
+Environment=RUNNER_ENV_FILE=/etc/business-os/runner.env
+Environment=RUNNER_AGENT_LAUNCHER=/usr/local/sbin/bos-agent-exec
+Environment=HERMES_BIN=/opt/hermes/venv/bin/hermes
+ExecStart=/var/www/mcp/venv/bin/python -m agent_runner.service
+UMask=0007
+Restart=on-failure
+RestartSec=3
+# The runner must reach the model providers; the AGENT process is the one with no network
+# (bos-agent-exec). NoNewPrivileges is deliberately absent: the runner uses sudo for that launcher.
+ProtectHome=read-only
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

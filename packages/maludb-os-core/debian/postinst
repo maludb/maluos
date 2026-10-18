@@ -1,0 +1,27 @@
+#!/bin/sh
+set -e
+case "$1" in
+    configure)
+        for u in bos-runner bos-agent; do
+            getent passwd $u >/dev/null || adduser --system --group --no-create-home --shell /usr/sbin/nologin $u
+        done
+        usermod -a -G bos-agent,adm,systemd-journal bos-runner
+        install -d -o www-data -g www-data -m 750 /var/www/storage
+        install -d -o bos-runner -g bos-agent -m 2770 /var/lib/business-os /var/lib/business-os/agents
+        install -d -m 755 /etc/business-os /srv/apps
+        install -d -o www-data -g www-data -m 755 /var/www/web/.next 2>/dev/null || true
+        chown -R www-data:www-data /var/www/web/.next
+        chmod 0440 /etc/sudoers.d/bos-runner && visudo -cf /etc/sudoers.d/bos-runner >/dev/null
+        chmod 0755 /usr/sbin/bos-agent-exec
+        # PHP limits for the Documents uploads, for whichever PHP Apache runs
+        phpv=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || true)
+        if [ -n "$phpv" ] && [ -d "/etc/php/$phpv/apache2/conf.d" ]; then
+            install -m 644 /usr/share/maludb-os-core/php-99-business-os.ini "/etc/php/$phpv/apache2/conf.d/99-business-os.ini"
+        fi
+        # Apache: the localhost-only PHP API port and the modules the vhost needs
+        grep -q '^Listen 127.0.0.1:8080' /etc/apache2/ports.conf || echo 'Listen 127.0.0.1:8080' >> /etc/apache2/ports.conf
+        a2enmod -q proxy proxy_http rewrite headers >/dev/null 2>&1 || true
+        ;;
+esac
+#DEBHELPER#
+exit 0

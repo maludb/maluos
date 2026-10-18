@@ -30,7 +30,7 @@ repository is the distribution layer.
 | 4 | First boot: maludb database, tenant, admin principal, listener role + token, operator logins; configured by /etc/maluos/firstboot.yaml (cloud-init writable); maluctl | done 2026-10-17, boot test PASS (see phase4-firstboot.md) |
 | 5 | CI: packages on every push/PR; rootfs + qcow2 built in a container and boot-tested on BIOS and UEFI under KVM on GitHub runners; ISO on demand | done 2026-10-17, both workflows green |
 | 6 | Inference gateway: scheduled GPU access, local-to-cloud routing, OS-held credentials per user/agent, usage ledger | requirements drafted 2026-10-17 (phase6-inference-gateway.md) |
-| 7 | Components (snap-like selection, Route B native packages): maludb-api done 2026-10-17; Business OS kernel + applications next; ISO catalogue layers and maluctl selector (docs/components.md) | in progress |
+| 7 | Components (snap-like selection, Route B native packages): maludb-api done 2026-10-17, Business OS kernel done 2026-10-18 (boot test PASS); applications next; ISO catalogue layers and maluctl selector (docs/components.md) | in progress |
 | 8+ | Further agent-native features (sandboxing, journal to memory) and the desktop variant (after Phase 6 slices 1-2) | |
 
 ### Phase 6+ candidates

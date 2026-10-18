@@ -1,0 +1,16 @@
+[
+ {"lookup": {"app": "SELECT id FROM applications WHERE name = 'SMOKE 0925-233732 Scoped Reservations' AND status = 'active'",
+             "scope": "SELECT s.id FROM application_scopes s JOIN locations l ON l.id = s.location_id WHERE s.application_id = 40 AND l.name = 'SMOKE 0925-233732 Downtown' AND s.removed_at IS NULL",
+             "who": "SELECT id FROM members WHERE display_name = 'Priya Raman'"}},
+ {"tool": "application_access_grant", "args": {"application": "{{app}}", "member": "{{who}}", "scope": "{{scope}}", "roles": "user,manager", "note": "SMOKE {{run}}"},
+  "save": {"grant": "record_id"}},
+ {"lookup": {"two": "SELECT 'yes' FROM application_access ac WHERE ac.id = {{grant}} AND ac.role_key = 'manager' AND ac.capability = 'write' AND (SELECT count(*) FROM application_access_roles WHERE application_access_id = ac.id) = 2"}},
+ {"shell": "php -r 'require \"app/bootstrap.php\"; require \"app/features/applications/sso.php\"; $h = sso_member_holding(db(), {{app}}, {{who}}); foreach ($h[\"scopes\"] as $s) if ($s[\"scope_id\"] === {{scope}}) { echo implode(\",\", $s[\"roles\"]), \"\\n\"; exit(0); } exit(1);'", "as": "www-data", "save": "held"},
+ {"lookup": {"both_held": "SELECT 'yes' WHERE '{{held}}' = 'manager,user' OR '{{held}}' = 'user,manager'"}},
+ {"tool": "application_access_grant", "args": {"application": "{{app}}", "member": "{{who}}", "scope": "{{scope}}", "roles": "nope"}, "expect": "error"},
+ {"tool": "application_access_change", "args": {"application": "{{app}}", "application_access": "{{grant}}", "roles": "admin"},
+  "save": {"changed": "record_id"}},
+ {"lookup": {"admin_now": "SELECT 'yes' FROM application_access ac WHERE ac.id = {{changed}} AND ac.revoked_at IS NULL AND ac.role_key = 'admin' AND ac.capability = 'admin' AND (SELECT array_agg(role_key) FROM application_access_roles WHERE application_access_id = ac.id) = ARRAY['admin']"}},
+ {"tool": "application_access_revoke", "args": {"application": "{{app}}", "application_access": "{{changed}}", "confirmed": true}},
+ {"lookup": {"gone": "SELECT 'yes' WHERE NOT EXISTS (SELECT 1 FROM application_access WHERE application_id = {{app}} AND member_id = {{who}} AND scope_id = {{scope}} AND revoked_at IS NULL)"}}
+]

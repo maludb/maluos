@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bos-conformance-plugins"
+version = "0.1.0"
+description = "Logging-only Hermes plugins used by the Business OS conformance suite"
+requires-python = ">=3.11"
+
+# Hermes 0.21.3: a GENERAL plugin entry point must name the MODULE that holds register(ctx) —
+# "pkg.mod:register" loads as "has no register() function". A memory provider accepts either form.
+# The same two entry-point groups the real packages will use: maludb-hermes publishes the memory
+# provider, bos_hermes publishes the observer plugin.
+[project.entry-points."hermes_agent.memory_providers"]
+bos-conformance-memory = "bos_conformance_plugins.memory:register"
+
+[project.entry-points."hermes_agent.plugins"]
+bos-conformance-observer = "bos_conformance_plugins.observer"
+
+[tool.setuptools.packages.find]
+include = ["bos_conformance_plugins*"]

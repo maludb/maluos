@@ -1,0 +1,4 @@
+# maluos-business-os: the MaluDB Business OS kernel (estate, people, agent workforce, SSO, directory API).
+maluos-base
+maluos-api
+maludb-os-core

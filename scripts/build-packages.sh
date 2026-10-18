@@ -15,6 +15,16 @@ test -s "$ROOT/packages/maluos-keyring/keys/maluos-archive-keyring.asc" \
 
 for pkg in "$ROOT"/packages/*/; do
     name=$(basename "$pkg")
+    if [ "${SKIP_BUILT:-0}" = 1 ]; then
+        ver=$(head -1 "$pkg/debian/changelog" | sed -E 's/.*\(([^)]+)\).*/\1/')
+        built=0
+        for d in "$BUILD"/*_"${ver}"_*.deb; do
+            [ -f "$d" ] || continue
+            src=$(dpkg-deb -f "$d" Source 2>/dev/null | cut -d' ' -f1); bin=$(dpkg-deb -f "$d" Package 2>/dev/null)
+            if [ "$src" = "$name" ] || { [ -z "$src" ] && [ "$bin" = "$name" ]; }; then built=1; break; fi
+        done
+        if [ $built = 1 ]; then echo "== $name $ver already built, skipping (SKIP_BUILT=1)"; continue; fi
+    fi
     echo "== building $name"
     ( cd "$pkg" && dpkg-buildpackage -us -uc -b >"$BUILD/$name.build.log" 2>&1 ) \
         || { tail -40 "$BUILD/$name.build.log"; exit 1; }

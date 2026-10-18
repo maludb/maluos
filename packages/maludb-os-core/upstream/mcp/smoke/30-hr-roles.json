@@ -1,0 +1,95 @@
+[
+ {
+  "tool": "application_roles_refresh",
+  "args": {
+   "application": "39"
+  }
+ },
+ {
+  "lookup": {
+   "four": "SELECT 'yes' WHERE (SELECT count(*) FROM application_roles WHERE application_id = 39 AND withdrawn_at IS NULL) = 4 AND EXISTS (SELECT 1 FROM application_roles WHERE application_id = 39 AND role_key = 'payroll' AND rights @> '[{\"key\": \"pay.write\"}]') AND (SELECT roles_synced_at FROM applications WHERE id = 39) > now() - interval '1 minute'",
+   "who": "SELECT id FROM members WHERE display_name = 'Priya Raman'",
+   "free": "SELECT 'yes' WHERE NOT EXISTS (SELECT 1 FROM application_access WHERE application_id = 39 AND member_id = 26 AND revoked_at IS NULL)"
+  }
+ },
+ {
+  "tool": "application_access_grant",
+  "args": {
+   "application": "39",
+   "member": "{{who}}",
+   "roles": "payroll",
+   "note": "SMOKE {{run}}"
+  },
+  "save": {
+   "grant": "record_id"
+  }
+ },
+ {
+  "shell": "php -r 'require \"app/bootstrap.php\"; require \"app/features/applications/sso.php\"; $h = sso_member_holding(db(), 39, {{who}}); echo implode(\",\", $h[\"roles\"]), \"|\", in_array(\"pay.write\", $h[\"rights\"], true) ? \"pay.write\" : \"-\", \"\\n\";'",
+  "as": "www-data",
+  "save": "claims"
+ },
+ {
+  "lookup": {
+   "claims_ok": "SELECT 'yes' WHERE '{{claims}}' = 'payroll|pay.write'"
+  }
+ },
+ {
+  "shell": "php /srv/apps/hr/bin/directory_sync.php",
+  "as": "www-data"
+ },
+ {
+  "shell": "sudo -n -u postgres psql -d subello_hr -Atc \"SELECT roles::text || '|' || capability || '|' || (SELECT hr_can_run_pay()::text || ',' || hr_is_staff()::text || ',' || hr_can_see_pay(1)::text FROM (SELECT set_config('app.member_id', '{{who}}', false)) x) FROM members WHERE id = {{who}}\"",
+  "save": "hr_payroll"
+ },
+ {
+  "lookup": {
+   "hr_payroll_ok": "SELECT 'yes' WHERE '{{hr_payroll}}' = '{payroll}|write|true,false,true'"
+  }
+ },
+ {
+  "tool": "application_access_change",
+  "args": {
+   "application": "39",
+   "application_access": "{{grant}}",
+   "roles": "employee"
+  },
+  "save": {
+   "changed": "record_id"
+  }
+ },
+ {
+  "shell": "php /srv/apps/hr/bin/directory_sync.php",
+  "as": "www-data"
+ },
+ {
+  "shell": "sudo -n -u postgres psql -d subello_hr -Atc \"SELECT roles::text || '|' || capability || '|' || (SELECT hr_can_run_pay()::text || ',' || hr_can_see_pay(1)::text FROM (SELECT set_config('app.member_id', '{{who}}', false)) x) FROM members WHERE id = {{who}}\"",
+  "save": "hr_employee"
+ },
+ {
+  "lookup": {
+   "hr_employee_ok": "SELECT 'yes' WHERE '{{hr_employee}}' = '{employee}|read|false,false'"
+  }
+ },
+ {
+  "tool": "application_access_revoke",
+  "args": {
+   "application": "39",
+   "application_access": "{{changed}}",
+   "confirmed": true
+  }
+ },
+ {
+  "shell": "php /srv/apps/hr/bin/directory_sync.php",
+  "as": "www-data"
+ },
+ {
+  "shell": "sudo -n -u postgres psql -d subello_hr -Atc \"SELECT roles::text || '|' || coalesce(capability, 'none') FROM members WHERE id = {{who}}\"",
+  "save": "hr_gone"
+ },
+ {
+  "lookup": {
+   "hr_gone_ok": "SELECT 'yes' WHERE '{{hr_gone}}' = '{}|none'"
+  }
+ }
+]

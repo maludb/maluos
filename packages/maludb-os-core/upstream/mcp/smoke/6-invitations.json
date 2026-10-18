@@ -1,0 +1,12 @@
+[
+ {"tool":"invitation_send","args":{"email":"smoke-{{code}}@example.invalid","business_role":"dept_admin","department":"Accounting","message":"SMOKE {{run}} — created by the action smoke."}},
+ {"tool":"invitation_send","expect":"error","args":{"email":"smoke-{{code}}@example.invalid","business_role":"user"}},
+ {"tool":"invitation_send","expect":"error","args":{"email":"not-an-address","business_role":"user"}},
+ {"tool":"invitation_send","expect":"error","args":{"email":"smoke-x{{code}}@example.invalid","business_role":"dept_admin"}},
+ {"lookup":{"inv":"SELECT id FROM invitations WHERE email = 'smoke-{{code}}@example.invalid' AND revoked_at IS NULL AND accepted_at IS NULL"}},
+ {"lookup":{"inv_check":"SELECT business_role_granted || ' | dept=' || coalesce(department_id::text,'-') || ' | legacy role=' || role_granted FROM invitations WHERE id = {{inv}}"}},
+ {"tool":"invitation_resend","args":{"invitation":"{{inv}}"}},
+ {"tool":"invitation_revoke","expect":"needs_confirmation","args":{"invitation":"{{inv}}"}},
+ {"tool":"invitation_revoke","args":{"invitation":"{{inv}}","confirmed":true}},
+ {"tool":"invitation_resend","expect":"error","args":{"invitation":"{{inv}}"}}
+]

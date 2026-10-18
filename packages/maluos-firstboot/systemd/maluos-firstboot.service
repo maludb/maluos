@@ -10,7 +10,7 @@ Before=cloud-final.service
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=/usr/lib/maluos/firstboot
-TimeoutStartSec=15min
+TimeoutStartSec=2h
 StandardOutput=journal+console
 StandardError=journal+console
 

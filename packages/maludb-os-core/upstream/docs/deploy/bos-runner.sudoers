@@ -1,0 +1,4 @@
+# /etc/sudoers.d/bos-runner — the agent runner may start a sandboxed agent process, and nothing else.
+# No SETENV: the per-run credentials go to the launcher on stdin, because sudo logs a preserved
+# environment to the journal.
+bos-runner ALL=(root) NOPASSWD: /usr/local/sbin/bos-agent-exec

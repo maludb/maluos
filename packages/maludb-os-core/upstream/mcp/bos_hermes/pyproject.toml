@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bos-hermes"
+version = "0.1.0"
+description = "Business OS observer plugin for Hermes Agent: reports a run's live steps to the agent runner"
+requires-python = ">=3.11"
+
+# H0: a GENERAL plugin's entry point names the MODULE holding register(ctx), not "module:register".
+[project.entry-points."hermes_agent.plugins"]
+bos-hermes = "bos_hermes.observer"
+
+[tool.setuptools.packages.find]
+include = ["bos_hermes*"]

@@ -12,7 +12,8 @@ apt-get update -q
 apt-get install -y -q --no-install-recommends \
     build-essential devscripts debhelper dh-python lintian dpkg-dev gnupg python3 python3-yaml ca-certificates curl \
     mmdebstrap squashfs-tools xorriso qemu-utils dosfstools gdisk rsync fdisk e2fsprogs \
-    util-linux mount grub-common >/dev/null
+    util-linux mount grub-common \
+    composer php-cli php-pgsql nodejs npm python3-venv python3-pip >/dev/null
 export PATH=/usr/sbin:/sbin:$PATH
 
 if [ "$STEP" = packages ] || [ "$STEP" = all ] || [ "$STEP" = images ]; then

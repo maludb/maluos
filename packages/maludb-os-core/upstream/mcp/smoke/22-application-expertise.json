@@ -1,0 +1,76 @@
+[
+ {
+  "tool": "application_save",
+  "args": {
+   "name": "SMOKE {{run}} Expertise App",
+   "app_key": "smokex{{code}}",
+   "category": "other",
+   "description": "Smoke application for the expert and application skills",
+   "business_area_id": "3"
+  }
+ },
+ {
+  "lookup": {
+   "app": "SELECT id FROM applications WHERE name = 'SMOKE {{run}} Expertise App' AND business_area_id = 3",
+   "expert": "SELECT member_id FROM agent_profiles WHERE status = 'active' ORDER BY member_id LIMIT 1"
+  }
+ },
+ {
+  "tool": "application_sme_set",
+  "args": {
+   "application": "{{app}}",
+   "agent": "{{expert}}"
+  }
+ },
+ {
+  "lookup": {
+   "sme_ok": "SELECT 'yes' FROM applications WHERE id = {{app}} AND sme_agent_member_id = {{expert}}",
+   "reaches": "SELECT 'yes' WHERE {{app}} = ANY (app_agent_skill_application_ids({{expert}})) AND NOT ({{app}} = ANY (app_member_application_ids({{expert}})))"
+  }
+ },
+ {
+  "tool": "skill_assign",
+  "args": {
+   "skill_name": "file-a-vendor-bill",
+   "scope_kind": "application",
+   "application": "{{app}}"
+  }
+ },
+ {
+  "lookup": {
+   "assignment": "SELECT id FROM skill_assignments WHERE application_id = {{app}} AND revoked_at IS NULL"
+  }
+ },
+ {
+  "tool": "skill_assign",
+  "expect": "error",
+  "args": {
+   "skill_name": "file-a-vendor-bill",
+   "scope_kind": "application",
+   "application": "{{app}}"
+  }
+ },
+ {
+  "tool": "skill_unassign",
+  "args": {
+   "skill_assignment": "{{assignment}}",
+   "confirmed": true
+  }
+ },
+ {
+  "tool": "application_set_status",
+  "args": {
+   "application": "{{app}}",
+   "status": "retired",
+   "confirmed": true
+  }
+ },
+ {
+  "tool": "application_sme_set",
+  "expect": "error",
+  "args": {
+   "application": "{{app}}",
+   "agent": "{{expert}}"
+  }
+ }
+]

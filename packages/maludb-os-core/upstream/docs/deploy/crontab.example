@@ -1,0 +1,18 @@
+# Business OS kernel — scheduled jobs. Install for the app user:
+#   crontab -u www-data /var/www/docs/deploy/crontab.example
+# (or run as any user that can read /var/www/config/.env). Uses the system php CLI.
+# Each job is idempotent, so overlapping runs never double-send.
+#
+# The kernel cut of 2026-09-22 (db/133) removed the jobs of the business modules — recurring
+# expenses, posting to the books, annual leave, report schedules — and the cert-study reminders.
+# Agents' duties are not cron: the agent runner's scheduler fires them.
+
+# Invitation-expiry report — daily at 08:10
+10 8 * * *   php /var/www/bin/cron/invite_expiry.php         >> /var/log/maludb-os-cron.log 2>&1
+
+# Outbound-email flush — every 5 minutes
+*/5 * * * *  php /var/www/bin/cron/notification_email_flush.php >> /var/log/maludb-os-cron.log 2>&1
+
+# Approval expiry — every 10 minutes: a request nobody decided in time expires, and the run that
+# waited on it is released (the screens sweep too; this covers the hours nobody looks)
+*/10 * * * * php /var/www/bin/cron/approvals_expire.php   >> /var/log/maludb-os-cron.log 2>&1

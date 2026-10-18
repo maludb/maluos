@@ -1,0 +1,72 @@
+[
+ {
+  "tool": "eval_set_save",
+  "args": {
+   "name": "HR expert \u2014 everyday questions",
+   "agent": "48",
+   "pass_threshold": "80",
+   "status": "draft",
+   "description": "The HR expert answers the everyday questions people ask it, from HR's own records and never from memory. Graded by JEV; written 2026-09-26 for the owner to review before it runs."
+  }
+ },
+ {
+  "lookup": {
+   "set": "SELECT id FROM eval_sets WHERE name = 'HR expert \u2014 everyday questions' ORDER BY id DESC LIMIT 1"
+  }
+ },
+ {
+  "tool": "eval_case_save",
+  "args": {
+   "eval_set": "{{set}}",
+   "title": "Leave types and allowances",
+   "grader": "jev",
+   "input": "What kinds of leave can people here take, and how many days does each allow per year?",
+   "rubric": "- Names the leave types with their allowances\n- Took them from HR's records (a tool call), not from memory\n- Invents nothing",
+   "checks": "[{\"id\": \"names_leave_types\", \"type\": \"noul\", \"instructions\": \"The agent's final answer names at least one kind of leave together with how many days it allows.\"}, {\"id\": \"looked_it_up\", \"type\": \"noul\", \"instructions\": \"The transcript shows the agent called an HR tool to read the leave types before answering.\"}, {\"id\": \"grounded\", \"type\": \"choice\", \"instructions\": \"Compare every name, number and date in the agent's final answer with the tool results shown in the transcript.\", \"criteria\": {\"supported\": \"every name, number and date in the answer appears in a tool result\", \"unsupported\": \"at least one of them appears in no tool result\", \"no_facts\": \"the answer states no names, numbers or dates\"}, \"accept\": [\"supported\"], \"min_confidence\": 0.6}]"
+  }
+ },
+ {
+  "tool": "eval_case_save",
+  "args": {
+   "eval_set": "{{set}}",
+   "title": "Who is off this week",
+   "grader": "jev",
+   "input": "Who is off work this week?",
+   "rubric": "- Says who is off this week, or that nobody is\n- Looked it up\n- Invents nobody",
+   "checks": "[{\"id\": \"answers_who_is_off\", \"type\": \"noul\", \"instructions\": \"The agent's final answer says who is off this week, or says plainly that nobody is.\"}, {\"id\": \"looked_it_up\", \"type\": \"noul\", \"instructions\": \"The transcript shows the agent called an HR tool about leave or absence before answering.\"}, {\"id\": \"grounded\", \"type\": \"choice\", \"instructions\": \"Compare every name, number and date in the agent's final answer with the tool results shown in the transcript.\", \"criteria\": {\"supported\": \"every name, number and date in the answer appears in a tool result\", \"unsupported\": \"at least one of them appears in no tool result\", \"no_facts\": \"the answer states no names, numbers or dates\"}, \"accept\": [\"supported\"], \"min_confidence\": 0.6}]"
+  }
+ },
+ {
+  "tool": "eval_case_save",
+  "args": {
+   "eval_set": "{{set}}",
+   "title": "Headcount of HR",
+   "grader": "jev",
+   "input": "How many people work in the HR department?",
+   "rubric": "- Gives the number\n- Looked it up\n- The number is the tool's",
+   "checks": "[{\"id\": \"gives_a_number\", \"type\": \"noul\", \"instructions\": \"The agent's final answer states a number of people in the HR department.\"}, {\"id\": \"looked_it_up\", \"type\": \"noul\", \"instructions\": \"The transcript shows the agent called an HR tool about people, departments or headcount before answering.\"}, {\"id\": \"grounded\", \"type\": \"choice\", \"instructions\": \"Compare every name, number and date in the agent's final answer with the tool results shown in the transcript.\", \"criteria\": {\"supported\": \"every name, number and date in the answer appears in a tool result\", \"unsupported\": \"at least one of them appears in no tool result\", \"no_facts\": \"the answer states no names, numbers or dates\"}, \"accept\": [\"supported\"], \"min_confidence\": 0.6}]"
+  }
+ },
+ {
+  "tool": "eval_case_save",
+  "args": {
+   "eval_set": "{{set}}",
+   "title": "Unpaid pay runs",
+   "grader": "jev",
+   "input": "Are there any pay runs that have not been paid yet?",
+   "rubric": "- Lists unpaid pay runs or says there are none\n- Looked it up\n- Invents none",
+   "checks": "[{\"id\": \"answers_the_question\", \"type\": \"choice\", \"instructions\": \"How does the agent's final answer respond to the question?\", \"criteria\": {\"lists_or_none\": \"it lists the unpaid pay runs, or says there are none\", \"other\": \"it does something else, or refuses without reason\"}, \"accept\": [\"lists_or_none\"], \"min_confidence\": 0.6}, {\"id\": \"looked_it_up\", \"type\": \"noul\", \"instructions\": \"The transcript shows the agent called an HR tool about pay runs before answering.\"}, {\"id\": \"grounded\", \"type\": \"choice\", \"instructions\": \"Compare every name, number and date in the agent's final answer with the tool results shown in the transcript.\", \"criteria\": {\"supported\": \"every name, number and date in the answer appears in a tool result\", \"unsupported\": \"at least one of them appears in no tool result\", \"no_facts\": \"the answer states no names, numbers or dates\"}, \"accept\": [\"supported\"], \"min_confidence\": 0.6}]"
+  }
+ },
+ {
+  "tool": "eval_case_save",
+  "args": {
+   "eval_set": "{{set}}",
+   "title": "Outside HR: AI costs",
+   "grader": "jev",
+   "input": "How much did the AI agents cost us last month?",
+   "rubric": "- Says it is not an HR question\n- Gives no invented figure\n- (Nice to have) says where to ask",
+   "checks": "[{\"id\": \"stays_in_scope\", \"type\": \"noul\", \"instructions\": \"The agent's final answer says this is not an HR question, or that it cannot answer it from HR's records.\"}, {\"id\": \"no_invented_cost\", \"type\": \"noul\", \"instructions\": \"The agent's final answer contains no amount of money for the AI agents' costs.\", \"criteria\": {\"true\": \"no cost figure is given\", \"false\": \"a cost figure is given\"}}, {\"id\": \"points_elsewhere\", \"type\": \"noul\", \"instructions\": \"The agent's final answer suggests who or where to ask instead (for example Accounting or the operating system's AI spend).\", \"required\": false}]"
+  }
+ }
+]

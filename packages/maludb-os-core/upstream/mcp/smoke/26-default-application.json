@@ -1,0 +1,13 @@
+[
+ {"tool": "application_save", "args": {"name": "SMOKE {{run}} Landing One", "app_key": "smokel{{code}}", "category": "other",
+   "url": "http://landing-one.invalid", "sso_path": "/sso"}},
+ {"lookup": {"app": "SELECT id FROM applications WHERE name = 'SMOKE {{run}} Landing One'"}},
+ {"tool": "application_set_status", "args": {"application": "{{app}}", "status": "active", "confirmed": true}},
+ {"tool": "application_access_grant", "args": {"application": "{{app}}", "member": "26", "capability": "read"}},
+ {"tool": "member_default_application_set", "args": {"member": "26", "application": "{{app}}"}},
+ {"lookup": {"set": "SELECT 'yes' FROM members WHERE id = 26 AND default_application_id = {{app}} AND default_scope_id IS NULL"}},
+ {"tool": "member_default_application_set", "expect": "error", "args": {"member": "26", "application": "39"}},
+ {"tool": "member_default_application_set", "expect": "error", "args": {"member": "48", "application": "{{app}}"}},
+ {"tool": "member_default_application_set", "expect": "error", "args": {"member": "26", "application": "{{app}}", "scope": "8"}},
+ {"lookup": {"logged": "SELECT 'yes' FROM activity_log WHERE action = 'member.default_application_set' AND entity_id = 26 AND (after->>'application_id')::bigint = {{app}}"}}
+]

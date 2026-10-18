@@ -1,0 +1,14 @@
+[
+ {"tool":"approval_policy_save","expect":"needs_confirmation","args":{"name":"SMOKE {{run}} policy","category":"other","action_pattern":"smoke_thing.send"}},
+ {"tool":"approval_policy_save","expect":"error","args":{"name":"SMOKE {{run}} bad","category":"other","action_pattern":"not a pattern","confirmed":true}},
+ {"tool":"approval_policy_save","expect":"error","args":{"name":"SMOKE {{run}} bad2","category":"other","action_pattern":"smoke_thing.send","applies_to":"department","confirmed":true}},
+ {"tool":"approval_policy_save","args":{"name":"SMOKE {{run}} policy","category":"money_out","action_pattern":"smoke_thing.pay","applies_to":"department","department":"Accounting","amount_threshold":"100","expires_after_hours":"24","confirmed":true}},
+ {"lookup":{"pol":"SELECT id FROM approval_policies WHERE name = 'SMOKE {{run}} policy'"}},
+ {"lookup":{"pol_check":"SELECT category || ' | ' || action_pattern || ' | ' || applies_to || ' dept=' || department_id || ' | ' || amount_threshold || ' ' || currency || ' | ' || expires_after_hours || 'h' FROM approval_policies WHERE id = {{pol}}"}},
+ {"tool":"approval_policy_save","args":{"policy":"{{pol}}","name":"SMOKE {{run}} policy","category":"money_out","action_pattern":"smoke_thing.*","applies_to":"agents","confirmed":true}},
+ {"lookup":{"pol_check2":"SELECT action_pattern || ' | ' || applies_to || ' | dept=' || coalesce(department_id::text,'-') || ' | amount=' || coalesce(amount_threshold::text,'-') FROM approval_policies WHERE id = {{pol}}"}},
+ {"tool":"approval_policy_set_active","args":{"policy":"{{pol}}","active":"0","confirmed":true}},
+ {"tool":"approval_policy_set_active","args":{"policy":"{{pol}}","active":"1","confirmed":true}},
+ {"tool":"approval_policy_delete","args":{"policy":"{{pol}}","confirmed":true}},
+ {"tool":"approval_policy_delete","expect":"error","args":{"policy":"{{pol}}","confirmed":true}}
+]

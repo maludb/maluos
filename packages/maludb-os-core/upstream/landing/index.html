@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Subello — the business operating system</title>
+<meta name="description" content="Subello runs your business applications and an AI agent workforce on your own server, with one sign-in for everyone.">
+<!--
+  The public landing page for the bare name and www. (the owner's request, 2026-09-22; rebuilt 2026-09-25).
+  Plain static HTML: no PHP, no React, nothing signed in, nothing loaded from another site.
+  Served by Apache's landing vhost; the React middleware serves the same file through web/public/landing.
+-->
+<style>
+  :root {
+    --ink: #1f2430; --muted: #5b6472; --line: #e3e6eb; --accent: #2f5aa8; --accent-ink: #fff;
+    --soft: #f6f7f9; --card: #fff; --hero: linear-gradient(160deg, #eef2fa 0%, #f6f7f9 60%);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink: #e6e9ef; --muted: #a2aab8; --line: #2c323d; --accent: #7aa2ec; --accent-ink: #10141b;
+      --soft: #12151b; --card: #1a1e26; --hero: linear-gradient(160deg, #1b2233 0%, #12151b 60%);
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--ink); background: var(--soft); }
+  a { color: var(--accent); }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 16px; }
+
+  header { border-bottom: 1px solid var(--line); background: var(--card); }
+  header .wrap { display: flex; align-items: center; justify-content: space-between; height: 60px; }
+  .brand { font-weight: 700; font-size: 20px; color: var(--ink); text-decoration: none; letter-spacing: -.01em; }
+  .brand span { color: var(--accent); }
+  nav a { margin-left: 20px; color: var(--muted); text-decoration: none; font-size: 15px; }
+  nav a:hover { color: var(--ink); }
+  nav a.btn { color: var(--accent-ink); }
+
+  .btn { display: inline-block; background: var(--accent); color: var(--accent-ink); padding: 10px 20px; border-radius: 8px; text-decoration: none; font-weight: 600; }
+  .btn:hover { filter: brightness(1.08); }
+  .btn.ghost { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+
+  .hero { background: var(--hero); padding: 72px 0 64px; }
+  .hero h1 { font-size: clamp(30px, 5vw, 46px); line-height: 1.15; margin: 0 0 16px; letter-spacing: -.02em; max-width: 760px; }
+  .hero p { font-size: 19px; color: var(--muted); margin: 0 0 28px; max-width: 640px; }
+  .hero .actions { display: flex; gap: 12px; flex-wrap: wrap; }
+
+  section { padding: 56px 0; }
+  section h2 { font-size: 26px; margin: 0 0 8px; letter-spacing: -.01em; }
+  section p.sub { color: var(--muted); margin: 0 0 28px; max-width: 640px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 22px; }
+  .card h3 { margin: 0 0 6px; font-size: 17px; }
+  .card p { margin: 0; color: var(--muted); font-size: 15px; }
+  .icon { width: 36px; height: 36px; border-radius: 8px; background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); display: grid; place-items: center; margin-bottom: 12px; }
+  .icon svg { width: 20px; height: 20px; }
+
+  ol.steps { list-style: none; padding: 0; margin: 0; counter-reset: step; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+  ol.steps li { counter-increment: step; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 22px; }
+  ol.steps li::before { content: counter(step); display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); font-weight: 700; font-size: 14px; margin-bottom: 10px; }
+  ol.steps strong { display: block; margin-bottom: 4px; }
+  ol.steps span { color: var(--muted); font-size: 15px; }
+
+  a.door { display: block; background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 12px; padding: 22px; color: inherit; text-decoration: none; }
+  a.door:hover { border-color: var(--accent); }
+  a.door .host { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; color: var(--accent); }
+  a.door p { margin: 8px 0 0; color: var(--muted); font-size: 15px; }
+
+  footer { border-top: 1px solid var(--line); padding: 28px 0 40px; color: var(--muted); font-size: 14px; }
+  footer .wrap { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+
+  @media (max-width: 560px) {
+    nav a:not(.btn) { display: none; }
+    .hero { padding: 48px 0 44px; }
+    section { padding: 40px 0; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <a class="brand" href="/">Sub<span>ello</span></a>
+    <nav>
+      <a href="#what">What it does</a>
+      <a href="#how">How it works</a>
+      <a class="btn" href="https://app.subello.com/">Sign in</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="hero">
+    <div class="wrap">
+      <h1>The operating system for your business, with an AI workforce built in.</h1>
+      <p>Subello runs your business applications and the AI agents that work in them on your own server. Everyone signs in once, and nothing leaves the server.</p>
+      <div class="actions">
+        <a class="btn" href="https://app.subello.com/">Sign in</a>
+        <a class="btn ghost" href="#how">See how it works</a>
+      </div>
+    </div>
+  </div>
+
+  <section id="what">
+    <div class="wrap">
+      <h2>What it does</h2>
+      <p class="sub">A small kernel that does a few things well, and applications you add when you need them.</p>
+      <div class="grid">
+        <div class="card">
+          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M9 9h6v6H9z"/></svg></div>
+          <h3>AI agents you hire</h3>
+          <p>Every application has an expert agent and every department a lead. You hire them, give them a role, and review their work.</p>
+        </div>
+        <div class="card">
+          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg></div>
+          <h3>One sign-in</h3>
+          <p>People sign in once and open the applications they have been granted. One directory for the whole business.</p>
+        </div>
+        <div class="card">
+          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/><path d="M9 12l2 2 4-4"/></svg></div>
+          <h3>Approvals and oversight</h3>
+          <p>Consequential actions wait for a person's approval. Every model call and every action is on the record.</p>
+        </div>
+        <div class="card">
+          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg></div>
+          <h3>Costs you can see</h3>
+          <p>AI usage is metered per agent and per application and closed into a monthly statement you can export.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="how">
+    <div class="wrap">
+      <h2>How it works</h2>
+      <p class="sub">Your installation is your own machine and your own database.</p>
+      <ol class="steps">
+        <li><strong>Install</strong><span>Subello installs on your server or ours. Each business gets its own machine and database.</span></li>
+        <li><strong>Set up</strong><span>Record your locations and departments, and add the people who work there.</span></li>
+        <li><strong>Add applications</strong><span>Add the applications you need, such as HR. Each one comes with its own expert agent.</span></li>
+        <li><strong>Get to work</strong><span>Your team signs in and your agents work alongside them, with a person approving what matters.</span></li>
+      </ol>
+    </div>
+  </section>
+
+  <section id="doors">
+    <div class="wrap">
+      <h2>Already a customer?</h2>
+      <p class="sub">Choose where you're going.</p>
+      <div class="grid">
+        <a class="door" href="https://app.subello.com/">
+          <h3>Applications</h3>
+          <span class="host">app.subello.com</span>
+          <p>Sign in and open the applications you work in.</p>
+        </a>
+        <a class="door" href="https://os.subello.com/">
+          <h3>Operating system</h3>
+          <span class="host">os.subello.com</span>
+          <p>Run the business: the estate, departments, people and AI agents. For administrators only.</p>
+        </a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>© <span id="year">2026</span> Subello</span>
+    <span><a href="https://app.subello.com/">Sign in</a></span>
+  </div>
+</footer>
+<script>document.getElementById("year").textContent = new Date().getFullYear();</script>
+</body>
+</html>

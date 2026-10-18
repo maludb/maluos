@@ -1,0 +1,14 @@
+maludb-os-core (2026.10.17maluos2) resolute; urgency=medium
+
+  * Drop the php-opcache dependency: Ubuntu 26.04 has no such package
+    (opcache ships with php8.5-common).
+
+ -- Edward Honour <ed@maludb.org>  Sat, 17 Oct 2026 23:19:27 +0000
+
+maludb-os-core (2026.10.17maluos1) resolute; urgency=medium
+
+  * Package the kernel at commit 43bb494 (after the MaluDB OS rename) for
+    MaluOS: PHP 8.5, Node 22, Python 3.14 venv, Apache vhosts, systemd units,
+    the runner sandbox, and the first-boot component.
+
+ -- Edward Honour <ed@maludb.org>  Sat, 17 Oct 2026 23:00:51 +0000

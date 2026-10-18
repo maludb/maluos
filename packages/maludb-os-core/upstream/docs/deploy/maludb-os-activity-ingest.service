@@ -1,0 +1,13 @@
+[Unit]
+Description=Business OS — activity_log → MaluDB episode ingestion (one shot; run by the timer)
+After=network.target postgresql.service maludb-api.service
+
+[Service]
+Type=oneshot
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/mcp
+ExecStart=/var/www/mcp/venv/bin/python /var/www/mcp/activity_ingest.py
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full

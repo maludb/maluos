@@ -1,0 +1,41 @@
+#!/usr/bin/make -f
+# Network is required at build time: Composer, npm and pip fetch dependencies.
+export DEB_BUILD_OPTIONS=nocheck
+export HOME=$(CURDIR)/debian/.home
+export npm_config_cache=$(CURDIR)/debian/.npm
+export COMPOSER_CACHE_DIR=$(CURDIR)/debian/.composer
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	mkdir -p debian/.home debian/.npm debian/.composer
+	# PHP dependencies
+	cd upstream && composer install --no-dev --no-interaction --no-progress --quiet
+	# Front end: build, then drop development dependencies
+	cd upstream/web && npm ci --no-fund --no-audit --loglevel=error && npm run build >/dev/null \
+	    && npm prune --omit=dev --no-fund --no-audit --loglevel=error && rm -rf .next/cache
+	# Python virtual environment for the MCP servers and the agent runner, relocated to /var/www/mcp/venv
+	rm -rf upstream/mcp/venv && python3 -m venv upstream/mcp/venv \
+	    && upstream/mcp/venv/bin/pip install --quiet --disable-pip-version-check -r upstream/mcp/requirements.txt \
+	    && find upstream/mcp/venv/bin -type f -exec sed -i "1s|^#!$(CURDIR)/upstream/mcp/venv/bin/python.*|#!/var/www/mcp/venv/bin/python3|" {} + \
+	    && sed -i "s|^command = .*|command = /usr/bin/python3 -m venv /var/www/mcp/venv|" upstream/mcp/venv/pyvenv.cfg \
+	    && find upstream/mcp/venv -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true
+	# The runner sandbox launcher lives in /usr/sbin on MaluOS; the sudoers line must agree
+	sed 's|/usr/local/sbin/bos-agent-exec|/usr/sbin/bos-agent-exec|' upstream/docs/deploy/bos-runner.sudoers > debian/bos-runner.sudoers
+
+override_dh_auto_clean:
+	rm -rf upstream/vendor upstream/web/node_modules upstream/web/.next upstream/mcp/venv debian/.home debian/.npm debian/.composer debian/bos-runner.sudoers
+	find upstream -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true
+
+override_dh_installsystemd:
+	dh_installsystemd --no-enable --no-start
+
+# the venv and node_modules carry their own binaries and symlinks; keep dh from touching them
+override_dh_strip_nondeterminism:
+override_dh_dwz:
+override_dh_strip:
+override_dh_shlibdeps:
+override_dh_usrlocal:
+override_dh_fixperms:
+	dh_fixperms -X/var/www/mcp/venv -X/var/www/web/node_modules
