@@ -1,3 +1,10 @@
+maluos-gateway (0.1.1) resolute; urgency=medium
+
+  * maluos_model_status: pin search_path to the tenant schema (the
+    listener's session does not see it).
+
+ -- Edward Honour <ed@maludb.org>  Sun, 18 Oct 2026 14:49:06 +0000
+
 maluos-gateway (0.1.0) resolute; urgency=medium
 
   * Initial release: gateway daemon (OpenAI + Ollama APIs, peer-credential

@@ -102,3 +102,5 @@ BEGIN
                                                              'stale', (now() - v_at) > interval '30 seconds'),
         'isError', false));
 END $$;
+-- The listener calls tools with its own pinned search_path: bind this function to the tenant schema.
+ALTER FUNCTION maluos_model_status(jsonb, jsonb) SET search_path FROM CURRENT;
