@@ -132,8 +132,11 @@ sudo -n test -f /var/lib/maluos-gateway/engine-inflight.json && echo "  ok   res
 ! sudo -n journalctl -u maluos-gateway --no-pager | grep -q 'internal error' && echo "  ok   no internal errors in the gateway journal" || { echo "  FAIL gateway internal errors"; sudo -n journalctl -u maluos-gateway --no-pager | grep 'internal error' | tail -3; fail=1; }
 sudo -n maluctl status | grep -q 'component:   maluos-gateway  ok' && echo "  ok   maluctl status shows the gateway component" || echo "  warn gateway component line missing from maluctl status"
 sudo -n systemctl stop maluos-mock-ollama 2>/dev/null
-# --- agents as system entities (maluos-agent)
+# --- agents as system entities (maluos-agent); the mock backend is started again for the demo agent
 dpkg-query -W -f='${Status}' maluos-agent 2>/dev/null | grep -q 'install ok installed' && echo "  ok   maluos-agent" || { echo "  FAIL maluos-agent"; fail=1; }
+sudo -n systemd-run --quiet --unit maluos-mock-ollama-2 -p User=nobody -p Environment=PYTHONPATH=/usr/lib/maluos /usr/bin/python3 -m maluos_gateway.mock_ollama --port 11999
+for i in $(seq 1 60); do curl -fsS --max-time 2 http://127.0.0.1:11999/api/tags >/dev/null 2>&1 && break; sleep 1; done
+for i in $(seq 1 30); do sudo -n maluctl gateway reload >/dev/null 2>&1; maluctl gateway status | grep -q 'backend:     mock  mock .* healthy' && break; sleep 2; done
 sudo -n maluctl agent create research --exec "/usr/bin/python3 /usr/lib/maluos/maluos-agent-demo.py" --scope org:read --tiers fast,standard --budget usd_per_day=1 --token --sandbox strict >/dev/null \
   && echo "  ok   maluctl agent create research" || { echo "  FAIL agent create"; sudo -n maluctl agent create research --exec /bin/true; fail=1; }
 getent passwd agent-research >/dev/null && echo "  ok   agent user exists" || { echo "  FAIL agent user"; fail=1; }
@@ -147,6 +150,7 @@ sudo -n maluctl gateway catalog | grep -q 'principal agent:research  class=agent
 sudo -n test -s /etc/maluos/agents/research.token && echo "  ok   gateway token delivered as a credential" || { echo "  FAIL agent token"; fail=1; }
 sudo -n maluctl agent show research | grep -q 'sandbox:     strict' && echo "  ok   strict sandbox drop-in" || { echo "  FAIL sandbox"; fail=1; }
 sudo -n maluctl agent remove research >/dev/null && ! systemctl is-active --quiet maluos-agent@research && sudo -n -u postgres psql -Atd maludb -c "set role maluos; set search_path to maluos, maludb_core, public; select enabled from maludb_principal where principal_ref='agent:research'" | grep -q f && echo "  ok   agent remove: unit stopped, principal disabled" || { echo "  FAIL agent remove"; fail=1; }
+sudo -n systemctl stop maluos-mock-ollama-2 2>/dev/null
 # --- MaluDB API component
 for p in maluos-api maludb-api; do dpkg-query -W -f='${Status}' $p 2>/dev/null | grep -q 'install ok installed' && echo "  ok   $p" || { echo "  FAIL $p"; fail=1; }; done
 systemctl is-active --quiet maludb-api && echo "  ok   maludb-api active" || { echo "  FAIL maludb-api: $(systemctl is-active maludb-api)"; sudo -n journalctl -u maludb-api --no-pager | tail -8; fail=1; }
