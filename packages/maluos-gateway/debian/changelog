@@ -1,3 +1,12 @@
+maluos-gateway (0.2.0) resolute; urgency=medium
+
+  * Slice 3: cloud backends (Anthropic, OpenAI, Ollama cloud) with per-
+    caller credentials from the vault, the routing ladder with skip
+    reasons, fallback on expected wait and failures, the sensitivity
+    gate, prices and budgets, service:engine principal.
+
+ -- Edward Honour <ed@maludb.org>  Sun, 18 Oct 2026 15:51:42 +0000
+
 maluos-gateway (0.1.1) resolute; urgency=medium
 
   * maluos_model_status: pin search_path to the tenant schema (the

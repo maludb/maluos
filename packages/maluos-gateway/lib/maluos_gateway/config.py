@@ -28,11 +28,30 @@ DEFAULTS = {
              "description": "engine maintenance, bulk jobs; waits"},
         ],
         "tiers": {
-            "fast": {"description": "small, quick", "local": ["llama3.2:3b", "qwen2.5:3b"]},
-            "standard": {"description": "general purpose", "local": ["llama3.1:8b", "qwen2.5:7b"]},
-            "strong": {"description": "largest the host can hold", "local": ["qwen2.5:14b", "llama3.1:8b"]},
-            "embed": {"description": "embeddings", "local": ["nomic-embed-text", "bge-m3"]},
+            "fast": {"description": "small, quick", "local": ["llama3.2:3b", "qwen2.5:3b"],
+                     "cloud": [["ollama-cloud", "gpt-oss:20b"], ["anthropic", "claude-haiku-4-5"], ["openai", "gpt-5-mini"]]},
+            "standard": {"description": "general purpose", "local": ["llama3.1:8b", "qwen2.5:7b"],
+                         "cloud": [["ollama-cloud", "gpt-oss:120b"], ["anthropic", "claude-sonnet-4-5"], ["openai", "gpt-5"]]},
+            "strong": {"description": "largest the host can hold, then the strongest cloud model", "local": ["qwen2.5:14b", "llama3.1:8b"],
+                       "cloud": [["ollama-cloud", "deepseek-v3.1:671b"], ["anthropic", "claude-opus-4-1"], ["openai", "gpt-5"]]},
+            "embed": {"description": "embeddings", "local": ["nomic-embed-text", "bge-m3"], "cloud": [["openai", "text-embedding-3-small"]]},
         },
+        # Cloud backends are seeded disabled: enable one with `maluctl gateway backend enable NAME`
+        # after storing its key in the vault (`sudo maluctl secret add system/anthropic ...`).
+        "cloud_backends": [
+            {"name": "ollama-cloud", "kind": "ollama_cloud", "endpoint": "https://ollama.com", "secret_ref": "ollama",
+             "models": ["gpt-oss:20b", "gpt-oss:120b", "deepseek-v3.1:671b", "qwen3-coder:480b"]},
+            {"name": "anthropic", "kind": "anthropic", "endpoint": "https://api.anthropic.com", "secret_ref": "anthropic",
+             "models": ["claude-haiku-4-5", "claude-sonnet-4-5", "claude-opus-4-1"]},
+            {"name": "openai", "kind": "openai", "endpoint": "https://api.openai.com", "secret_ref": "openai",
+             "models": ["gpt-5-mini", "gpt-5", "text-embedding-3-small"]},
+        ],
+        # Rough list prices per million tokens (USD) for estimates; operators correct them (maluctl gateway price set).
+        "prices": [
+            ["anthropic", "claude-haiku-4-5", 1, 5, 0.1], ["anthropic", "claude-sonnet-4-5", 3, 15, 0.3], ["anthropic", "claude-opus-4-1", 15, 75, 1.5],
+            ["openai", "gpt-5-mini", 0.25, 2, 0.025], ["openai", "gpt-5", 1.25, 10, 0.125], ["openai", "text-embedding-3-small", 0.02, 0, 0],
+            ["ollama-cloud", "*", 0, 0, 0],
+        ],
     },
 }
 

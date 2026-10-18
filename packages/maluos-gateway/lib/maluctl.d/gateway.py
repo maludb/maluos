@@ -3,13 +3,16 @@
   maluctl gateway status | queue | routes [--limit N] | backends | whoami
   maluctl gateway chat "PROMPT" [--model NAME] [--class C] [--stream]   quick test call
   maluctl gateway catalog                                tiers, aliases, classes, policies
-  maluctl gateway backend add NAME --kind ollama_local|mock --endpoint URL [--max-concurrent N] [--keep-alive 30m]
+  maluctl gateway backend add NAME --kind ollama_local|ollama_cloud|anthropic|openai|openai_compat|mock --endpoint URL
+                    [--secret REF] [--models a,b] [--max-concurrent N] [--keep-alive 30m]
+  maluctl gateway price set BACKEND MODEL --input USD/Mtok --output USD/Mtok [--cached USD/Mtok]  |  price list
   maluctl gateway backend enable|disable|rm NAME
   maluctl gateway tier add NAME [--description D]  |  tier rm NAME
   maluctl gateway alias set NAME --backend B --model M [--tier T] [--position N]
   maluctl gateway alias rm NAME [--backend B] [--model M]
   maluctl gateway class set NAME [--priority N] [--weight N] [--max-queue N] [--max-wait S|none] [--fallback-wait S|none]
   maluctl gateway policy set (--default | --principal REF | --scope S) [--class C] [--tiers a,b|all] [--backends a,b|all] [--cloud yes|no]
+                    [--egress public|internal|restricted|prohibited] [--ladder b1,b2|none] [--budget usd_per_day=5,usd_per_month=100|none]
   maluctl gateway policy rm (--principal REF | --scope S)
   maluctl gateway token issue --principal REF [--name N] [--expires 90d]   bearer token for the TCP listener
   maluctl gateway token list | revoke ID
@@ -121,6 +124,7 @@ def run(a):
         for b in st["backends"]:
             h = "healthy" if b["healthy"] else ("down: " + (b.get("error") or "?")) if b["healthy"] is False else "unchecked"
             print(f"backend:     {b['name']}  {b['kind']}  {b['endpoint']}  {h}" + (f"  v{b['version']}" if b.get("version") else "")
+                  + (f"  key: vault {b['secret_ref']}" if b.get("secret_ref") else "")
                   + (f"  loaded: {', '.join(m['name'] for m in b['loaded'])}" if b.get("loaded") else "") + ("" if b["enabled"] else "  (disabled)"))
         for name, s in st["schedulers"].items():
             print(f"scheduler:   {name}  capacity {s['capacity']}  resident {s['resident'] or '-'}  " +
@@ -141,7 +145,8 @@ def run(a):
             print(f"{ts}  {r['status']:6} {r['principal']:22} {r['requested']:14} {r['class']:11} {route}  "
                   f"{'wait ' + str(r.get('queue_wait_ms')) + 'ms ' if r.get('queue_wait_ms') is not None else ''}"
                   f"{'svc ' + str(r.get('service_ms')) + 'ms ' if r.get('service_ms') else ''}"
-                  f"{str(r.get('tokens_in')) + '/' + str(r.get('tokens_out')) + ' tok' if r.get('tokens_out') else ''} {r.get('reason') or ''}".rstrip())
+                  f"{str(r.get('tokens_in')) + '/' + str(r.get('tokens_out')) + ' tok ' if r.get('tokens_out') else ''}"
+                  f"{'$' + format(r['cost'], '.5f') + ' ' if r.get('cost') else ''}{'x' + str(r['attempts']) + ' ' if (r.get('attempts') or 1) > 1 else ''}{r.get('reason') or ''}".rstrip())
         return 0
     if cmd == "backends":
         for b in api("GET", "/v1/maluos/status")["backends"]:
@@ -181,20 +186,36 @@ def run(a):
         print("aliases:");  print(sql("SELECT '  ' || name || ' -> ' || backend || '/' || model || CASE WHEN enabled THEN '' ELSE ' (disabled)' END FROM maluos_alias WHERE tier IS NULL ORDER BY name") or "  (none)")
         print("classes:");  print(sql("SELECT '  ' || name || '  priority ' || priority || '  weight ' || weight || '  max_queue ' || max_queue || '  max_wait ' || coalesce(max_wait_s::text,'-') || '  fallback_wait ' || coalesce(fallback_wait_s::text,'never') FROM maluos_class ORDER BY priority") or "  (none)")
         print("backends:"); print(sql("SELECT '  ' || name || '  ' || kind || '  ' || endpoint || '  ' || capacity::text || CASE WHEN enabled THEN '' ELSE ' (disabled)' END FROM maluos_backend ORDER BY name") or "  (none)")
-        print("policies:"); print(sql("SELECT '  ' || subject_kind || CASE WHEN subject_ref='' THEN '' ELSE ' ' || subject_ref END || '  class=' || coalesce(default_class,'-') || '  tiers=' || coalesce(array_to_string(allowed_tiers, ','),'all') || '  backends=' || coalesce(array_to_string(allowed_backends, ','),'all') || '  cloud=' || cloud_allowed FROM maluos_policy ORDER BY subject_kind, subject_ref") or "  (none)")
+        print("policies:"); print(sql("SELECT '  ' || subject_kind || CASE WHEN subject_ref='' THEN '' ELSE ' ' || subject_ref END || '  class=' || coalesce(default_class,'-') || '  tiers=' || coalesce(array_to_string(allowed_tiers, ','),'all') || '  backends=' || coalesce(array_to_string(allowed_backends, ','),'all') || '  cloud=' || cloud_allowed || '  egress=' || coalesce(max_egress_sensitivity, '(default)') || '  budget=' || coalesce(budget::text, '-') FROM maluos_policy ORDER BY subject_kind, subject_ref") or "  (none)")
+        print("prices:");   print(sql("SELECT '  ' || backend || '/' || model || '  in ' || input_per_mtok || ' out ' || output_per_mtok || ' cached ' || cached_per_mtok || ' ' || currency || '/Mtok' FROM maluos_price ORDER BY 1") or "  (none)")
         return 0
     if cmd == "backend":
         sub, name = a.pop(0), a.pop(0)
         if sub == "add":
             kind = opt(a, "--kind", "ollama_local"); ep = opt(a, "--endpoint") or sys.exit("--endpoint required")
-            cap = json.dumps({"max_concurrent": int(opt(a, "--max-concurrent", 1))}); opts = json.dumps({"keep_alive": opt(a, "--keep-alive", "30m")})
-            sql(f"INSERT INTO maluos_backend (name, kind, endpoint, capacity, options) VALUES ({ql(name)}, {ql(kind)}, {ql(ep)}, {ql(cap)}::jsonb, {ql(opts)}::jsonb) "
-                f"ON CONFLICT (name) DO UPDATE SET kind=EXCLUDED.kind, endpoint=EXCLUDED.endpoint, capacity=EXCLUDED.capacity, options=EXCLUDED.options, enabled=true")
-            print(f"backend {name} -> {ep}"); api("POST", "/v1/maluos/reload"); return 0
+            cloud = kind in ("ollama_cloud", "anthropic", "openai", "openai_compat")
+            cap = json.dumps({"max_concurrent": int(opt(a, "--max-concurrent", 8 if cloud else 1))})
+            o = {"keep_alive": opt(a, "--keep-alive", "30m")} if not cloud else {}
+            models = opt(a, "--models")
+            if models:
+                o["models"] = [m.strip() for m in models.split(",") if m.strip()]
+            secret = opt(a, "--secret")
+            sql(f"INSERT INTO maluos_backend (name, kind, endpoint, secret_ref, capacity, options) VALUES ({ql(name)}, {ql(kind)}, {ql(ep)}, {ql(secret)}, {ql(cap)}::jsonb, {ql(json.dumps(o))}::jsonb) "
+                f"ON CONFLICT (name) DO UPDATE SET kind=EXCLUDED.kind, endpoint=EXCLUDED.endpoint, secret_ref=EXCLUDED.secret_ref, capacity=EXCLUDED.capacity, options=maluos_backend.options || EXCLUDED.options, enabled=true")
+            print(f"backend {name} ({kind}) -> {ep}" + (f"  key: vault {secret}" if secret else "")); api("POST", "/v1/maluos/reload"); return 0
         if sub in ("enable", "disable"):
             sql(f"UPDATE maluos_backend SET enabled={'true' if sub == 'enable' else 'false'} WHERE name={ql(name)}"); api("POST", "/v1/maluos/reload"); print(f"{name} {sub}d"); return 0
         if sub == "rm":
             sql(f"DELETE FROM maluos_backend WHERE name={ql(name)}"); api("POST", "/v1/maluos/reload"); print(f"removed {name}"); return 0
+    if cmd == "price":
+        sub = a.pop(0)
+        if sub == "list":
+            print(sql("SELECT backend || '/' || model || '  in ' || input_per_mtok || '  out ' || output_per_mtok || '  cached ' || cached_per_mtok || ' ' || currency || '/Mtok' FROM maluos_price ORDER BY 1") or "(none)"); return 0
+        if sub == "set":
+            b, m = a.pop(0), a.pop(0); i, o, c = opt(a, "--input", 0), opt(a, "--output", 0), opt(a, "--cached", 0)
+            sql(f"INSERT INTO maluos_price (backend, model, input_per_mtok, output_per_mtok, cached_per_mtok, currency) VALUES ({ql(b)}, {ql(m)}, {float(i)}, {float(o)}, {float(c)}, {ql(opt(a, '--currency', 'USD'))}) "
+                f"ON CONFLICT (backend, model) DO UPDATE SET input_per_mtok=EXCLUDED.input_per_mtok, output_per_mtok=EXCLUDED.output_per_mtok, cached_per_mtok=EXCLUDED.cached_per_mtok, currency=EXCLUDED.currency, updated_at=now()")
+            api("POST", "/v1/maluos/reload"); print(f"price {b}/{m}: in {i} out {o} cached {c} per Mtok"); return 0
     if cmd == "tier":
         sub, name = a.pop(0), a.pop(0)
         if sub == "add":
@@ -234,11 +255,22 @@ def run(a):
         if sub == "rm":
             sql(f"DELETE FROM maluos_policy WHERE subject_kind={ql(kind)} AND subject_ref={ql(ref)}"); api("POST", "/v1/maluos/reload"); print("removed"); return 0
         cls, tiers, backends, cloud = opt(a, "--class"), opt(a, "--tiers"), opt(a, "--backends"), opt(a, "--cloud")
+        egress, ladder, budget = opt(a, "--egress"), opt(a, "--ladder"), opt(a, "--budget")
         sets = []
         if cls is not None: sets.append(f"default_class={ql(None if cls == 'none' else cls)}")
         if tiers is not None: sets.append(f"allowed_tiers={arr(tiers)}")
         if backends is not None: sets.append(f"allowed_backends={arr(backends)}")
         if cloud is not None: sets.append(f"cloud_allowed={'true' if cloud in ('yes', 'true', '1') else 'false'}")
+        if egress is not None: sets.append(f"max_egress_sensitivity={ql(None if egress == 'none' else egress)}")
+        if ladder is not None: sets.append("ladder=" + ("NULL" if ladder == "none" else ql(json.dumps([x.strip() for x in ladder.split(',') if x.strip()])) + "::jsonb"))
+        if budget is not None:
+            if budget == "none":
+                sets.append("budget=NULL")
+            else:
+                bd = {}
+                for kv in budget.split(","):
+                    k, v = kv.split("=", 1); bd[k.strip()] = float(v)
+                sets.append(f"budget={ql(json.dumps(bd))}::jsonb")
         sql(f"INSERT INTO maluos_policy (subject_kind, subject_ref) VALUES ({ql(kind)}, {ql(ref)}) ON CONFLICT (subject_kind, subject_ref) DO NOTHING; "
             + (f"UPDATE maluos_policy SET {', '.join(sets)}, updated_at=now() WHERE subject_kind={ql(kind)} AND subject_ref={ql(ref)}" if sets else "SELECT 1"))
         api("POST", "/v1/maluos/reload"); print(f"policy {kind} {ref}: {', '.join(sets) or 'created'}"); return 0
@@ -276,10 +308,12 @@ def run(a):
         agg = {}
         for r in rows:
             k = r["ts"][:10] if by == "day" else (r.get("detail") or {}).get("class", "-") if by == "class" else (r.get(key[by]) or "-")
-            d = agg.setdefault(k, {by: k, "calls": 0, "ok": 0, "errors": 0, "denied": 0, "tokens_in": 0, "tokens_out": 0, "last": ""})
+            d = agg.setdefault(k, {by: k, "calls": 0, "ok": 0, "errors": 0, "denied": 0, "tokens_in": 0, "tokens_out": 0, "cost": 0.0, "last": ""})
             d["calls"] += 1; d["ok" if r["status"] == "ok" else "denied" if r["status"] == "denied" else "errors"] += 1
-            d["tokens_in"] += r.get("tokens_in") or 0; d["tokens_out"] += r.get("tokens_out") or 0; d["last"] = max(d["last"], r["ts"][:19])
-        table(sorted(agg.values(), key=lambda d: d["last"], reverse=True), [by, "calls", "ok", "errors", "denied", "tokens_in", "tokens_out", "last"])
+            d["tokens_in"] += r.get("tokens_in") or 0; d["tokens_out"] += r.get("tokens_out") or 0; d["cost"] += r.get("cost_actual") or 0; d["last"] = max(d["last"], r["ts"][:19])
+        for d in agg.values():
+            d["cost"] = f"{d['cost']:.4f}"
+        table(sorted(agg.values(), key=lambda d: d["last"], reverse=True), [by, "calls", "ok", "errors", "denied", "tokens_in", "tokens_out", "cost", "last"])
         print(f"({len(rows)} calls since {since}; --raw for the list)"); return 0
     if cmd == "ollama":
         sub = a.pop(0) if a else "status"

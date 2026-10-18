@@ -8,12 +8,13 @@ from psycopg.rows import dict_row
 
 
 class Catalog:
-    def __init__(self, backends, tiers, aliases, classes, policies):
+    def __init__(self, backends, tiers, aliases, classes, policies, prices=()):
         self.backends = {b["name"]: b for b in backends}
         self.tiers = {t["name"]: t for t in tiers}
         self.aliases = aliases
         self.classes = {c["name"]: c for c in classes}
         self.policies = policies
+        self.prices = {(p["backend"], p["model"]): p for p in prices}
         self.loaded_at = time.time()
 
     def default_class(self):
@@ -32,9 +33,11 @@ class Catalog:
         out = []
         for name, models in known_models.items():
             b = self.backends.get(name)
-            if b and b["enabled"] and b["kind"] in ("ollama_local", "mock") and (requested in models or requested + ":latest" in models):
+            if b and b["enabled"] and (requested in models or requested + ":latest" in models):
                 out.append((name, requested, "direct"))
-        return out
+        # local backends first, then cloud, as a stable default ladder for bare model names
+        cloud = ("anthropic", "openai", "openai_compat", "ollama_cloud")
+        return sorted(out, key=lambda c: (self.backends[c[0]]["kind"] in cloud, c[0]))
 
     def policy_for(self, principal_ref, scopes=()):
         merged = {"allowed_tiers": None, "allowed_backends": None, "cloud_allowed": True, "default_class": None,
@@ -109,7 +112,8 @@ class Database:
             await self.fetch("SELECT * FROM maluos_tier ORDER BY name"),
             await self.fetch("SELECT * FROM maluos_alias ORDER BY tier NULLS LAST, position, name"),
             await self.fetch("SELECT * FROM maluos_class ORDER BY priority"),
-            await self.fetch("SELECT * FROM maluos_policy"))
+            await self.fetch("SELECT * FROM maluos_policy"),
+            await self.fetch("SELECT * FROM maluos_price"))
 
     async def principal(self, ref):
         return await self.fetchone("SELECT principal_ref, principal_kind, home_scope, max_sensitivity, enabled FROM maludb_principal WHERE principal_ref=%s", (ref,))

@@ -39,13 +39,16 @@ class Caller:
 class Call:
     """One request through the gateway: who, what was asked, where it went."""
     __slots__ = ("id", "caller", "kind", "requested", "tier", "backend", "model", "reason", "cls", "route", "task", "hints",
-                 "job", "t0", "queued_ms", "endpoint", "stream", "engine_request_id")
+                 "job", "t0", "queued_ms", "endpoint", "stream", "engine_request_id", "rungs", "rung", "keys", "attempts",
+                 "cost_est", "currency", "warnings")
 
     def __init__(self, caller, kind, requested, hints, endpoint, stream):
         self.id = f"mg-{secrets.token_hex(6)}"
         self.caller, self.kind, self.requested, self.hints, self.endpoint, self.stream = caller, kind, requested, hints, endpoint, stream
         self.tier = self.backend = self.model = self.reason = self.cls = None
         self.route, self.task, self.job, self.t0, self.queued_ms, self.engine_request_id = [], hints.get("task"), None, time.monotonic(), None, None
+        self.rungs, self.rung, self.keys, self.attempts = [], None, {}, 0
+        self.cost_est, self.currency, self.warnings = None, None, []
 
 
 def process_ref(pid):
@@ -91,9 +94,12 @@ def openai_to_ollama_chat(body):
                         args = json.loads(args)
                     except Exception:
                         args = {"_raw": args}
-                om["tool_calls"].append({"function": {"name": fn.get("name"), "arguments": args or {}}})
-        if role == "tool" and m.get("name"):
-            om["tool_name"] = m["name"]
+                om["tool_calls"].append({"id": tc.get("id"), "function": {"name": fn.get("name"), "arguments": args or {}}})
+        if role == "tool":
+            if m.get("name"):
+                om["tool_name"] = m["name"]
+            if m.get("tool_call_id"):
+                om["tool_call_id"] = m["tool_call_id"]
         msgs.append(om)
     opts = {}
     for src, dst in (("temperature", "temperature"), ("top_p", "top_p"), ("seed", "seed"), ("presence_penalty", "presence_penalty"),
@@ -120,12 +126,21 @@ def openai_to_ollama_chat(body):
     return out
 
 
+def needs_of(body):
+    """What a request requires of a model, and rough token estimates for budgets."""
+    msgs = body.get("messages") or []
+    text = json.dumps(msgs) if msgs else (body.get("prompt") or "") + json.dumps(body.get("input") or "")
+    opts = body.get("options") or {}
+    return {"tools": bool(body.get("tools")), "vision": any(m.get("images") for m in msgs) or bool(body.get("images")),
+            "context": len(text) // 4, "tokens_in_est": len(text) // 4, "tokens_out_est": opts.get("num_predict") or 1024}
+
+
 def openai_tool_calls(tcs):
     out = []
     for tc in tcs or []:
         fn = tc.get("function") or {}
         args = fn.get("arguments", {})
-        out.append({"id": f"call_{secrets.token_hex(8)}", "type": "function",
+        out.append({"id": tc.get("id") or f"call_{secrets.token_hex(8)}", "type": "function",
                     "function": {"name": fn.get("name"), "arguments": args if isinstance(args, str) else json.dumps(args)}})
     return out
 
@@ -139,7 +154,10 @@ def finish_reason(res):
 def openai_usage(res):
     u = usage_from(res)
     pi, po = u["tokens_in"] or 0, u["tokens_out"] or 0
-    return {"prompt_tokens": pi, "completion_tokens": po, "total_tokens": pi + po}
+    out = {"prompt_tokens": pi, "completion_tokens": po, "total_tokens": pi + po}
+    if res.get("cached_tokens"):
+        out["prompt_tokens_details"] = {"cached_tokens": res["cached_tokens"]}
+    return out
 
 
 def sse(obj):
@@ -147,6 +165,10 @@ def sse(obj):
 
 
 # ---------------------------------------------------------------- the gateway
+SENS = {"public": 0, "internal": 1, "restricted": 2, "prohibited": 3}
+CLOUD_KINDS = ("anthropic", "openai", "openai_compat", "ollama_cloud")
+
+
 class Gateway:
     def __init__(self, cfg):
         self.cfg = cfg
@@ -154,7 +176,7 @@ class Gateway:
         self.catalog = None
         self.backends, self.schedulers = {}, {}
         self.session = None
-        self.principal_cache, self.token_cache = {}, {}
+        self.principal_cache, self.token_cache, self.spend_cache = {}, {}, {}
         self.routes = collections.deque(maxlen=200)
         self.started = time.time()
         self.tasks = []
@@ -175,7 +197,7 @@ class Gateway:
                 self.tasks.remove(task)
             if not task.cancelled() and task.exception():
                 e = task.exception()
-                log(f"task {coro.__name__ if hasattr(coro, '__name__') else coro} died: {e.__class__.__name__}: {str(e)[:200]}")
+                log(f"task {getattr(coro, '__name__', coro)} died: {e.__class__.__name__}: {str(e)[:200]}")
         t.add_done_callback(done)
         return t
 
@@ -192,21 +214,21 @@ class Gateway:
             log(f"catalogue load failed: {e.__class__.__name__}: {str(e)[:160]}")
             if initial or self.catalog is None:
                 from .db import Catalog
-                self.catalog = Catalog([], [], [], [], [])
+                self.catalog = Catalog([], [], [], [], [], [])
             return
+        from .cloud import make_backend
         aff, plimit = self.cfg.get("affinity"), self.cfg.get("principal_queue_limit")
         for name, row in cat.backends.items():
-            if row["kind"] not in ("ollama_local", "ollama_cloud", "mock"):
-                continue  # other kinds arrive in slice 3
-            if name in self.backends:
+            if name in self.backends and self.backends[name].kind == row["kind"]:
                 self.backends[name].update(row)
             else:
-                self.backends[name] = OllamaBackend(row, self.session)
+                self.backends[name] = make_backend(row, self.session)
                 self.spawn(self.backends[name].refresh())
             sch = self.schedulers.get(name)
+            cap = self.backends[name].max_concurrent if not self.backends[name].is_cloud else int((row.get("capacity") or {}).get("max_concurrent") or 8)
             if not sch:
-                sch = self.schedulers[name] = Scheduler(name, self.backends[name].max_concurrent, cat.classes, aff, plimit)
-            sch.configure(self.backends[name].max_concurrent, cat.classes, aff, plimit)
+                sch = self.schedulers[name] = Scheduler(name, cap, cat.classes, aff, plimit)
+            sch.configure(cap, cat.classes, aff, plimit)
         for name in list(self.backends):
             if name not in cat.backends:
                 del self.backends[name]; self.schedulers.pop(name, None)
@@ -313,19 +335,43 @@ class Gateway:
                 return conv(v)
             except Exception:
                 raise ApiError(400, "bad_hint", f"bad value for {key}: {v!r}")
+        flag = lambda v: str(v).lower() in ("1", "true", "yes")
         h["class"] = pick("X-MaluOS-Class", "class")
         h["max_wait"] = pick("X-MaluOS-Max-Wait", "max_wait", float)
         h["task"] = pick("X-MaluOS-Task", "task")
-        h["strict"] = pick("X-MaluOS-Strict", "strict", lambda v: str(v).lower() in ("1", "true", "yes"))
-        h["local_only"] = pick("X-MaluOS-Local-Only", "local_only", lambda v: str(v).lower() in ("1", "true", "yes"))
+        h["strict"] = pick("X-MaluOS-Strict", "strict", flag)
+        h["local_only"] = pick("X-MaluOS-Local-Only", "local_only", flag)
+        h["sensitivity"] = pick("X-MaluOS-Sensitivity", "sensitivity", lambda v: str(v).lower())
+        if h["sensitivity"] and h["sensitivity"] not in SENS:
+            raise ApiError(400, "bad_hint", f"sensitivity must be one of {', '.join(SENS)}")
+        h["prefer"] = pick("X-MaluOS-Prefer", "prefer", lambda v: str(v).lower())
         return h
 
     def known_models(self):
         return {name: set(b.models) for name, b in self.backends.items()}
 
-    async def prepare(self, caller, kind, requested, hints, endpoint, stream=False):
+    async def credential(self, backend, caller, call):
+        """(key, reason_if_none): the caller's own key first, then granted shared ones (FR-13), through the vault."""
+        ref = backend.secret_ref or {"anthropic": "anthropic", "openai": "openai", "openai_compat": backend.name, "ollama_cloud": "ollama"}.get(backend.kind, backend.name)
+        if not caller.enrolled:
+            return None, "not_enrolled"
+        try:
+            from maluos_vault_client import Vault, VaultError
+        except ImportError:
+            return None, "vault_unavailable"
+        v = Vault(self.cfg.get("vault_socket"), on_behalf_of=caller.ref)
+        try:
+            r = await asyncio.to_thread(v.use, ref, f"{call.id} {backend.name}")
+            return r["value"], None
+        except VaultError as e:
+            return None, {"no_secret": "no_credential", "forbidden": "no_credential", "use_requires_broker": "not_a_broker",
+                          "not_a_broker": "not_a_broker", "unavailable": "vault_unavailable", "locked": "credential_locked",
+                          "expired": "credential_expired"}.get(e.code, e.code)
+
+    async def prepare(self, caller, kind, requested, hints, endpoint, stream=False, needs=None):
         cat = self.catalog
         call = Call(caller, kind, requested, hints, endpoint, stream)
+        needs = needs or {}
         policy = cat.policy_for(caller.ref, caller.scopes)
         cls = hints.get("class") or policy.get("default_class") or ("agent" if caller.kind == "agent" and "agent" in cat.classes else None) or cat.default_class()
         if cls not in cat.classes and cat.classes:
@@ -339,30 +385,132 @@ class Gateway:
             await self.ledger_denied(call, "policy_tier", f"tier {call.tier} not allowed")
             raise ApiError(403, "policy", f"your policy does not allow tier {call.tier}")
         cands = cat.candidates(requested, self.known_models())
-        if policy["allowed_backends"] is not None:
-            allowed = [c for c in cands if c[0] in policy["allowed_backends"]]
-            if cands and not allowed:
-                await self.ledger_denied(call, "policy_backend", f"no allowed backend for {requested}")
-                raise ApiError(403, "policy", f"your policy does not allow any backend that serves {requested}")
-            cands = allowed
         if not cands:
             await self.ledger_denied(call, "model_not_found", f"no route for {requested}", status="error")
             names = sorted(set(list(cat.tiers) + [a["name"] for a in cat.aliases if a["tier"] is None]))
             raise ApiError(404, "model_not_found", f"model {requested!r} is not a tier, an alias or a model present on a local backend; known names: {', '.join(names[:12])}")
-        chosen = None
+        if policy.get("ladder"):
+            order = {n: i for i, n in enumerate(policy["ladder"])}
+            cands = sorted((c for c in cands if c[0] in order), key=lambda c: order[c[0]])
+        req_sens = hints.get("sensitivity") or "internal"
+        egress = policy.get("max_egress_sensitivity") or ("public" if caller.kind == "agent" else "internal")
+        cls_row = cat.classes.get(cls) or {}
+        rungs, keys = [], {}
         for backend, model, reason in cands:
             b = self.backends.get(backend)
-            ok = bool(b and b.enabled and b.healthy is not False)
-            call.route.append({"backend": backend, "model": model, "reason": reason, "taken": ok and chosen is None,
-                               **({} if ok else {"skipped": "unhealthy" if b else "unknown backend"})})
-            if ok and chosen is None:
-                chosen = (backend, model, reason)
-        if not chosen:
-            await self.ledger_denied(call, "backend_unavailable", f"no healthy backend for {requested}", status="error")
-            raise ApiError(503, "backend_unavailable", f"no healthy backend serves {requested} right now ({', '.join(c[0] for c in cands)})",
-                           backends={c[0]: self.backends[c[0]].last_error for c in cands if c[0] in self.backends})
-        call.backend, call.model, call.reason = chosen
+            e = {"backend": backend, "model": model, "reason": reason, "taken": False}
+            skip = None
+            if not b or not b.enabled:
+                skip = "disabled" if b else "unknown backend"
+            elif policy["allowed_backends"] is not None and backend not in policy["allowed_backends"]:
+                skip = "policy"
+            elif b.healthy is False:
+                skip = "unhealthy"
+            elif b.is_cloud:
+                if hints.get("local_only"):
+                    skip = "local_only"
+                elif not policy.get("cloud_allowed", True):
+                    skip = "cloud_not_allowed"
+                elif SENS[req_sens] > SENS.get(egress, 1):
+                    skip = f"sensitivity:{req_sens}>{egress}"
+                else:
+                    key, why = await self.credential(b, caller, call)
+                    if not key:
+                        skip = why or "no_credential"
+                    else:
+                        keys[backend] = key
+            else:
+                caps = b.capabilities(model)
+                if needs.get("tools") and caps.get("tools") is False:
+                    skip = "no_tools"
+                elif needs.get("vision") and caps.get("vision") is False:
+                    skip = "no_vision"
+                elif needs.get("context") and caps.get("context_length") and needs["context"] > caps["context_length"]:
+                    skip = "context_too_long"
+            if skip:
+                e["skipped"] = skip
+            rungs.append(e)
+        eligible = [r for r in rungs if "skipped" not in r]
+        cloud_ok = any(self.backends[r["backend"]].is_cloud for r in eligible)
+        if cloud_ok and any(not self.backends[r["backend"]].is_cloud for r in eligible):
+            fw = cls_row.get("fallback_wait_s")
+            if hints.get("prefer") == "cloud":
+                for r in eligible:
+                    if not self.backends[r["backend"]].is_cloud:
+                        r["skipped"] = "prefer_cloud"
+            elif fw is not None:
+                for r in eligible:
+                    if not self.backends[r["backend"]].is_cloud:
+                        ew = self.schedulers[r["backend"]].expected_wait(cls, r["model"])
+                        if ew > float(fw):
+                            r["skipped"] = f"wait_exceeds_fallback:{ew}s>{fw}s"
+            eligible = [r for r in rungs if "skipped" not in r]
+        if hints.get("prefer") == "local":
+            local = [r for r in eligible if not self.backends[r["backend"]].is_cloud]
+            if local:
+                for r in eligible:
+                    if self.backends[r["backend"]].is_cloud:
+                        r["skipped"] = "prefer_local"
+                eligible = local
+        call.route, call.keys = rungs, keys
+        if not eligible:
+            reasons = {r.get("skipped", "").split(":")[0] for r in rungs}
+            policy_only = reasons <= {"policy", "cloud_not_allowed", "sensitivity", "no_credential", "local_only", "not_enrolled", "credential_locked", "credential_expired", "disabled", "prefer_local"}
+            code = "policy" if policy_only else "backend_unavailable"
+            await self.ledger_denied(call, code, "no eligible rung", status="denied" if policy_only else "error")
+            raise ApiError(403 if policy_only else 503, code, f"no eligible backend for {requested}: " +
+                           "; ".join(f"{r['backend']}/{r['model']} {r.get('skipped')}" for r in rungs), route=rungs)
+        call.rungs = eligible
+        self.select(call, eligible[0])
+        await self.check_budget(call, policy, needs)
         return call
+
+    def select(self, call, rung):
+        call.backend, call.model, call.reason = rung["backend"], rung["model"], rung["reason"]
+        call.rung = rung
+
+    # -- budgets and prices (FR-21, FR-39)
+    def price(self, backend, model):
+        return self.catalog.prices.get((backend, model)) or self.catalog.prices.get((backend, "*"))
+
+    def cost(self, backend, model, tokens_in, tokens_out, cached=0):
+        p = self.price(backend, model)
+        if not p:
+            return None, None
+        ti, to, tc = (tokens_in or 0) - (cached or 0), tokens_out or 0, cached or 0
+        c = ti * float(p["input_per_mtok"] or 0) / 1e6 + to * float(p["output_per_mtok"] or 0) / 1e6 + tc * float(p["cached_per_mtok"] or 0) / 1e6
+        return round(c, 6), p.get("currency") or "USD"
+
+    async def spent(self, principal_ref, period):
+        key = (principal_ref, period)
+        ent = self.spend_cache.get(key)
+        if ent and ent[1] > time.time() - 10:
+            return ent[0]
+        row = await self.db.fetchone(f"SELECT coalesce(sum(cost_actual), 0) AS c FROM maluos_ledger WHERE principal_ref=%s AND event='model.call' AND ts >= date_trunc(%s, now())",
+                                     (principal_ref, period))
+        v = float(row["c"]) if row else 0.0
+        self.spend_cache[key] = (v, time.time())
+        return v
+
+    async def check_budget(self, call, policy, needs):
+        est_in, est_out = needs.get("tokens_in_est") or 0, needs.get("tokens_out_est") or 1024
+        call.cost_est, call.currency = self.cost(call.backend, call.model, est_in, est_out)
+        budget = policy.get("budget") or {}
+        if not budget or call.cost_est is None:
+            return
+        warn_at = float(budget.get("warn_at") or 0.8)
+        for key, period in (("usd_per_day", "day"), ("usd_per_month", "month")):
+            limit = budget.get(key)
+            if limit is None:
+                continue
+            spent = await self.spent(call.caller.ref, period)
+            if spent + call.cost_est > float(limit):
+                await self.ledger_denied(call, "budget_exceeded", f"{period}: spent {spent:.4f} + est {call.cost_est:.4f} > {limit}")
+                raise ApiError(403, "budget_exceeded", f"{period} budget of {limit} {call.currency} exhausted (spent {spent:.4f}, this call ~{call.cost_est:.4f})",
+                               period=period, spent=spent, limit=limit)
+            if spent + call.cost_est > warn_at * float(limit):
+                call.warnings.append(f"{period} budget {spent + call.cost_est:.4f}/{limit} {call.currency}")
+                log(f"budget warning for {call.caller.ref}: {call.warnings[-1]}")
 
     # -- admission and ledger
     async def admit(self, call):
@@ -374,7 +522,7 @@ class Gateway:
         except AdmissionError as e:
             await self.ledger_denied(call, e.code, e.message, expected_wait=e.expected_wait)
             raise ApiError(503, e.code, e.message, expected_wait_s=e.expected_wait, **{"class": call.cls}, retry_after_s=e.expected_wait)
-        call.queued_ms = int((time.monotonic() - t) * 1000)
+        call.queued_ms = (call.queued_ms or 0) + int((time.monotonic() - t) * 1000)
 
     def release(self, call, final=None, error=False):
         sch = self.schedulers.get(call.backend)
@@ -392,14 +540,14 @@ class Gateway:
     def base_row(self, call):
         c = call.caller
         return {"event": "model.call", "principal_ref": c.ref, "linux_user": c.linux_user, "linux_uid": c.uid, "process_ref": c.process_ref,
-                "class": call.cls, "tier": call.tier, "requested_model": call.requested, "route": call.route, "attempts": 1,
+                "class": call.cls, "tier": call.tier, "requested_model": call.requested, "route": call.route, "attempts": call.attempts,
                 "backend": call.backend, "model": call.model, "queue_wait_ms": call.queued_ms, "task_ref": call.task,
-                "purpose": call.endpoint}
+                "purpose": call.endpoint, "cost_est": call.cost_est, "currency": call.currency}
 
     async def ledger_denied(self, call, reason, message, status="denied", expected_wait=None):
         row = self.base_row(call)
         row.update({"status": status, "reason": reason, "error_class": reason,
-                    "detail": {"message": message[:200], "expected_wait_s": expected_wait, "via": call.caller.via}})
+                    "detail": {"message": message[:300], "expected_wait_s": expected_wait, "via": call.caller.via}})
         await self.ledger_write(row)
         self.routes.appendleft({"ts": time.time(), "id": call.id, "principal": call.caller.ref, "requested": call.requested,
                                 "class": call.cls, "route": call.route, "status": status, "reason": reason})
@@ -408,12 +556,17 @@ class Gateway:
         row = self.base_row(call)
         elapsed_ms = int((time.monotonic() - call.t0) * 1000) - (call.queued_ms or 0)
         detail = {"endpoint": call.endpoint, "stream": call.stream, "via": call.caller.via, "reason": call.reason}
+        if call.warnings:
+            detail["warnings"] = call.warnings
         if call.engine_request_id:
             detail["engine_request_id"] = call.engine_request_id
         if final:
             u = usage_from(final)
-            row.update({"service_ms": u["total_ms"] or elapsed_ms, "gpu_ms": (u["prompt_ms"] or 0) + (u["eval_ms"] or 0) or None,
-                        "tokens_in": u["tokens_in"], "tokens_out": u["tokens_out"]})
+            cached = final.get("cached_tokens") or 0
+            cost, cur = self.cost(call.backend, call.model, u["tokens_in"], u["tokens_out"], cached)
+            row.update({"service_ms": u["total_ms"] or elapsed_ms, "gpu_ms": ((u["prompt_ms"] or 0) + (u["eval_ms"] or 0) or None) if not self.backends[call.backend].is_cloud else None,
+                        "tokens_in": u["tokens_in"], "tokens_out": u["tokens_out"], "tokens_cached": cached or None,
+                        "cost_actual": cost, "currency": cur or call.currency, "provider_request_id": final.get("provider_request_id")})
             detail.update({"load_ms": u["load_ms"], "done_reason": u["done_reason"]})
         else:
             row["service_ms"] = elapsed_ms
@@ -426,9 +579,13 @@ class Gateway:
             row["status"] = "ok"
         row["detail"] = detail
         await self.ledger_write(row)
+        if row.get("cost_actual"):
+            for key in [k for k in self.spend_cache if k[0] == call.caller.ref]:
+                del self.spend_cache[key]   # the next budget check re-reads the ledger
         self.routes.appendleft({"ts": time.time(), "id": call.id, "principal": call.caller.ref, "requested": call.requested, "class": call.cls,
                                 "route": call.route, "status": row["status"], "reason": row.get("reason"), "queue_wait_ms": call.queued_ms,
-                                "service_ms": row.get("service_ms"), "tokens_in": row.get("tokens_in"), "tokens_out": row.get("tokens_out")})
+                                "service_ms": row.get("service_ms"), "tokens_in": row.get("tokens_in"), "tokens_out": row.get("tokens_out"),
+                                "cost": row.get("cost_actual"), "attempts": call.attempts})
 
     async def ledger_write(self, row):
         try:
@@ -436,42 +593,89 @@ class Gateway:
         except Exception as e:
             log(f"ledger write failed: {e.__class__.__name__}: {str(e)[:160]}")
 
-    # -- execution
+    # -- execution with fallback across the ladder (FR-29, FR-31)
+    FALLBACK_ERRORS = ("model_not_found", "capability", "no_credential", "bad_credential", "rate_limited", "backend_unavailable", "timeout", "backend_error")
+
+    async def run(self, call, path, body, stream, timeout_s=None):
+        """Admit and start the call on the first eligible rung, moving down the ladder on failure.
+        Returns the final object (non-stream) or (generator, first_chunk) for streaming."""
+        timeout_s = timeout_s or float(self.cfg.get("request_timeout_s") or 600)
+        last = None
+        idx = 0
+        while idx < len(call.rungs):
+            rung = call.rungs[idx]
+            self.select(call, rung)
+            b = self.backends[call.backend]
+            await self.admit(call)
+            call.attempts += 1
+            key = call.keys.get(call.backend)
+            fwd = dict(body, model=call.model)
+            try:
+                if stream:
+                    gen = b.stream(path, fwd, timeout_s, key=key)
+                    first = await anext(gen)
+                    rung["taken"] = True
+                    return gen, first
+                res = await b.call(path, fwd, timeout_s, key=key)
+                rung["taken"] = True
+                self.release(call, res)
+                return res
+            except BackendError as e:
+                self.release(call, error=True)
+                last = e
+                rung.setdefault("failed", []).append(e.error_class)
+                retry_local = (not b.is_cloud and e.error_class in ("backend_error", "timeout") and not rung.get("retried"))
+                if retry_local:
+                    rung["retried"] = True
+                    continue
+                if e.error_class in self.FALLBACK_ERRORS and idx + 1 < len(call.rungs):
+                    idx += 1
+                    continue
+                raise
+            except asyncio.CancelledError:
+                self.release(call, error=True)
+                raise
+        raise last
+
     async def execute(self, call, path, body, timeout_s=None):
-        """Non-streaming call: admit, run, account."""
-        await self.admit(call)
-        b = self.backends[call.backend]
-        body = dict(body, model=call.model)
+        """Non-streaming call: admit, run (with fallback), account."""
         try:
-            res = await b.call(path, body, timeout_s or float(self.cfg.get("request_timeout_s") or 600))
+            res = await self.run(call, path, body, False, timeout_s)
         except BackendError as e:
-            self.release(call, error=True)
             await self.ledger_done(call, error=e)
-            raise ApiError(e.status if e.status in (404, 503, 504) else 502, e.error_class, e.message, backend=call.backend)
+            raise ApiError(e.status if e.status in (401, 403, 404, 429, 503, 504) else 502, e.error_class, e.message, backend=call.backend, route=call.route)
         except asyncio.CancelledError:
-            self.release(call, error=True)
             await self.ledger_done(call, cancelled=True)
             raise
-        self.release(call, res)
         await self.ledger_done(call, res)
         return res
 
     async def stream(self, request, call, path, body, on_chunk, on_end, on_error, content_type):
-        """Streaming call: admit before sending headers (so admission errors are HTTP errors), then pass chunks through."""
-        await self.admit(call)
-        b = self.backends[call.backend]
-        body = dict(body, model=call.model)
-        resp = web.StreamResponse(status=200, headers={"Content-Type": content_type, "Cache-Control": "no-cache",
-                                                       "X-MaluOS-Route": f"{call.backend}/{call.model} ({call.reason})",
-                                                       "X-MaluOS-Request": call.id, "X-MaluOS-Class": call.cls})
+        """Streaming call: admission and the first chunk happen before the headers go out, so
+        admission errors and dead rungs are still HTTP errors and fallback still works."""
+        try:
+            gen, first = await self.run(call, path, body, True)
+        except BackendError as e:
+            await self.ledger_done(call, error=e)
+            raise ApiError(e.status if e.status in (401, 403, 404, 429, 503, 504) else 502, e.error_class, e.message, backend=call.backend, route=call.route)
+        except asyncio.CancelledError:
+            await self.ledger_done(call, cancelled=True)
+            raise
+        resp = web.StreamResponse(status=200, headers={"Content-Type": content_type, "Cache-Control": "no-cache", **self.headers_for(call)})
         await resp.prepare(request)
         final, err = None, None
         try:
-            async for obj in b.stream(path, body, float(self.cfg.get("request_timeout_s") or 600)):
+            obj = first
+            while True:
                 for out in on_chunk(obj):
                     await resp.write(out)
                 if obj.get("done"):
                     final = obj
+                    break
+                obj = await anext(gen)
+            for out in on_end(final):
+                await resp.write(out)
+        except StopAsyncIteration:
             for out in on_end(final):
                 await resp.write(out)
         except BackendError as e:
@@ -494,12 +698,13 @@ class Gateway:
         return resp
 
     def headers_for(self, call):
-        return {"X-MaluOS-Route": f"{call.backend}/{call.model} ({call.reason})", "X-MaluOS-Request": call.id, "X-MaluOS-Class": call.cls}
+        return {"X-MaluOS-Route": f"{call.backend}/{call.model} ({call.reason})", "X-MaluOS-Request": call.id, "X-MaluOS-Class": call.cls,
+                "X-MaluOS-Attempts": str(call.attempts or 1)}
 
     # -- status
     def status(self):
         snaps = {n: s.snapshot() for n, s in self.schedulers.items()}
-        local = [s for n, s in snaps.items() if self.backends[n].kind in ("ollama_local", "mock")]
+        local = [s for n, s in snaps.items() if not self.backends[n].is_cloud]
         ew = {}
         for cls in (self.catalog.classes if self.catalog else {}):
             ew[cls] = max([s["classes"].get(cls, {}).get("expected_wait_s", 0) for s in local] or [0])
@@ -542,9 +747,11 @@ class Gateway:
         rid = row["request_id"]
         try:
             conn = await self.db.connection()
-            caller = Caller(f"engine:{row.get('account_name') or 'queue'}", None, None, "maludb-engine", "engine")
+            caller = Caller(self.cfg["engine_queue"].get("principal") or "service:engine", None, None, "maludb-engine", "engine")
             caller.kind = "service"
-            hints = {"class": self.cfg["engine_queue"].get("class") or "batch", "task": f"model_request:{rid}"}
+            await self.enrich(caller)
+            hints = {"class": self.cfg["engine_queue"].get("class") or "batch", "task": f"model_request:{rid}",
+                     "sensitivity": self.cfg["engine_queue"].get("sensitivity") or "internal"}
             params = row.get("generation_params") or {}
             body = {"prompt": row["rendered_prompt"]}
             opts = {}
@@ -553,6 +760,8 @@ class Gateway:
                     opts[dst] = params[src]
             if params.get("stop"):
                 opts["stop"] = params["stop"] if isinstance(params["stop"], list) else [params["stop"]]
+            if isinstance(params.get("options"), dict):
+                opts.update(params["options"])
             if opts:
                 body["options"] = opts
             if params.get("format"):
@@ -560,9 +769,10 @@ class Gateway:
             if row.get("runtime_params") and isinstance(row["runtime_params"], dict) and row["runtime_params"].get("options"):
                 body.setdefault("options", {}).update(row["runtime_params"]["options"])
             call = None
+            needs = {"tokens_in_est": len(row["rendered_prompt"]) // 4, "tokens_out_est": opts.get("num_predict") or 1024}
             for requested in (row["alias_name"], row["model_identifier"]):
                 try:
-                    call = await self.prepare(caller, "generate", requested, hints, "engine:model_request")
+                    call = await self.prepare(caller, "generate", requested, hints, "engine:model_request", needs=needs)
                     break
                 except ApiError as e:
                     if e.code != "model_not_found":
@@ -575,15 +785,27 @@ class Gateway:
                 return
             timeout = max(1.0, (row.get("timeout_ms") or 30000) / 1000.0)
             t0 = time.monotonic()
-            try:
-                res = await asyncio.wait_for(self.execute(call, "/api/generate", body, timeout_s=timeout), timeout=timeout + 5)
-            except asyncio.TimeoutError:
-                await self.db.finish_engine_request(conn, rid, "timeout", error_class="timeout", user_safe_error=f"no result within {timeout:.0f}s",
-                                                    latency_ms=int((time.monotonic() - t0) * 1000))
-                return
+            task = asyncio.create_task(self.execute(call, "/api/generate", body, timeout_s=timeout))
+            while True:   # the contract: re-read cancel_requested while the adapter runs
+                done, _ = await asyncio.wait({task}, timeout=1.0)
+                if done:
+                    break
+                if time.monotonic() - t0 > timeout + 5:
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+                    await self.db.finish_engine_request(conn, rid, "timeout", error_class="timeout", user_safe_error=f"no result within {timeout:.0f}s",
+                                                        latency_ms=int((time.monotonic() - t0) * 1000))
+                    return
+                if await self.db.engine_cancel_requested(conn, rid):
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+                    await self.db.finish_engine_request(conn, rid, "cancelled", error_class="cancelled", user_safe_error="cancelled while running",
+                                                        latency_ms=int((time.monotonic() - t0) * 1000))
+                    return
+            res = task.result()
             u = usage_from(res)
             raw = {k: v for k, v in res.items() if k not in ("response", "context")}
-            raw["gateway"] = {"backend": call.backend, "model": call.model, "class": call.cls, "request": call.id}
+            raw["gateway"] = {"backend": call.backend, "model": call.model, "class": call.cls, "request": call.id, "route": call.route}
             await self.db.finish_engine_request(conn, rid, "succeeded", output_text=res.get("response", ""), prompt_tokens=u["tokens_in"],
                                                 completion_tokens=u["tokens_out"], latency_ms=u["total_ms"] or int((time.monotonic() - t0) * 1000),
                                                 finish_reason=u["done_reason"], raw=raw)
@@ -674,7 +896,7 @@ async def h_openai_chat(request):
     obody = openai_to_ollama_chat(body)
     stream = bool(body.get("stream"))
     include_usage = bool((body.get("stream_options") or {}).get("include_usage"))
-    call = await gw.prepare(caller, "chat", requested, hints, "/v1/chat/completions", stream)
+    call = await gw.prepare(caller, "chat", requested, hints, "/v1/chat/completions", stream, needs=needs_of(obody))
     created, rid = int(time.time()), f"chatcmpl-{secrets.token_hex(10)}"
     if not stream:
         res = await gw.execute(call, "/api/chat", obody)
@@ -727,7 +949,7 @@ async def h_openai_embeddings(request):
     if inp is None:
         raise ApiError(400, "bad_request", "input is required")
     requested = body.get("model") or ("embed" if "embed" in gw.catalog.tiers else None)
-    call = await gw.prepare(caller, "embed", requested, hints, "/v1/embeddings")
+    call = await gw.prepare(caller, "embed", requested, hints, "/v1/embeddings", needs={"tokens_in_est": len(json.dumps(inp)) // 4, "tokens_out_est": 0})
     res = await gw.execute(call, "/api/embed", {"input": inp})
     embs = res.get("embeddings") or []
     n = res.get("prompt_eval_count") or 0
@@ -749,12 +971,11 @@ def model_entries(gw):
             out.append({"id": a["name"], "object": "model", "created": now, "owned_by": "maluos", "maluos": {"kind": "alias", "target": f"{a['backend']}/{a['model']}"}})
     seen = {m["id"] for m in out}
     for b in gw.backends.values():
-        if b.kind in ("ollama_local", "mock"):
-            for name, info in sorted(b.models.items()):
-                if name in seen or (name.endswith(":latest") and name[:-7] in b.models):
-                    continue
-                seen.add(name)
-                out.append({"id": name, "object": "model", "created": now, "owned_by": b.name, "maluos": {"kind": "model", "backend": b.name}})
+        for name, info in sorted(b.models.items()):
+            if name in seen or (name.endswith(":latest") and name[:-7] in b.models):
+                continue
+            seen.add(name)
+            out.append({"id": name, "object": "model", "created": now, "owned_by": b.name, "maluos": {"kind": "model", "backend": b.name, "cloud": b.is_cloud}})
     return out
 
 
@@ -789,8 +1010,8 @@ async def ollama_passthrough(request, kind, path, endpoint, required):
             raise ApiError(400, "bad_request", f"{k} is required")
     requested = body.get("model")
     stream = body.get("stream", True) if kind != "embed" else False
-    call = await gw.prepare(caller, kind, requested, hints, endpoint, bool(stream))
     fwd = {k: v for k, v in body.items() if k not in ("model", "stream")}
+    call = await gw.prepare(caller, kind, requested, hints, endpoint, bool(stream), needs=needs_of(fwd))
     if not stream:
         res = await gw.execute(call, path, fwd)
         return web.json_response(res, headers=gw.headers_for(call))
@@ -848,7 +1069,7 @@ async def h_ollama_tags(request):
 async def h_ollama_ps(request):
     gw = request.app["gw"]
     await gw.caller(request)
-    await asyncio.gather(*(b.refresh() for b in gw.backends.values() if b.kind in ("ollama_local", "mock")), return_exceptions=True)
+    await asyncio.gather(*(b.refresh() for b in gw.backends.values() if not b.is_cloud), return_exceptions=True)
     out = []
     for b in gw.backends.values():
         for m in b.loaded:

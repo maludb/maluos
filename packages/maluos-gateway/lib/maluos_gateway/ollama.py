@@ -13,27 +13,53 @@ class BackendError(Exception):
 class OllamaBackend:
     def __init__(self, row, session):
         self.name, self.kind, self.endpoint = row["name"], row["kind"], row["endpoint"].rstrip("/")
+        self.secret_ref = row.get("secret_ref")
         self.options = row.get("options") or {}
         self.capacity = row.get("capacity") or {}
         self.enabled = row.get("enabled", True)
         self.session = session
         self.healthy, self.last_error, self.checked_at = None, None, None
+        self.cooldown_until = 0
         self.models, self.loaded, self.version = {}, [], None
+        self.system_key = None   # set by the gateway when a system credential exists (for health probes)
 
     def update(self, row):
         self.endpoint = row["endpoint"].rstrip("/")
+        self.secret_ref = row.get("secret_ref")
         self.options, self.capacity, self.enabled = row.get("options") or {}, row.get("capacity") or {}, row.get("enabled", True)
 
     @property
     def max_concurrent(self):
         return int(self.capacity.get("max_concurrent") or 1)
 
-    def headers(self):
-        return {}
+    def headers(self, key=None):
+        return {"Authorization": f"Bearer {key}"} if key else {}
+
+    @property
+    def is_cloud(self):
+        return self.kind != "ollama_local" and self.kind != "mock"
+
+    def fail(self, seconds=60):
+        """Mark unhealthy for a cool-down after a connection-level failure (FR-32)."""
+        self.healthy, self.checked_at = False, time.time()
+        self.cooldown_until = time.time() + seconds
 
     async def refresh(self):
+        if time.time() < self.cooldown_until:
+            return False
+        if self.is_cloud and not self.system_key:
+            # No credential to list models with: declared models only; reachability is enough.
+            try:
+                async with self.session.get(self.endpoint + "/", timeout=aiohttp.ClientTimeout(total=5)) as r:
+                    pass
+                self.healthy, self.last_error = True, None
+            except Exception as e:
+                self.healthy, self.last_error = False, f"{e.__class__.__name__}: {str(e)[:120]}"
+            self.models = {m: {"name": m, "model": m} for m in (self.options.get("models") or [])}
+            self.checked_at = time.time()
+            return self.healthy
         try:
-            async with self.session.get(self.endpoint + "/api/tags", headers=self.headers(), timeout=aiohttp.ClientTimeout(total=5)) as r:
+            async with self.session.get(self.endpoint + "/api/tags", headers=self.headers(self.system_key), timeout=aiohttp.ClientTimeout(total=5)) as r:
                 if r.status != 200:
                     raise BackendError(r.status, (await r.text())[:200])
                 tags = await r.json()
@@ -64,18 +90,19 @@ class OllamaBackend:
     def status(self):
         return {"name": self.name, "kind": self.kind, "endpoint": self.endpoint, "enabled": self.enabled,
                 "healthy": self.healthy, "error": self.last_error, "version": self.version,
+                "cooldown_s": max(0, int(self.cooldown_until - time.time())), "secret_ref": self.secret_ref,
                 "checked_at": self.checked_at, "models": sorted(n for n in self.models if ":" in n or n + ":latest" not in self.models),
                 "loaded": [{"name": m.get("name"), "size_vram": m.get("size_vram"), "expires_at": m.get("expires_at")} for m in self.loaded],
                 "capacity": self.capacity}
 
     # -- calls
-    async def stream(self, path, body, timeout_s=600):
+    async def stream(self, path, body, timeout_s=600, key=None):
         """POST path with stream=true and yield each NDJSON object."""
         body = dict(body, stream=True)
         if "keep_alive" not in body and self.options.get("keep_alive"):
             body["keep_alive"] = self.options["keep_alive"]
         try:
-            async with self.session.post(self.endpoint + path, json=body, headers=self.headers(),
+            async with self.session.post(self.endpoint + path, json=body, headers=self.headers(key),
                                          timeout=aiohttp.ClientTimeout(total=None, sock_connect=10, sock_read=timeout_s)) as r:
                 if r.status != 200:
                     text = (await r.text())[:300]
@@ -89,17 +116,18 @@ class OllamaBackend:
                         raise BackendError(500, str(obj["error"]))
                     yield obj
         except aiohttp.ClientConnectorError as e:
+            self.fail()
             raise BackendError(503, f"{self.name} unreachable: {e}", "backend_unavailable")
         except asyncio.TimeoutError:
             raise BackendError(504, f"{self.name} timed out", "timeout")
 
-    async def call(self, path, body, timeout_s=600):
+    async def call(self, path, body, timeout_s=600, key=None):
         """POST path without streaming and return the JSON object."""
         body = dict(body, stream=False)
         if "keep_alive" not in body and self.options.get("keep_alive") and path in ("/api/chat", "/api/generate", "/api/embed"):
             body["keep_alive"] = self.options["keep_alive"]
         try:
-            async with self.session.post(self.endpoint + path, json=body, headers=self.headers(),
+            async with self.session.post(self.endpoint + path, json=body, headers=self.headers(key),
                                          timeout=aiohttp.ClientTimeout(total=timeout_s, sock_connect=10)) as r:
                 if r.status != 200:
                     text = (await r.text())[:300]
@@ -109,6 +137,7 @@ class OllamaBackend:
                     raise BackendError(500, str(obj["error"]))
                 return obj
         except aiohttp.ClientConnectorError as e:
+            self.fail()
             raise BackendError(503, f"{self.name} unreachable: {e}", "backend_unavailable")
         except asyncio.TimeoutError:
             raise BackendError(504, f"{self.name} timed out", "timeout")
@@ -123,6 +152,11 @@ class OllamaBackend:
     async def warm(self, model, keep_alive=None):
         body = {"model": model, "keep_alive": keep_alive or self.options.get("keep_alive") or "30m"}
         return await self.call("/api/generate", body, timeout_s=300)
+
+    def capabilities(self, model):
+        """What a model can do, from the backend's declared options (operators fill this in)."""
+        caps = (self.options.get("capabilities") or {}).get(model) or (self.options.get("capabilities") or {}).get("*") or {}
+        return caps
 
 
 def _ollama_error(text):

@@ -71,6 +71,18 @@ CREATE TABLE IF NOT EXISTS maluos_token (
     last_used_at  timestamptz
 );
 
+-- Prices for cost estimates and budgets (FR-21, FR-39); model '*' is a backend default.
+CREATE TABLE IF NOT EXISTS maluos_price (
+    backend          text NOT NULL REFERENCES maluos_backend(name) ON DELETE CASCADE,
+    model            text NOT NULL,
+    input_per_mtok   numeric(12,6) NOT NULL DEFAULT 0,
+    output_per_mtok  numeric(12,6) NOT NULL DEFAULT 0,
+    cached_per_mtok  numeric(12,6) NOT NULL DEFAULT 0,
+    currency         text NOT NULL DEFAULT 'USD',
+    updated_at       timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (backend, model)
+);
+
 -- Live state the gateway publishes every few seconds (for the MCP tool and reports).
 CREATE TABLE IF NOT EXISTS maluos_gateway_status (
     id          integer PRIMARY KEY DEFAULT 1 CHECK (id = 1),

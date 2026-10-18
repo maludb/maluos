@@ -13,7 +13,7 @@ SCHEMA = "/usr/share/maluos-gateway/schema.sql"
 CONF = "/etc/maluos/gateway.yaml"
 VAULT_CONF = "/etc/maluos/vault.yaml"
 DAEMON = "/usr/lib/maluos/maluos_gateway/server.py"
-TABLES = ("maluos_backend", "maluos_tier", "maluos_alias", "maluos_class", "maluos_policy", "maluos_token", "maluos_gateway_status")
+TABLES = ("maluos_backend", "maluos_tier", "maluos_alias", "maluos_class", "maluos_policy", "maluos_token", "maluos_gateway_status", "maluos_price")
 SEQUENCES = ("maluos_backend_backend_id_seq", "maluos_policy_policy_id_seq", "maluos_token_token_id_seq", "maluos_ledger_ledger_id_seq")
 
 
@@ -35,8 +35,9 @@ def provision(ctx):
     ensure_schema(psql, exists, qi, ql, db, tenant)
     log(f"gateway: schema in {tenant}, grants to {ROLE}")
 
-    # 2. catalogue seed (only when empty)
+    # 2. catalogue seed (only when empty) and the engine's principal
     seeded = seed_catalog(psql, qi, ql, db, tenant, cfg)
+    ensure_engine_principal(psql, exists, qi, ql, db, tenant)
     if seeded:
         log(f"gateway: seeded catalogue ({seeded})")
 
@@ -160,13 +161,33 @@ def seed_catalog(psql, qi, ql, db, tenant, cfg):
         opts = json.dumps({"keep_alive": oll.get("keep_alive") or "30m", "keep_warm": list(oll.get("keep_warm") or [])})
         psql(pre + f"INSERT INTO maluos_backend (name, kind, endpoint, capacity, options) VALUES ('ollama-local', 'ollama_local', {ql(oll.get('url'))}, {ql(cap)}::jsonb, {ql(opts)}::jsonb)", db)
         done.append("backend ollama-local")
+    for cb in seed.get("cloud_backends") or []:
+        if psql(pre + f"SELECT count(*) FROM maluos_backend WHERE name={ql(cb['name'])}", db) == "0":
+            opts = json.dumps({"models": cb.get("models") or []})
+            psql(pre + f"INSERT INTO maluos_backend (name, kind, endpoint, secret_ref, capacity, options, enabled) VALUES "
+                       f"({ql(cb['name'])}, {ql(cb['kind'])}, {ql(cb['endpoint'])}, {ql(cb.get('secret_ref'))}, '{{\"max_concurrent\": 8}}', {ql(opts)}::jsonb, false)", db)
+            done.append(f"backend {cb['name']} (disabled)")
     if psql(pre + "SELECT count(*) FROM maluos_tier", db) == "0":
         for name, t in (seed.get("tiers") or {}).items():
             psql(pre + f"INSERT INTO maluos_tier (name, description) VALUES ({ql(name)}, {ql(t.get('description'))})", db)
             for i, model in enumerate(t.get("local") or []):
                 psql(pre + f"INSERT INTO maluos_alias (name, tier, backend, model, position) VALUES ({ql(name)}, {ql(name)}, 'ollama-local', {ql(model)}, {i}) ON CONFLICT DO NOTHING", db)
+            for i, (backend, model) in enumerate(t.get("cloud") or []):
+                if psql(pre + f"SELECT count(*) FROM maluos_backend WHERE name={ql(backend)}", db) != "0":
+                    psql(pre + f"INSERT INTO maluos_alias (name, tier, backend, model, position) VALUES ({ql(name)}, {ql(name)}, {ql(backend)}, {ql(model)}, {10 + i}) ON CONFLICT DO NOTHING", db)
         done.append("tiers")
+    if psql(pre + "SELECT count(*) FROM maluos_price", db) == "0":
+        for backend, model, i, o, c in seed.get("prices") or []:
+            if psql(pre + f"SELECT count(*) FROM maluos_backend WHERE name={ql(backend)}", db) != "0":
+                psql(pre + f"INSERT INTO maluos_price (backend, model, input_per_mtok, output_per_mtok, cached_per_mtok) VALUES ({ql(backend)}, {ql(model)}, {i}, {o}, {c}) ON CONFLICT DO NOTHING", db)
+        done.append("prices")
     return ", ".join(done)
+
+
+def ensure_engine_principal(psql, exists, qi, ql, db, tenant):
+    """The engine queue's work runs as principal service:engine, so cloud keys can be granted to it."""
+    pre = f"SET ROLE {qi(tenant)}; SET search_path TO {qi(tenant)}, maludb_core, public; "
+    psql(pre + "SELECT maludb_principal_upsert('service:engine', 'service', 'MaluDB engine (model request queue)', 'org');", db)
 
 
 def register_tool(psql, exists, qi, ql, db, tenant, listener_user):
