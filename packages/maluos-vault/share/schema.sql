@@ -124,3 +124,13 @@ CREATE OR REPLACE VIEW maluos_ledger_daily AS
            sum(cost_actual) AS cost_actual
       FROM maluos_ledger
      GROUP BY 1,2,3,4,5,6,7,8,9;
+
+-- A narrow capability for the host daemons: record an episode in this tenant's memory
+-- (alerts, model calls with a task reference) without any other memory privilege.
+CREATE OR REPLACE FUNCTION maluos_record_episode(p_kind text, p_title text, p_summary text, p_payload jsonb, p_sensitivity text DEFAULT 'internal')
+RETURNS bigint LANGUAGE sql SECURITY DEFINER AS $$
+    SELECT maludb_register_episode(p_kind, p_title, p_summary, coalesce(p_payload, '{}'::jsonb), now(), NULL, coalesce(p_sensitivity, 'internal'));
+$$;
+ALTER FUNCTION maluos_record_episode(text, text, text, jsonb, text) SET search_path FROM CURRENT;
+REVOKE ALL ON FUNCTION maluos_record_episode(text, text, text, jsonb, text) FROM PUBLIC;
+

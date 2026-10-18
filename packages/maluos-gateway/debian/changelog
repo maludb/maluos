@@ -1,3 +1,13 @@
+maluos-gateway (0.3.0) resolute; urgency=medium
+
+  * Slice 4: alerts (budget, backend down/recovered, usage anomaly,
+    restart) to journal, ledger, memory and hooks; restart accounting
+    for engine requests;
+    local_unavailable/cloud_unreachable/vault_unavailable codes; an
+    episode per call with a task reference.
+
+ -- Edward Honour <ed@maludb.org>  Sun, 18 Oct 2026 16:04:57 +0000
+
 maluos-gateway (0.2.0) resolute; urgency=medium
 
   * Slice 3: cloud backends (Anthropic, OpenAI, Ollama cloud) with per-

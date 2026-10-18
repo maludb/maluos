@@ -39,10 +39,12 @@ class OllamaBackend:
     def is_cloud(self):
         return self.kind != "ollama_local" and self.kind != "mock"
 
-    def fail(self, seconds=60):
+    cooldown_s = 60   # set from the gateway's health.cooldown_s
+
+    def fail(self, seconds=None):
         """Mark unhealthy for a cool-down after a connection-level failure (FR-32)."""
         self.healthy, self.checked_at = False, time.time()
-        self.cooldown_until = time.time() + seconds
+        self.cooldown_until = time.time() + (seconds if seconds is not None else self.cooldown_s)
 
     async def refresh(self):
         if time.time() < self.cooldown_until:

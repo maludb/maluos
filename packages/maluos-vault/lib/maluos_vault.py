@@ -22,6 +22,7 @@ VERSION = "0.1.0"
 CONFIG = os.environ.get("MALUOS_VAULT_CONFIG", "/etc/maluos/vault.yaml")
 DEFAULTS = {
     "socket": "/run/maluos/vault.sock",
+    "hooks_dir": "/etc/maluos/alert-hooks.d",
     "database": "maludb", "tenant": "maluos",
     "pg_host": "/var/run/postgresql", "pg_user": None, "pg_role": None,
     "state_dir": "/var/lib/maluos-vault",
@@ -296,7 +297,122 @@ class Vault:
                 hit = g["grantee_ref"] in scopes
             if hit and (best is None or (g["level"] == "read" and best == "use")):
                 best, why = g["level"], f"grant:{g['grantee_kind']}:{g['grantee_ref']}"
+        if best is None and comp["owner"]:
+            # FR-15: a user may delegate their keys to an agent, use only, with expiry and budget
+            cur.execute("""SELECT delegation_id FROM maluos_delegation WHERE from_principal_ref=%s AND to_principal_ref=%s AND revoked_at IS NULL
+                             AND (expires_at IS NULL OR expires_at > now()) AND (secret_id IS NULL OR secret_id=%s) LIMIT 1""",
+                        (comp["owner"], caller.ref, secret["secret_id"]))
+            if cur.fetchone():
+                best, why = "use", f"delegation:{comp['owner']}"
         return best, why
+
+    # -- delegations (FR-15)
+    def delegations(self, cur, caller):
+        cur.execute("""SELECT d.delegation_id, d.from_principal_ref, d.to_principal_ref, d.secret_id, s.name AS secret_name, c.name AS compartment,
+                              d.budget, d.expires_at, d.created_at, d.revoked_at
+                         FROM maluos_delegation d LEFT JOIN maluos_secret s ON s.secret_id=d.secret_id LEFT JOIN maluos_compartment c ON c.compartment_id=s.compartment_id
+                        WHERE d.revoked_at IS NULL ORDER BY d.delegation_id""")
+        rows = []
+        for r in cur.fetchall():
+            if caller.operator or r[1] == caller.ref or r[2] == caller.ref:
+                rows.append({"delegation_id": r[0], "from": r[1], "to": r[2], "secret": f"{r[5]}/{r[4]}" if r[3] else None, "budget": r[6],
+                             "expires_at": r[7].isoformat() if r[7] else None, "created_at": r[8].isoformat() if r[8] else None})
+        return rows
+
+    def delegate(self, cur, caller, body):
+        frm = body.get("from") or caller.ref
+        to = str(body.get("to") or "")
+        if not to:
+            raise ApiError(400, "bad_request", "to (a principal) is required")
+        if not caller.operator and (not caller.principal or frm != caller.ref):
+            self.deny(cur, "delegation.add", caller, "forbidden", "you may only delegate your own secrets")
+        cur.execute("SELECT 1 FROM maludb_principal WHERE principal_ref=%s", (to,))
+        if not cur.fetchone():
+            raise ApiError(404, "unknown_principal", f"no principal {to}")
+        sid = None
+        if body.get("secret"):
+            secret, comp = self.resolve(cur, caller, body["secret"])
+            if comp["owner"] != frm:
+                raise ApiError(403, "forbidden", f"{secret['ref']} is not in {frm}'s compartment")
+            sid = secret["secret_id"]
+        expires = parse_ts(body.get("expires_at"))
+        cur.execute("UPDATE maluos_delegation SET revoked_at=now() WHERE from_principal_ref=%s AND to_principal_ref=%s AND secret_id IS NOT DISTINCT FROM %s AND revoked_at IS NULL", (frm, to, sid))
+        cur.execute("INSERT INTO maluos_delegation (from_principal_ref, to_principal_ref, secret_id, budget, expires_at) VALUES (%s,%s,%s,%s,%s) RETURNING delegation_id",
+                    (frm, to, sid, json.dumps(body["budget"]) if body.get("budget") else None, expires))
+        did = cur.fetchone()[0]
+        self.ledger(cur, "delegation.add", caller, "ok", detail={"from": frm, "to": to, "secret_id": sid, "expires_at": expires.isoformat() if expires else None, "budget": body.get("budget")})
+        return {"delegation_id": did, "from": frm, "to": to, "secret_id": sid}
+
+    def undelegate(self, cur, caller, body):
+        frm = body.get("from") or caller.ref
+        to = str(body.get("to") or "")
+        if not caller.operator and (not caller.principal or frm != caller.ref):
+            self.deny(cur, "delegation.revoke", caller, "forbidden", "you may only revoke your own delegations")
+        sid = None
+        if body.get("secret"):
+            secret, _ = self.resolve(cur, caller, body["secret"]); sid = secret["secret_id"]
+        cur.execute("UPDATE maluos_delegation SET revoked_at=now() WHERE from_principal_ref=%s AND to_principal_ref=%s AND revoked_at IS NULL" + ("" if sid is None else " AND secret_id=%s"),
+                    (frm, to) if sid is None else (frm, to, sid))
+        n = cur.rowcount
+        self.ledger(cur, "delegation.revoke", caller, "ok" if n else "noop", detail={"from": frm, "to": to, "secret_id": sid})
+        return {"revoked": n}
+
+    # -- export / import (FR-18): operators only; every exported value is a logged read
+    def export(self, cur, caller, compartment=None):
+        if not caller.operator:
+            self.deny(cur, "vault.export", caller, "forbidden", "operators only")
+        comps = [c for c in self.visible_compartments(cur, caller) if not compartment or c["name"] == compartment]
+        out = {"maluos_vault_export": 1, "exported_at": utcnow().isoformat(), "compartments": [], "secrets": [], "grants": [], "delegations": []}
+        for c in comps:
+            out["compartments"].append({k: c[k] for k in ("name", "owner", "scope", "lock_mode")})
+            for sec in self.secrets_in(cur, c["compartment_id"]):
+                val = self.store.get(sec["cred_ref"]).decode()
+                self.ledger(cur, "secret.read", caller, "ok", reason="export", secret=sec, comp=c, level="read", purpose="export")
+                out["secrets"].append({"compartment": c["name"], "name": sec["name"], "kind": sec["kind"], "provider": sec["provider"], "env_var": sec["env_var"],
+                                       "expires_at": sec["expires_at"], "value": val})
+                for g in self.live_grants(cur, sec["secret_id"]):
+                    out["grants"].append({"secret": f"{c['name']}/{sec['name']}", "grantee_kind": g["grantee_kind"], "grantee_ref": g["grantee_ref"], "level": g["level"], "expires_at": g["expires_at"]})
+        cur.execute("SELECT from_principal_ref, to_principal_ref, s.name, c.name, d.budget, d.expires_at FROM maluos_delegation d LEFT JOIN maluos_secret s ON s.secret_id=d.secret_id LEFT JOIN maluos_compartment c ON c.compartment_id=s.compartment_id WHERE d.revoked_at IS NULL")
+        for r in cur.fetchall():
+            out["delegations"].append({"from": r[0], "to": r[1], "secret": f"{r[3]}/{r[2]}" if r[2] else None, "budget": r[4], "expires_at": r[5].isoformat() if r[5] else None})
+        self.ledger(cur, "vault.export", caller, "ok", detail={"compartments": len(out["compartments"]), "secrets": len(out["secrets"])})
+        return out
+
+    def import_bundle(self, cur, caller, bundle):
+        if not caller.operator:
+            self.deny(cur, "vault.import", caller, "forbidden", "operators only")
+        if not isinstance(bundle, dict) or bundle.get("maluos_vault_export") != 1:
+            raise ApiError(400, "bad_bundle", "not a MaluOS vault export")
+        n = {"compartments": 0, "secrets": 0, "grants": 0, "delegations": 0}
+        for c in bundle.get("compartments") or []:
+            if not self.compartment(cur, c["name"]):
+                cur.execute("INSERT INTO maluos_compartment (name, owner_principal_ref, scope, lock_mode) VALUES (%s,%s,%s,%s)",
+                            (c["name"], c.get("owner"), c.get("scope"), c.get("lock_mode") or CFG["default_lock_mode"]))
+                n["compartments"] += 1
+        for sec in bundle.get("secrets") or []:
+            self.add(cur, caller, {"name": sec["name"], "compartment": sec["compartment"], "kind": sec.get("kind"), "provider": sec.get("provider"),
+                                   "env_var": sec.get("env_var"), "expires_at": sec.get("expires_at"), "value": sec["value"], "upsert": True})
+            n["secrets"] += 1
+        for g in bundle.get("grants") or []:
+            secret, comp = self.resolve(cur, caller, g["secret"])
+            self.grant(cur, caller, secret, comp, {"grantee_kind": g["grantee_kind"], "grantee_ref": g["grantee_ref"], "level": g["level"], "expires_at": g.get("expires_at")})
+            n["grants"] += 1
+        for d in bundle.get("delegations") or []:
+            self.delegate(cur, caller, {"from": d["from"], "to": d["to"], "secret": d.get("secret"), "budget": d.get("budget"), "expires_at": d.get("expires_at")})
+            n["delegations"] += 1
+        self.ledger(cur, "vault.import", caller, "ok", detail=n)
+        return n
+
+    # -- alerts (FR-44): journal, ledger, memory episode, hooks
+    def alert(self, cur, kind, title, detail):
+        log(f"ALERT {kind}: {title}")
+        cur.execute("INSERT INTO maluos_ledger (event, status, reason, detail, principal_ref) VALUES (%s, 'ok', %s, %s, %s)",
+                    (f"alert.{kind}", title[:200], json.dumps(detail), detail.get("principal")))
+        try:
+            cur.execute("SELECT maluos_record_episode('maluos.alert', %s, %s, %s, 'internal')", (title[:200], json.dumps(detail)[:1000], json.dumps(dict(detail, kind=kind))))
+        except Exception as e:
+            log(f"alert episode not recorded: {e.__class__.__name__}: {str(e)[:120]}")
+        run_hooks(CFG["hooks_dir"], {"source": "maluos-vault", "kind": kind, "title": title, "detail": detail, "ts": utcnow().isoformat()})
 
     def resolve(self, cur, caller, ref):
         """'compartment/name' or bare 'name' -> (secret, compartment). FR-13 order:
@@ -390,6 +506,9 @@ class Vault:
             raise ApiError(500, "store_error", f"cannot open secret value: {e.__class__.__name__}")
         self.ledger(cur, event, caller, "ok", reason=why, secret=secret, comp=comp, level=level, purpose=purpose,
                     detail={"previous": previous} if previous else None)
+        if previous:
+            self.alert(cur, "retired_key", f"retired value of {secret['ref']} presented by {caller.ref or caller.user}",
+                       {"principal": caller.ref, "user": caller.user, "process": caller.process_ref, "secret": secret["ref"], "grace_until": secret["grace_until"]})
         return {"ref": secret["ref"], "name": secret["name"], "kind": secret["kind"], "provider": secret["provider"],
                 "env_var": secret["env_var"], "value": val, "level": level, "via": why}
 
@@ -502,6 +621,8 @@ class Vault:
                          ("event", "event"), ("status", "status"), ("user", "linux_user")):
             if q.get(key):
                 where.append(f"{col}=%s"); args.append(q[key])
+        if q.get("event_like"):
+            where.append("event LIKE %s"); args.append(q["event_like"])
         since = parse_ts(q.get("since"), past=True)
         if since:
             where.append("ts >= %s"); args.append(since)
@@ -518,6 +639,22 @@ class Vault:
                 d["cost_actual"] = float(d["cost_actual"])
             out.append(d)
         return out
+
+
+def run_hooks(hooks_dir, payload):
+    """Run every executable in hooks_dir with the alert as JSON on stdin, detached from the request."""
+    import glob, subprocess, threading
+    exes = [f for f in sorted(glob.glob(os.path.join(hooks_dir, "*"))) if os.access(f, os.X_OK) and os.path.isfile(f)]
+    if not exes:
+        return
+    data = json.dumps(payload).encode()
+    def run():
+        for exe in exes:
+            try:
+                subprocess.run([exe], input=data, timeout=15, capture_output=True)
+            except Exception as e:
+                log(f"alert hook {exe}: {e.__class__.__name__}")
+    threading.Thread(target=run, daemon=True).start()
 
 
 def parse_ts(v, past=False):
@@ -660,6 +797,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return 200, v.revoke(cur, caller, secret, comp, body)
         if p == ["ledger"] and method == "GET":
             return 200, {"events": v.ledger_rows(cur, caller, q)}
+        if p == ["delegations"]:
+            if method == "GET":
+                return 200, {"delegations": v.delegations(cur, caller)}
+            if method == "POST":
+                return 201, v.delegate(cur, caller, body)
+        if p == ["delegations", "revoke"] and method == "POST":
+            return 200, v.undelegate(cur, caller, body)
+        if p == ["export"] and method == "GET":
+            return 200, v.export(cur, caller, q.get("compartment"))
+        if p == ["import"] and method == "POST":
+            return 200, v.import_bundle(cur, caller, body.get("bundle"))
         raise ApiError(404, "not_found", f"no route {method} /{'/'.join(p)}")
 
     @staticmethod

@@ -13,6 +13,12 @@
   maluctl secret grant NAME (--to PRINCIPAL | --scope SCOPE) [--level use|read] [--expires 30d]
   maluctl secret revoke NAME (--to PRINCIPAL | --scope SCOPE)
   maluctl secret usage [--since 7d] [--by user|principal|secret|event|day] [--secret N] [--principal R] [--raw]
+  maluctl secret delegate --to PRINCIPAL [--secret NAME] [--expires 7d] [--budget usd_per_day=1]
+                                                let an agent use your keys (use only, never read)
+  maluctl secret undelegate --to PRINCIPAL [--secret NAME]  |  maluctl secret delegations
+  maluctl secret export FILE [--compartment C]  encrypted bundle (operators; passphrase prompt or --passphrase-file F)
+  maluctl secret import FILE                    restore a bundle (operators)
+  maluctl secret alerts [--since 7d]            alert rows from the ledger
   maluctl secret compartment list | create NAME [--owner P] [--scope S] | lock NAME | unlock NAME
 
 NAME is `compartment/name`, or a bare name looked up in your own compartment
@@ -172,6 +178,56 @@ def run(v, a):
         fmt_table(sorted(agg.values(), key=lambda d: d["last"], reverse=True), [by, "ok", "denied", "reads", "uses", "last"])
         print(f"({len(rows)} events since {since}; --raw for the list)")
         return 0
+    if cmd == "delegate":
+        to = opt(a, "--to") or sys.exit("--to PRINCIPAL required"); sec = opt(a, "--secret"); exp = opt(a, "--expires"); b = opt(a, "--budget")
+        budget = None
+        if b:
+            budget = {}
+            for kv in b.split(","):
+                k, val = kv.split("=", 1); budget[k.strip()] = float(val)
+        r = v.delegate(to, secret=sec, expires_at=exp, budget=budget, frm=opt(a, "--from"))
+        print(f"delegated {r['from']}'s {'secret ' + sec if sec else 'secrets'} to {to} (use only)"); return 0
+    if cmd == "undelegate":
+        to = opt(a, "--to") or sys.exit("--to PRINCIPAL required")
+        print(f"revoked {v.undelegate(to, secret=opt(a, '--secret'), frm=opt(a, '--from'))['revoked']} delegation(s)"); return 0
+    if cmd == "delegations":
+        rows = v.delegations()
+        for r in rows:
+            r["secret"] = r.get("secret") or "(all)"; r["expires"] = (r.get("expires_at") or "never")[:19]
+        fmt_table(rows, ["from", "to", "secret", "expires", "budget"]); return 0
+    if cmd == "export":
+        path = a.pop(0); comp = opt(a, "--compartment")
+        pw = passphrase(a, confirm=True)
+        bundle = v.export(compartment=comp)
+        import base64, json as _json
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
+        salt, nonce = os.urandom(16), os.urandom(12)
+        key = Scrypt(salt=salt, length=32, n=2 ** 15, r=8, p=1).derive(pw.encode())
+        ct = AESGCM(key).encrypt(nonce, _json.dumps(bundle).encode(), b"maluos-vault-export-1")
+        with open(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
+            _json.dump({"maluos_vault_export_encrypted": 1, "salt": base64.b64encode(salt).decode(), "nonce": base64.b64encode(nonce).decode(),
+                        "data": base64.b64encode(ct).decode()}, f)
+        print(f"exported {len(bundle['secrets'])} secret(s) in {len(bundle['compartments'])} compartment(s) to {path} (every value read is in the ledger)"); return 0
+    if cmd == "import":
+        path = a.pop(0)
+        pw = passphrase(a)
+        import base64, json as _json
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
+        env = _json.load(open(path))
+        key = Scrypt(salt=base64.b64decode(env["salt"]), length=32, n=2 ** 15, r=8, p=1).derive(pw.encode())
+        try:
+            bundle = _json.loads(AESGCM(key).decrypt(base64.b64decode(env["nonce"]), base64.b64decode(env["data"]), b"maluos-vault-export-1"))
+        except Exception:
+            sys.exit("wrong passphrase or damaged file")
+        n = v.import_bundle(bundle)
+        print(f"imported: {n}"); return 0
+    if cmd == "alerts":
+        since = opt(a, "--since", "7d")
+        for r in reversed(v.ledger(since=since, event_like="alert.%", limit=500)):
+            print(f"{r['ts'][:19]}  {r['event'][6:]:16} {r.get('reason') or ''}")
+        return 0
     if cmd == "compartment":
         sub = a.pop(0) if a else "list"
         if sub == "list":
@@ -185,6 +241,16 @@ def run(v, a):
         if sub in ("lock", "unlock"):
             r = v.lock(a.pop(0), sub == "lock"); print(f"{r['name']}: {'locked' if r['locked'] else 'unlocked'}"); return 0
     print(__doc__); return 2
+
+
+def passphrase(args, confirm=False):
+    f = opt(args, "--passphrase-file")
+    if f:
+        return open(f).read().strip()
+    pw = getpass.getpass("passphrase: ")
+    if confirm and getpass.getpass("again: ") != pw:
+        sys.exit("passphrases differ")
+    return pw
 
 
 def default_env_var(r):

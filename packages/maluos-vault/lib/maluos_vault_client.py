@@ -77,6 +77,13 @@ class Vault:
     def revoke(self, ref, grantee_kind, grantee_ref):
         return self.request("POST", f"/v1/secrets/{q(ref)}/revoke", {"grantee_kind": grantee_kind, "grantee_ref": grantee_ref})
     def ledger(self, **query):    return self.request("GET", "/v1/ledger", query=query)["events"]
+    def delegations(self):        return self.request("GET", "/v1/delegations")["delegations"]
+    def delegate(self, to, secret=None, expires_at=None, budget=None, frm=None):
+        return self.request("POST", "/v1/delegations", {"to": to, "secret": secret, "expires_at": expires_at, "budget": budget, "from": frm})
+    def undelegate(self, to, secret=None, frm=None):
+        return self.request("POST", "/v1/delegations/revoke", {"to": to, "secret": secret, "from": frm})
+    def export(self, compartment=None): return self.request("GET", "/v1/export", query={"compartment": compartment})
+    def import_bundle(self, bundle):  return self.request("POST", "/v1/import", {"bundle": bundle})
 
 
 def q(s):

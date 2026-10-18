@@ -1,3 +1,11 @@
+maluos-vault (0.2.0) resolute; urgency=medium
+
+  * Slice 4: delegation (use only), export/import of encrypted bundles,
+    retired-key alerts with hooks and memory episodes,
+    maluos_record_episode wrapper, ledger event_like filter.
+
+ -- Edward Honour <ed@maludb.org>  Sun, 18 Oct 2026 16:04:57 +0000
+
 maluos-vault (0.1.0) resolute; urgency=medium
 
   * Initial release: vault daemon (peer-credential identity, compartments,

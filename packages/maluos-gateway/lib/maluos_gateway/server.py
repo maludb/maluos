@@ -12,6 +12,7 @@ from .config import Config
 from .db import Database
 from .ollama import OllamaBackend, BackendError, usage_from
 from .scheduler import Scheduler, Job, AdmissionError
+from .alerts import Alerts
 
 
 def log(msg):
@@ -181,13 +182,56 @@ class Gateway:
         self.started = time.time()
         self.tasks = []
         self.engine_inflight = 0
+        self.alerts = Alerts(self)
+        self.inflight_file = os.path.join(cfg.get("state_dir") or "/var/lib/maluos-gateway", "engine-inflight.json")
+        self.inflight = set()
 
     # -- lifecycle
     async def start(self):
         self.session = aiohttp.ClientSession()
         await self.reload_catalog(initial=True)
-        for coro in (self.catalog_loop(), self.health_loop(), self.status_loop(), self.warm_loop(), self.drain_loop()):
+        await self.recover_restart()
+        for coro in (self.catalog_loop(), self.health_loop(), self.status_loop(), self.warm_loop(), self.drain_loop(), self.alerts.monitor_loop()):
             self.spawn(coro)
+
+    # -- restart accounting (FR-47): engine requests this gateway had claimed and lost
+    def save_inflight(self):
+        try:
+            os.makedirs(os.path.dirname(self.inflight_file), exist_ok=True)
+            tmp = self.inflight_file + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(sorted(self.inflight), f)
+            os.replace(tmp, self.inflight_file)
+        except OSError as e:
+            log(f"cannot save in-flight state: {e}")
+
+    async def recover_restart(self):
+        try:
+            with open(self.inflight_file) as f:
+                lost = [int(x) for x in json.load(f)]
+        except (OSError, ValueError):
+            lost = []
+        if not lost:
+            return
+        conn = None
+        finished = []
+        try:
+            conn = await self.db.connection()
+            for rid in lost:
+                cur = await conn.execute("""SELECT status FROM maludb_core."malu$model_request" WHERE request_id=%s""", (rid,))
+                r = await cur.fetchone()
+                if r and r["status"] == "running":
+                    await self.db.finish_engine_request(conn, rid, "failed", error_class="gateway_restart", user_safe_error="the gateway restarted while this request was running")
+                    finished.append(rid)
+        except Exception as e:
+            log(f"restart recovery: {e.__class__.__name__}: {str(e)[:160]}")
+        finally:
+            if conn:
+                await conn.close()
+        self.inflight = set(); self.save_inflight()
+        await self.ledger_write({"event": "gateway.restart", "status": "ok", "reason": f"{len(finished)} engine request(s) lost", "detail": {"lost": finished, "checked": lost}})
+        if finished:
+            await self.alerts.fire("restart_lost_work", f"gateway restarted; {len(finished)} engine request(s) failed: {finished}", {"requests": finished})
 
     def spawn(self, coro):
         t = asyncio.create_task(coro)
@@ -224,6 +268,7 @@ class Gateway:
             else:
                 self.backends[name] = make_backend(row, self.session)
                 self.spawn(self.backends[name].refresh())
+            self.backends[name].cooldown_s = float((self.cfg.get("health") or {}).get("cooldown_s") or 60)
             sch = self.schedulers.get(name)
             cap = self.backends[name].max_concurrent if not self.backends[name].is_cloud else int((row.get("capacity") or {}).get("max_concurrent") or 8)
             if not sch:
@@ -242,7 +287,7 @@ class Gateway:
     async def health_loop(self):
         while True:
             await asyncio.gather(*(b.refresh() for b in list(self.backends.values())), return_exceptions=True)
-            await asyncio.sleep(10)
+            await asyncio.sleep(float((self.cfg.get("health") or {}).get("probe_s") or 10))
 
     async def status_loop(self):
         while True:
@@ -457,6 +502,12 @@ class Gateway:
             reasons = {r.get("skipped", "").split(":")[0] for r in rungs}
             policy_only = reasons <= {"policy", "cloud_not_allowed", "sensitivity", "no_credential", "local_only", "not_enrolled", "credential_locked", "credential_expired", "disabled", "prefer_local"}
             code = "policy" if policy_only else "backend_unavailable"
+            if "vault_unavailable" in reasons:
+                code = "vault_unavailable"
+            elif reasons <= {"unhealthy", "local_only", "disabled"} and (hints.get("local_only") or not any(self.backends[r["backend"]].is_cloud for r in rungs if r["backend"] in self.backends)):
+                code = "local_unavailable"      # FR-45: the GPU or local Ollama is down and the request may not leave the host
+            elif reasons <= {"unhealthy", "disabled"} and all(self.backends[r["backend"]].is_cloud for r in rungs if r["backend"] in self.backends):
+                code = "cloud_unreachable"      # FR-46: cloud-only work with no reachable provider
             await self.ledger_denied(call, code, "no eligible rung", status="denied" if policy_only else "error")
             raise ApiError(403 if policy_only else 503, code, f"no eligible backend for {requested}: " +
                            "; ".join(f"{r['backend']}/{r['model']} {r.get('skipped')}" for r in rungs), route=rungs)
@@ -506,11 +557,16 @@ class Gateway:
             spent = await self.spent(call.caller.ref, period)
             if spent + call.cost_est > float(limit):
                 await self.ledger_denied(call, "budget_exceeded", f"{period}: spent {spent:.4f} + est {call.cost_est:.4f} > {limit}")
+                await self.alerts.fire("budget_exceeded", f"{call.caller.ref} exhausted the {period} budget ({spent:.4f}/{limit} {call.currency})",
+                                       {"principal": call.caller.ref, "period": period, "spent": spent, "limit": limit},
+                                       once_key=f"budget_exceeded:{call.caller.ref}:{period}", cooldown_s=3600)
                 raise ApiError(403, "budget_exceeded", f"{period} budget of {limit} {call.currency} exhausted (spent {spent:.4f}, this call ~{call.cost_est:.4f})",
                                period=period, spent=spent, limit=limit)
             if spent + call.cost_est > warn_at * float(limit):
                 call.warnings.append(f"{period} budget {spent + call.cost_est:.4f}/{limit} {call.currency}")
-                log(f"budget warning for {call.caller.ref}: {call.warnings[-1]}")
+                await self.alerts.fire("budget", f"{call.caller.ref} is at {spent + call.cost_est:.4f}/{limit} {call.currency} of the {period} budget",
+                                       {"principal": call.caller.ref, "period": period, "spent": spent, "estimate": call.cost_est, "limit": limit},
+                                       once_key=f"budget:{call.caller.ref}:{period}", cooldown_s=3600)
 
     # -- admission and ledger
     async def admit(self, call):
@@ -578,6 +634,18 @@ class Gateway:
         else:
             row["status"] = "ok"
         row["detail"] = detail
+        if call.task and row["status"] == "ok" and (self.cfg.get("episodes") or {}).get("enabled", True):
+            try:
+                ep = await self.db.fetchone("SELECT maluos_record_episode('maluos.model_call', %s, %s, %s, %s) AS id",
+                                            (f"{call.model} for {call.task}"[:200],
+                                             f"{call.caller.ref} called {call.backend}/{call.model} ({call.cls}) for task {call.task}: {row.get('tokens_in') or 0} in, {row.get('tokens_out') or 0} out",
+                                             json.dumps({"task_ref": call.task, "principal": call.caller.ref, "backend": call.backend, "model": call.model, "class": call.cls,
+                                                         "tokens_in": row.get("tokens_in"), "tokens_out": row.get("tokens_out"), "cost": row.get("cost_actual"),
+                                                         "request": call.id, "route": call.route}, default=str),
+                                             call.hints.get("sensitivity") or "internal"))
+                row["episode_id"] = ep["id"] if ep else None
+            except Exception as e:
+                log(f"episode for {call.task} not recorded: {e.__class__.__name__}: {str(e)[:120]}")
         await self.ledger_write(row)
         if row.get("cost_actual"):
             for key in [k for k in self.spend_cache if k[0] == call.caller.ref]:
@@ -637,13 +705,19 @@ class Gateway:
                 raise
         raise last
 
+    def error_code(self, call, e):
+        """FR-45/46: a dead local backend is local_unavailable, a dead cloud one cloud_unreachable."""
+        if e.error_class == "backend_unavailable" and call.backend in self.backends:
+            return "cloud_unreachable" if self.backends[call.backend].is_cloud else "local_unavailable"
+        return e.error_class
+
     async def execute(self, call, path, body, timeout_s=None):
         """Non-streaming call: admit, run (with fallback), account."""
         try:
             res = await self.run(call, path, body, False, timeout_s)
         except BackendError as e:
             await self.ledger_done(call, error=e)
-            raise ApiError(e.status if e.status in (401, 403, 404, 429, 503, 504) else 502, e.error_class, e.message, backend=call.backend, route=call.route)
+            raise ApiError(e.status if e.status in (401, 403, 404, 429, 503, 504) else 502, self.error_code(call, e), e.message, backend=call.backend, route=call.route)
         except asyncio.CancelledError:
             await self.ledger_done(call, cancelled=True)
             raise
@@ -657,7 +731,7 @@ class Gateway:
             gen, first = await self.run(call, path, body, True)
         except BackendError as e:
             await self.ledger_done(call, error=e)
-            raise ApiError(e.status if e.status in (401, 403, 404, 429, 503, 504) else 502, e.error_class, e.message, backend=call.backend, route=call.route)
+            raise ApiError(e.status if e.status in (401, 403, 404, 429, 503, 504) else 502, self.error_code(call, e), e.message, backend=call.backend, route=call.route)
         except asyncio.CancelledError:
             await self.ledger_done(call, cancelled=True)
             raise
@@ -745,6 +819,8 @@ class Gateway:
         self.engine_inflight += 1
         conn = None
         rid = row["request_id"]
+        self.inflight.add(rid); self.save_inflight()
+        interrupted = False
         try:
             conn = await self.db.connection()
             caller = Caller(self.cfg["engine_queue"].get("principal") or "service:engine", None, None, "maludb-engine", "engine")
@@ -820,8 +896,13 @@ class Gateway:
                 await self.db.finish_engine_request(conn, rid, "failed", error_class=e.__class__.__name__, user_safe_error=str(e)[:300])
             except Exception:
                 pass
+        except asyncio.CancelledError:
+            interrupted = True      # shutting down: leave the request in the in-flight file for recovery (FR-47)
+            raise
         finally:
             self.engine_inflight -= 1
+            if not interrupted:
+                self.inflight.discard(rid); self.save_inflight()
             if conn:
                 await conn.close()
 
@@ -851,6 +932,7 @@ def build_app(gw):
     r.add_get("/v1/maluos/routes", h_routes)
     r.add_post("/v1/maluos/reload", h_reload)
     r.add_post("/v1/maluos/warm", h_warm)
+    r.add_post("/v1/maluos/alert", h_alert)
     return app
 
 
@@ -1160,6 +1242,8 @@ async def h_reload(request):
     need_operator(await gw.caller(request))
     gw.cfg.reload()
     await gw.reload_catalog()
+    for b in gw.backends.values():
+        b.cooldown_until = 0
     await asyncio.gather(*(b.refresh() for b in gw.backends.values()), return_exceptions=True)
     return web.json_response({"reloaded": True, "backends": list(gw.backends)})
 
@@ -1180,6 +1264,15 @@ async def h_warm(request):
     await gw.backends[bname].refresh()
     gw.schedulers[bname].resident = name
     return web.json_response({"warmed": name, "backend": bname, "load_ms": usage_from(res)["load_ms"]})
+
+
+async def h_alert(request):
+    """Operators: raise an alert by hand (tests, external monitors)."""
+    gw = request.app["gw"]
+    need_operator(await gw.caller(request))
+    body = await read_json(request)
+    fired = await gw.alerts.fire(body.get("kind") or "manual", body.get("title") or "manual alert", body.get("detail") or {})
+    return web.json_response({"fired": fired})
 
 
 # ---------------------------------------------------------------- main

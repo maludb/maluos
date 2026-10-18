@@ -50,7 +50,15 @@ status_publish_s: 2
 engine_queue: {enabled: true, poll_s: 1, class: batch}
 ollama: {url: "http://127.0.0.1:11434", keep_alive: 5m, max_concurrent: 1}
 vault_socket: $W/vault.sock
+state_dir: $W/gwstate
+alerts: {check_s: 2, backend_down_s: 3, backend_down_repeat_s: 60, hooks_dir: $W/hooks, usage_anomaly: {enabled: true, check_s: 2, min_calls: 5, factor: 2}}
+health: {cooldown_s: 2, probe_s: 3}
 EOF
+mkdir -p "$W/gwstate" "$W/hooks"; cat > "$W/hooks/10-record" <<'EOF'
+#!/bin/sh
+cat >> /var/tmp/maluos-gateway-test/hooks.log; echo >> /var/tmp/maluos-gateway-test/hooks.log
+EOF
+chmod +x "$W/hooks/10-record"; : > "$W/hooks.log"; chmod 666 "$W/hooks.log"
 chmod 644 "$W/gateway.yaml"
 printf '{"database":"%s","tenant":"%s","provisioned_at":"test","admin_principal":"human:admin","operators":[],"components":{}}\n' $DB $T > "$W/state/done"
 
@@ -253,6 +261,38 @@ check "/v1/models lists cloud models as cloud" "C $U/v1/models | J '[m[\"id\"] f
 check "status shows the cloud backend with its vault key reference" "mctl status | grep -q 'anthropic-mock  anthropic .* healthy  key: vault anthropic'"
 check "usage report carries cost" "mctl usage --by backend | grep -E 'anthropic-mock +[0-9]+ .* 0\.[0-9]{4}' >/dev/null"
 check "no secret value in the gateway log or ledger" "! grep -rq 'sk-me-anthropic\|sk-system' $W/gw.log && ! sudo -n -u postgres pg_dump -d $DB -n $T --data-only 2>/dev/null | grep -q 'sk-me-anthropic'"
+
+echo "== slice 4: delegation, episodes, alerts, restart accounting, export/import, degradation"
+check "delegation: agent uses the user's key (use only)" "vme delegate --to agent:bot --secret anthropic --expires 1h >/dev/null && Cp -H 'Content-Type: application/json' $U/v1/chat/completions -d '{\"model\":\"cloud\",\"messages\":[{\"role\":\"user\",\"content\":\"d\"}]}' | grep -q 'mock claude' && mock stats | J 'd[\"keys\"][-1][\"key\"]' | grep -q '^sk-me-anthropic$'"
+check "delegation recorded as the access reason in the vault ledger" "SQL \"select count(*) from maluos_ledger where event='secret.use' and principal_ref='agent:bot' and reason='delegation:user:$ME'\" | grep -qE '^[1-9]'"
+check "delegation never grants read" "! sudo -n -u postgres env $ENV python3 $W/lib/maluctl secret show user:$ME/anthropic >/dev/null 2>&1"
+check "delegations list" "vme delegations | grep -q 'user:$ME  agent:bot  user:$ME/anthropic'"
+check "undelegate -> no_credential again" "vme undelegate --to agent:bot --secret anthropic | grep -q 'revoked 1' && Cp -H 'Content-Type: application/json' $U/v1/chat/completions -d '{\"model\":\"cloud\",\"messages\":[{\"role\":\"user\",\"content\":\"d\"}]}' | J 'd[\"error\"][\"route\"][0][\"skipped\"]' | grep -q '^no_credential$'"
+check "a call with a task reference writes a memory episode" "chat -H 'X-MaluOS-Task: ticket-42' $U/v1/chat/completions -d '{\"model\":\"fast\",\"messages\":[{\"role\":\"user\",\"content\":\"t\"}]}' | grep -q 'mock reply' && SQL \"select e.episode_kind || ' ' || (e.payload_jsonb->>'task_ref') from maluos_ledger l join maludb_episode e on e.episode_id=l.episode_id where l.task_ref='ticket-42'\" | grep -q 'maluos.model_call ticket-42'"
+check "budget warning raises an alert (ledger, episode, hook)" "rmctl policy set --principal user:nobody --budget usd_per_day=0.0017,warn_at=0.5 >/dev/null && Cn -H 'Content-Type: application/json' $U/v1/chat/completions -d '{\"model\":\"cloud\",\"max_tokens\":100,\"messages\":[{\"role\":\"user\",\"content\":\"w\"}]}' | grep -q 'mock claude' && sleep 0.5 && SQL \"select count(*) from maluos_ledger where event='alert.budget' and principal_ref='user:nobody'\" | grep -qE '^[1-9]' && SQL \"select count(*) from maludb_episode where episode_kind='maluos.alert' and payload_jsonb->>'kind'='budget'\" | grep -qE '^[1-9]' && grep -q '\"kind\": \"budget\"' $W/hooks.log; rmctl policy rm --principal user:nobody >/dev/null"
+check "manual alert through the API (operators)" "Cr -H 'Content-Type: application/json' $U/v1/maluos/alert -d '{\"kind\":\"test\",\"title\":\"hello alerts\"}' | grep -q '\"fired\": true' && rmctl alerts | grep -q 'test .*hello alerts'"
+check "maluctl secret alerts lists them too (operators see all, users their own)" "vroot alerts | grep -q 'budget' && sudo -n -u nobody env $ENV python3 $W/lib/maluctl secret alerts | grep -q budget && ! vme alerts | grep -q 'hello alerts'"
+kill $(cat $W/mock.pid); sleep 1; Cr -X POST $U/v1/maluos/reload >/dev/null; sleep 6
+check "backend down beyond the limit -> alert" "SQL \"select count(*) from maluos_ledger where event='alert.backend_down' and detail->>'backend'='mock'\" | grep -qE '^[1-9]'"
+check "degradation: local-only work fails with local_unavailable" "chat -H 'X-MaluOS-Local-Only: 1' $U/v1/chat/completions -d '{\"model\":\"fast\",\"messages\":[{\"role\":\"user\",\"content\":\"x\"}]}' | J 'd[\"error\"][\"code\"]' | grep -q local_unavailable"
+check "degradation: cloud-only tier with no reachable provider -> cloud_unreachable" "chat $U/v1/chat/completions -d '{\"model\":\"cloud\",\"messages\":[{\"role\":\"user\",\"content\":\"x\"}]}' | J 'd[\"error\"][\"code\"]' | grep -q cloud_unreachable"
+PYTHONPATH=$W/lib python3 -m maluos_gateway.mock_ollama --port $MOCK --token-delay 0.005 --models mock-7b,mock-13b,mock-embed,mock-fail >>"$W/mock.log" 2>&1 & echo $! > "$W/mock.pid"; disown
+for i in $(seq 1 30); do curl -sf http://127.0.0.1:$MOCK/api/tags >/dev/null && break; sleep 0.5; done; sleep 1; Cr -X POST $U/v1/maluos/reload >/dev/null; sleep 4
+check "backend recovered -> alert" "SQL \"select count(*) from maluos_ledger where event='alert.backend_recovered' and detail->>'backend'='mock'\" | grep -qE '^[1-9]'"
+check "backend serves again after recovery" "chat $U/v1/chat/completions -d '{\"model\":\"fast\",\"messages\":[{\"role\":\"user\",\"content\":\"back\"}]}' | grep -q 'mock reply to: back'"
+RID3=$(SQL "select submit_request('chat', 'lose me', NULL, NULL, '{\"options\": {\"mock_delay_s\": 8}}', 60000)"); sleep 2.5
+kill $(cat $W/gw.pid); sleep 1
+PYTHONPATH=$W/lib MALUOS_GATEWAY_CONFIG=$W/gateway.yaml python3 -m maluos_gateway --socket "$W/gw.sock" >>"$W/gw.log" 2>&1 & echo $! > "$W/gw.pid"; disown
+for i in $(seq 1 40); do [ -S "$W/gw.sock" ] && curl -sf --unix-socket "$W/gw.sock" http://g/v1/maluos/health >/dev/null && break; sleep 0.25; done; sleep 2
+check "restart accounting: the lost engine request is failed as gateway_restart" "SQL \"select status || ' ' || coalesce((select error_class from maludb_core.\\\"malu\\\$model_response\\\" r where r.request_id=$RID3), '-') from maludb_core.\\\"malu\\\$model_request\\\" where request_id=$RID3\" | grep -q 'failed gateway_restart'"
+check "restart recorded in the ledger with an alert" "SQL \"select count(*) from maluos_ledger where event='gateway.restart' and detail->'lost' @> '[$RID3]'\" | grep -qE '^[1-9]' && SQL \"select count(*) from maluos_ledger where event='alert.restart_lost_work'\" | grep -qE '^[1-9]'"
+check "usage anomaly alert after a burst" "for i in \$(seq 1 6); do chat $U/v1/chat/completions -d '{\"model\":\"fast\",\"messages\":[{\"role\":\"user\",\"content\":\"burst\"}]}' >/dev/null; done; sleep 4; SQL \"select count(*) from maluos_ledger where event='alert.usage_anomaly' and principal_ref='user:$ME'\" | grep -qE '^[1-9]'"
+echo pw-test > $W/pw.txt
+check "vault export (operator) is encrypted and logged" "vroot export $W/export.bin --passphrase-file $W/pw.txt | grep -q 'exported [1-9]' && ! grep -q 'sk-me-anthropic' $W/export.bin && SQL \"select count(*) from maluos_ledger where event='vault.export'\" | grep -qE '^[1-9]'"
+check "export refused for non-operators" "! vme export $W/x.bin --passphrase-file $W/pw.txt 2>/dev/null"
+check "import restores a deleted secret" "vme delete anthropic >/dev/null && ! vme show anthropic >/dev/null 2>&1 && vroot import $W/export.bin --passphrase-file $W/pw.txt | grep -q imported && [ \"\$(vme show anthropic)\" = sk-me-anthropic ]"
+check "import with a wrong passphrase fails" "echo wrong > $W/pw2.txt; ! vroot import $W/export.bin --passphrase-file $W/pw2.txt 2>/dev/null"
+check "retired key presented -> alert" "echo sk-me-new | vme rotate anthropic --grace 1h --stdin >/dev/null && vme show anthropic --previous | grep -q sk-me-anthropic && SQL \"select count(*) from maluos_ledger where event='alert.retired_key' and secret_name is null and reason like 'retired value of user:$ME/anthropic%'\" | grep -qE '^[1-9]'"
 
 echo "== ledger"
 check "model.call rows carry tokens, wait, process" "SQL \"select count(*) from maluos_ledger where event='model.call' and status='ok' and tokens_out > 0 and queue_wait_ms is not null and process_ref like 'curl@%' and linux_user='$ME'\" | grep -qE '^[1-9]'"

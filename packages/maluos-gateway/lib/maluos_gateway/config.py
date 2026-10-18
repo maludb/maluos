@@ -14,7 +14,12 @@ DEFAULTS = {
     "request_timeout_s": 600,
     "principal_queue_limit": 20,
     "affinity": {"max_wait_s": 20, "max_backlog": 4},
-    "engine_queue": {"enabled": True, "poll_s": 2, "class": "batch"},
+    "engine_queue": {"enabled": True, "poll_s": 2, "class": "batch", "principal": "service:engine"},
+    "state_dir": "/var/lib/maluos-gateway",
+    "episodes": {"enabled": True},
+    "health": {"cooldown_s": 60, "probe_s": 10},      # a memory episode per call that carries a task reference (FR-42)
+    "alerts": {"hooks_dir": "/etc/maluos/alert-hooks.d", "check_s": 30, "backend_down_s": 300, "backend_down_repeat_s": 3600,
+               "usage_anomaly": {"enabled": True, "check_s": 300, "min_calls": 20, "factor": 3}},
     "ollama": {"url": "http://127.0.0.1:11434", "keep_alive": "30m", "max_concurrent": 1,
                "keep_warm": [], "pull": [], "install": False, "version": "v0.40.6"},
     # Seeded into the catalogue at provisioning when it is empty (operators edit the tables after).

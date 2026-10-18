@@ -111,6 +111,7 @@ def ensure_schema(psql, exists, qi, ql, db, tenant, role=ROLE, schema=SCHEMA):
     psql(f"""SET ROLE {t};
              GRANT SELECT, INSERT, UPDATE, DELETE ON {', '.join(f'{t}.{x}' for x in TABLES)} TO {rl};
              GRANT SELECT, INSERT ON {t}.maluos_ledger TO {rl};
+             GRANT EXECUTE ON FUNCTION {t}.maluos_record_episode(text, text, text, jsonb, text) TO {rl};
              GRANT USAGE, SELECT ON {', '.join(f'{t}.{s}' for s in SEQUENCES)} TO {rl};""", db)
 
 

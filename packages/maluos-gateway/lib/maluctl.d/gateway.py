@@ -18,6 +18,7 @@
   maluctl gateway token list | revoke ID
   maluctl gateway usage [--since 7d] [--by principal|model|class|backend|user|day] [--raw]
   maluctl gateway ollama install [--version vX.Y.Z] | pull MODEL [--backend B] | warm MODEL [--backend B] | status
+  maluctl gateway alerts [--since 7d]                  alert rows (budget, backend down/recovered, usage anomaly, restart)
   maluctl gateway reload
 
 Callers use the gateway at the Unix socket /run/maluos/gateway.sock with any
@@ -346,6 +347,18 @@ def run(a):
                     print(f"  models: {', '.join(b['models']) or '(none; maluctl gateway ollama pull MODEL)'}")
                     print(f"  loaded: {', '.join(m['name'] for m in b['loaded']) or '-'}")
             return 0
+    if cmd == "alerts":
+        from maluos_vault_client import Vault, VaultError
+        since = opt(a, "--since", "7d")
+        try:
+            rows = Vault().ledger(since=since, event_like="alert.%", limit=500)
+        except VaultError as e:
+            raise GwError(f"ledger via the vault: {e.message}")
+        for r in reversed(rows):
+            print(f"{r['ts'][:19]}  {r['event'][6:]:18} {r.get('reason') or ''}")
+        if not rows:
+            print("(no alerts)")
+        return 0
     if cmd == "reload":
         print(api("POST", "/v1/maluos/reload")); return 0
     print(__doc__); return 2
