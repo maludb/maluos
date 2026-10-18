@@ -1,0 +1,6 @@
+maluos-agent (0.1.0) resolute; urgency=medium
+
+  * Initial release: maluctl agent create/list/show/run/start/stop/logs/remove,
+    maluos-agent@.service template with standard and strict sandboxes, demo agent.
+
+ -- Edward Honour <ed@maludb.org>  Sun, 18 Oct 2026 18:30:00 +0000

@@ -73,3 +73,7 @@ inside tmux (`tmux new -s maluos`, reattach with `tmux attach -t maluos`).
 ```
 curl -fsSL https://apt.maludb.org/maluos/bootstrap/install-maluos.sh | sudo bash
 ```
+
+## Releases
+
+Dated builds `26.04.YYYYMMDD`: `scripts/release.sh` tags, names, checksums and signs the artefacts and creates the GitHub Release; keys and hosting are in docs/release.md.

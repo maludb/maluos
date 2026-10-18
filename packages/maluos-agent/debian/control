@@ -1,0 +1,21 @@
+Source: maluos-agent
+Section: admin
+Priority: optional
+Maintainer: Edward Honour <ed@maludb.org>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.6.2
+Homepage: https://github.com/maludb/maluos
+Rules-Requires-Root: no
+
+Package: maluos-agent
+Architecture: all
+Depends: ${misc:Depends}, adduser, python3 (>= 3.12), python3-yaml, maluos-firstboot (>= 0.1.6), maluos-vault (>= 0.2.0), maluos-gateway (>= 0.3.0)
+Description: MaluOS agents as system entities: maluctl agent
+ `maluctl agent create` makes an agent real on the host in one step: a
+ Linux system user, a MaluDB principal with scope grants, the identity
+ mapping the vault and the gateway use, the agent's own secret compartment,
+ a gateway policy (class, tiers, cloud, egress ceiling, budget), optionally
+ a gateway token delivered as a systemd credential, and a hardened
+ maluos-agent@NAME unit running the agent's command as that user with the
+ MaluOS endpoints in its environment. `maluctl agent run` executes a
+ command as an agent; `remove` reverses it all.

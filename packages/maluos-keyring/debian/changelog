@@ -1,3 +1,9 @@
+maluos-keyring (0.2.0) resolute; urgency=medium
+
+  * Import every key in keys/*.asc: production keys and rotation.
+
+ -- Edward Honour <ed@maludb.org>  Sun, 18 Oct 2026 20:35:21 +0000
+
 maluos-keyring (0.1.0) resolute; urgency=medium
 
   * Initial release.

@@ -1,0 +1,4 @@
+lib/maluctl.d/agent.py         usr/lib/maluos/maluctl.d
+lib/maluos-agent-idle          usr/lib/maluos
+lib/maluos-agent-demo.py       usr/lib/maluos
+systemd/maluos-agent@.service  usr/lib/systemd/system

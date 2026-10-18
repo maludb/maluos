@@ -1,0 +1,4 @@
+#!/bin/sh
+# Placeholder command for an agent created without --exec: identifies itself and waits.
+echo "maluos agent ${MALUOS_AGENT:-?} (${MALUOS_PRINCIPAL:-?}) idle; set --exec to run something"
+exec sleep infinity

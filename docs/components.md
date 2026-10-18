@@ -65,6 +65,11 @@ in firstboot.yaml). Cloud rungs, budgets and alerts are in slices 3 and 4
 (docs/phase6-slice3-routing.md, phase6-slice4-operations.md); alert hooks go
 in /etc/maluos/alert-hooks.d.
 
+### maluos-agent (package maluos-agent, in maluos-server)
+
+`maluctl agent` (docs/agents.md): agents as system entities. No first-boot
+module; it acts on a provisioned host.
+
 ### maludb-api (package maludb-api, metapackage maluos-api)
 
 The MaluDB Python API server (github.com/maludb/maludb-python-api-server),

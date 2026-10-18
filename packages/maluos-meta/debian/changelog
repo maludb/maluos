@@ -1,3 +1,9 @@
+maluos-meta (0.1.7) resolute; urgency=medium
+
+  * maluos-server: add maluos-agent.
+
+ -- Edward Honour <ed@maludb.org>  Sun, 18 Oct 2026 20:32:51 +0000
+
 maluos-meta (0.1.6) resolute; urgency=medium
 
   * maluos-server: add maluos-gateway.

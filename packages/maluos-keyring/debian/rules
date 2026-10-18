@@ -4,7 +4,7 @@
 
 override_dh_auto_build:
 	mkdir -p build
-	gpg --batch --no-default-keyring --keyring ./build/tmp.kbx --import keys/maluos-archive-keyring.asc
+	for k in keys/*.asc; do gpg --batch --no-default-keyring --keyring ./build/tmp.kbx --import "$$k"; done
 	gpg --batch --no-default-keyring --keyring ./build/tmp.kbx --export > build/maluos-archive-keyring.gpg
 	test -s build/maluos-archive-keyring.gpg
 

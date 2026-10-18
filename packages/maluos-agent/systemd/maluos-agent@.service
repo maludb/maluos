@@ -1,0 +1,43 @@
+[Unit]
+Description=MaluOS agent %i
+Documentation=https://github.com/maludb/maluos
+After=network-online.target maluos-gateway.socket maluos-vault.socket maludb-mc2dbd.service
+Wants=maluos-gateway.socket maluos-vault.socket
+
+[Service]
+Type=simple
+User=agent-%i
+Group=agent-%i
+EnvironmentFile=/etc/maluos/agents/%i.env
+Environment=HOME=/var/lib/maluos/agents/%i
+WorkingDirectory=/var/lib/maluos/agents/%i
+ExecStart=/bin/sh -c 'exec ${MALUOS_AGENT_EXEC}'
+LoadCredential=gateway-token:/etc/maluos/agents/%i.token
+Restart=on-failure
+RestartSec=5
+
+# Hardening: the agent owns only its home; it reaches the host's services over their sockets.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/maluos/agents/%i
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,9 @@
+#!/bin/sh
+set -e
+case "$1" in
+    configure)
+        install -d -m 0755 /etc/maluos/agents /var/lib/maluos/agents
+        ;;
+esac
+#DEBHELPER#
+exit 0
