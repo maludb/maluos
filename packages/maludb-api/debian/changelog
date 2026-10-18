@@ -1,3 +1,10 @@
+maludb-api (0.4.1maluos5) resolute; urgency=medium
+
+  * Component: keep the tenant database password and the API token in
+    the vault's system compartment.
+
+ -- Edward Honour <ed@maludb.org>  Sun, 18 Oct 2026 12:16:10 +0000
+
 maludb-api (0.4.1maluos4) resolute; urgency=medium
 
   * First-boot component: MALUDB_STORE_KEY is a Fernet key; replace an

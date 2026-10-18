@@ -1,0 +1,13 @@
+#!/bin/sh
+set -e
+case "$1" in
+    configure)
+        if ! getent passwd maluos-vault >/dev/null; then
+            adduser --system --group --no-create-home --home /var/lib/maluos-vault \
+                    --shell /usr/sbin/nologin maluos-vault
+        fi
+        install -d -o maluos-vault -g maluos-vault -m 0700 /var/lib/maluos-vault
+        ;;
+esac
+#DEBHELPER#
+exit 0

@@ -1,0 +1,6 @@
+lib/maluos_vault.py              usr/lib/maluos
+lib/maluos_vault_client.py       usr/lib/maluos
+lib/maluctl.d/secret.py          usr/lib/maluos/maluctl.d
+components/40-maluos-vault.py    usr/lib/maluos/components
+share/schema.sql                 usr/share/maluos-vault
+etc/vault.yaml                   etc/maluos

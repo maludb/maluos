@@ -74,6 +74,9 @@ def provision(ctx):
         with open(os.open(tok_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
             f.write(token + "\n")
     log(f"maludb-api healthy at {url}; tenant token in {tok_file}")
+    if ctx.get("store_secret"):
+        ctx["store_secret"](f"pg-{tenant}-password", password, kind="password", provider="postgresql", env_var="PGPASSWORD")
+        ctx["store_secret"]("maludb-api-token", token, kind="token", provider="maludb-api", env_var="MALU_TOKEN")
 
     # 5. sweeps
     for s in SWEEPS:

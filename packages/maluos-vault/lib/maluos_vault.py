@@ -1,0 +1,724 @@
+#!/usr/bin/python3
+"""maluos-vault: the MaluOS secret vault.
+
+One daemon on a Unix socket. The caller's identity is the kernel-reported
+uid of the peer (SO_PEERCRED), mapped to a MaluDB principal (`user:<name>`
+unless /etc/maluos/vault.yaml maps the user elsewhere). Secret metadata,
+compartments, grants and the ledger live in the tenant schema; secret
+values are AES-256-GCM blobs under /var/lib/maluos-vault/blobs, keyed from a
+master key that systemd hands the service as an encrypted credential
+(LoadCredentialEncrypted=, sealed to the TPM when the host has one).
+
+Wire protocol: HTTP/1.1 + JSON over the socket (see docs/phase6-slice1-vault.md).
+"""
+import datetime, http.server, json, os, pwd, re, secrets, socket, socketserver, struct, sys, threading, time, urllib.parse
+import psycopg
+from psycopg import sql as pgsql
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.hazmat.primitives import hashes
+
+VERSION = "0.1.0"
+CONFIG = os.environ.get("MALUOS_VAULT_CONFIG", "/etc/maluos/vault.yaml")
+DEFAULTS = {
+    "socket": "/run/maluos/vault.sock",
+    "database": "maludb", "tenant": "maluos",
+    "pg_host": "/var/run/postgresql", "pg_user": None, "pg_role": None,
+    "state_dir": "/var/lib/maluos-vault",
+    "brokers": [],            # Linux users allowed to act on behalf of a principal (the gateway)
+    "identities": {},         # linux user -> principal ref, when not user:<name>
+    "default_lock_mode": "always_unlocked",
+}
+NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.@-]{0,119}$")
+COMP_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:_.@-]{0,119}$")
+KINDS = ("api_key", "token", "password", "generic")
+LEVELS = ("use", "read")
+LOCK_MODES = ("always_unlocked", "manual", "login")
+
+
+def log(msg):
+    print(f"maluos-vault: {msg}", file=sys.stderr, flush=True)
+
+
+def utcnow():
+    return datetime.datetime.now(datetime.timezone.utc)
+
+
+# ---------------------------------------------------------------- config
+class Config:
+    def __init__(self):
+        self._mtime = None; self.data = dict(DEFAULTS); self.reload()
+
+    def reload(self):
+        try:
+            st = os.stat(CONFIG)
+        except FileNotFoundError:
+            self.data = dict(DEFAULTS); return
+        if st.st_mtime == self._mtime:
+            return
+        import yaml
+        with open(CONFIG) as f:
+            user = yaml.safe_load(f) or {}
+        d = dict(DEFAULTS); d.update({k: v for k, v in user.items() if v is not None})
+        d["brokers"] = list(d.get("brokers") or []); d["identities"] = dict(d.get("identities") or {})
+        self.data, self._mtime = d, st.st_mtime
+
+    def __getitem__(self, k):
+        self.reload(); return self.data[k]
+
+
+CFG = Config()
+
+
+# ---------------------------------------------------------------- blob store
+class Store:
+    MAGIC = b"MV1"
+
+    def __init__(self, master, blob_dir):
+        if len(master) < 32:
+            raise RuntimeError("master key too short")
+        self.master, self.dir = master, blob_dir
+        os.makedirs(blob_dir, mode=0o700, exist_ok=True)
+
+    def _key(self, salt, ref):
+        return HKDF(algorithm=hashes.SHA256(), length=32, salt=salt, info=b"maluos-vault secret v1 " + ref.encode()).derive(self.master)
+
+    def put(self, value: bytes) -> str:
+        ref = secrets.token_hex(16)
+        salt, nonce = os.urandom(16), os.urandom(12)
+        ct = AESGCM(self._key(salt, ref)).encrypt(nonce, value, ref.encode())
+        tmp = os.path.join(self.dir, ref + ".tmp")
+        with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as f:
+            f.write(self.MAGIC + salt + nonce + ct)
+        os.rename(tmp, os.path.join(self.dir, ref))
+        return ref
+
+    def get(self, ref: str) -> bytes:
+        with open(os.path.join(self.dir, ref), "rb") as f:
+            blob = f.read()
+        if blob[:3] != self.MAGIC:
+            raise RuntimeError("bad blob header")
+        salt, nonce, ct = blob[3:19], blob[19:31], blob[31:]
+        return AESGCM(self._key(salt, ref)).decrypt(nonce, ct, ref.encode())
+
+    def delete(self, ref):
+        if ref:
+            try:
+                os.remove(os.path.join(self.dir, ref))
+            except FileNotFoundError:
+                pass
+
+
+def load_master():
+    cdir = os.environ.get("CREDENTIALS_DIRECTORY")
+    path = os.path.join(cdir, "maluos-vault.key") if cdir else None
+    if not path or not os.path.exists(path):
+        raise RuntimeError("no master key: expected $CREDENTIALS_DIRECTORY/maluos-vault.key (LoadCredentialEncrypted)")
+    with open(path, "rb") as f:
+        return f.read()
+
+
+# ---------------------------------------------------------------- database
+def connect():
+    d = CFG.data
+    kw = {"dbname": d["database"], "host": d["pg_host"], "autocommit": True,
+          "options": f"-c search_path={d['tenant']},maludb_core,public"}
+    if d.get("pg_user"):
+        kw["user"] = d["pg_user"]
+    conn = psycopg.connect(**kw)
+    if d.get("pg_role"):
+        conn.execute(pgsql.SQL("SET ROLE {}").format(pgsql.Identifier(d["pg_role"])))
+    return conn
+
+
+# ---------------------------------------------------------------- errors
+class ApiError(Exception):
+    def __init__(self, status, code, message):
+        super().__init__(message); self.status, self.code, self.message = status, code, message
+
+
+# ---------------------------------------------------------------- caller identity
+class Caller:
+    def __init__(self, pid, uid, gid):
+        self.pid, self.uid, self.gid = pid, uid, gid
+        try:
+            self.user = pwd.getpwuid(uid).pw_name
+        except KeyError:
+            self.user = str(uid)
+        self.operator = uid == 0
+        self.broker = self.user in CFG["brokers"]
+        self.process_ref = process_ref(pid)
+        self.principal = None      # row dict or None (unenrolled)
+        self.ref = CFG["identities"].get(self.user, f"user:{self.user}")
+        self.broker_ref = None     # set when acting on behalf of someone
+
+    def resolve(self, cur, on_behalf_of=None):
+        if on_behalf_of:
+            if not (self.operator or self.broker):
+                raise ApiError(403, "not_a_broker", f"{self.user} may not act on behalf of another principal")
+            self.broker_ref = self.ref
+            self.ref = on_behalf_of
+        cur.execute("SELECT principal_ref, principal_kind, home_scope, enabled FROM maludb_principal WHERE principal_ref=%s", (self.ref,))
+        row = cur.fetchone()
+        if row:
+            self.principal = {"ref": row[0], "kind": row[1], "home_scope": row[2], "enabled": row[3]}
+            if not row[3]:
+                raise ApiError(403, "principal_disabled", f"principal {self.ref} is disabled")
+        elif on_behalf_of:
+            raise ApiError(404, "unknown_principal", f"no principal {on_behalf_of}")
+        return self
+
+    def scopes(self, cur):
+        if not self.principal:
+            return set()
+        s = {self.principal["home_scope"]} if self.principal["home_scope"] else set()
+        cur.execute("SELECT scope FROM maludb_principal_scope WHERE principal_ref=%s AND revoked_at IS NULL", (self.ref,))
+        s.update(r[0] for r in cur.fetchall())
+        return s
+
+    def as_dict(self):
+        return {"uid": self.uid, "user": self.user, "pid": self.pid, "process": self.process_ref,
+                "principal": self.ref if self.principal else None, "enrolled": bool(self.principal),
+                "kind": self.principal["kind"] if self.principal else None,
+                "operator": self.operator, "broker": self.broker, "broker_ref": self.broker_ref}
+
+
+def process_ref(pid):
+    comm = unit = None
+    try:
+        with open(f"/proc/{pid}/comm") as f:
+            comm = f.read().strip()
+        with open(f"/proc/{pid}/cgroup") as f:
+            for line in f:
+                path = line.strip().split(":", 2)[-1]
+                parts = [p for p in path.split("/") if p]
+                if parts:
+                    unit = parts[-1]
+    except OSError:
+        pass
+    if comm and unit:
+        return f"{comm}@{unit}"
+    return comm or unit or None
+
+
+# ---------------------------------------------------------------- vault logic
+class Vault:
+    def __init__(self, store):
+        self.store = store
+
+    # -- ledger
+    def ledger(self, cur, event, caller, status, reason=None, secret=None, comp=None, level=None, purpose=None, detail=None):
+        cur.execute("""INSERT INTO maluos_ledger (event, principal_ref, linux_user, linux_uid, process_ref, broker_ref,
+                         compartment, secret_name, secret_id, grant_level, purpose, status, reason, detail)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                    (event, caller.ref if (caller.principal or caller.broker_ref) else None, caller.user, caller.uid,
+                     caller.process_ref, caller.broker_ref,
+                     comp["name"] if comp else None, secret["name"] if secret else None,
+                     secret["secret_id"] if secret else None, level, purpose, status, reason,
+                     json.dumps(detail) if detail is not None else None))
+
+    def deny(self, cur, event, caller, code, message, status=403, **kw):
+        self.ledger(cur, event, caller, "denied", reason=code, **kw)
+        raise ApiError(status, code, message)
+
+    # -- compartments
+    def compartment(self, cur, name, create=False, caller=None):
+        cur.execute("SELECT compartment_id, name, owner_principal_ref, scope, lock_mode, locked, created_at FROM maluos_compartment WHERE name=%s", (name,))
+        r = cur.fetchone()
+        if r:
+            return self._comp(r)
+        if create and caller and caller.principal and name == caller.ref:
+            cur.execute("""INSERT INTO maluos_compartment (name, owner_principal_ref, lock_mode) VALUES (%s,%s,%s)
+                           RETURNING compartment_id, name, owner_principal_ref, scope, lock_mode, locked, created_at""",
+                        (name, caller.ref, CFG["default_lock_mode"]))
+            return self._comp(cur.fetchone())
+        return None
+
+    @staticmethod
+    def _comp(r):
+        return {"compartment_id": r[0], "name": r[1], "owner": r[2], "scope": r[3], "lock_mode": r[4], "locked": r[5],
+                "created_at": r[6].isoformat() if r[6] else None, "shared": r[2] is None}
+
+    def may_manage(self, caller, comp):
+        return caller.operator or (caller.principal is not None and comp["owner"] == caller.ref)
+
+    def visible_compartments(self, cur, caller):
+        cur.execute("SELECT compartment_id, name, owner_principal_ref, scope, lock_mode, locked, created_at FROM maluos_compartment ORDER BY owner_principal_ref NULLS FIRST, name")
+        out = []
+        for r in cur.fetchall():
+            c = self._comp(r)
+            if caller.operator or c["shared"] or c["owner"] == caller.ref:
+                out.append(c)
+        return out
+
+    # -- secrets
+    SECRET_COLS = "s.secret_id, s.compartment_id, s.name, s.kind, s.provider, s.env_var, s.cred_ref, s.previous_cred_ref, s.grace_until, s.created_by, s.created_at, s.rotated_at, s.expires_at, c.name"
+
+    def _secret(self, r):
+        return {"secret_id": r[0], "compartment_id": r[1], "name": r[2], "kind": r[3], "provider": r[4], "env_var": r[5],
+                "cred_ref": r[6], "previous_cred_ref": r[7], "grace_until": r[8].isoformat() if r[8] else None,
+                "created_by": r[9], "created_at": r[10].isoformat() if r[10] else None,
+                "rotated_at": r[11].isoformat() if r[11] else None, "expires_at": r[12].isoformat() if r[12] else None,
+                "compartment": r[13], "ref": f"{r[13]}/{r[2]}"}
+
+    def public(self, s):
+        return {k: v for k, v in s.items() if k not in ("cred_ref", "previous_cred_ref")}
+
+    def secrets_in(self, cur, comp_id):
+        cur.execute(f"SELECT {self.SECRET_COLS} FROM maluos_secret s JOIN maluos_compartment c USING (compartment_id) WHERE s.compartment_id=%s ORDER BY s.name", (comp_id,))
+        return [self._secret(r) for r in cur.fetchall()]
+
+    def live_grants(self, cur, secret_id):
+        cur.execute("""SELECT grant_id, grantee_kind, grantee_ref, level, budget, expires_at, granted_by, granted_at
+                       FROM maluos_secret_grant WHERE secret_id=%s AND revoked_at IS NULL
+                         AND (expires_at IS NULL OR expires_at > now()) ORDER BY grant_id""", (secret_id,))
+        return [{"grant_id": r[0], "grantee_kind": r[1], "grantee_ref": r[2], "level": r[3], "budget": r[4],
+                 "expires_at": r[5].isoformat() if r[5] else None, "granted_by": r[6],
+                 "granted_at": r[7].isoformat() if r[7] else None} for r in cur.fetchall()]
+
+    def access(self, cur, caller, secret, comp):
+        """(level, why) the caller holds on the secret, or (None, None)."""
+        if caller.operator:
+            return "read", "operator"
+        if caller.principal and comp["owner"] == caller.ref:
+            return "read", "owner"
+        if not caller.principal:
+            return None, None
+        best, why = None, None
+        scopes = None
+        for g in self.live_grants(cur, secret["secret_id"]):
+            hit = False
+            if g["grantee_kind"] == "principal" and g["grantee_ref"] == caller.ref:
+                hit = True
+            elif g["grantee_kind"] == "scope":
+                if scopes is None:
+                    scopes = caller.scopes(cur)
+                hit = g["grantee_ref"] in scopes
+            if hit and (best is None or (g["level"] == "read" and best == "use")):
+                best, why = g["level"], f"grant:{g['grantee_kind']}:{g['grantee_ref']}"
+        return best, why
+
+    def resolve(self, cur, caller, ref):
+        """'compartment/name' or bare 'name' -> (secret, compartment). FR-13 order:
+        the caller's own compartment, then compartments it holds grants in."""
+        if "/" in ref:
+            cname, name = ref.split("/", 1)
+            comp = self.compartment(cur, cname)
+            if not comp:
+                raise ApiError(404, "no_compartment", f"no compartment {cname}")
+            cur.execute(f"SELECT {self.SECRET_COLS} FROM maluos_secret s JOIN maluos_compartment c USING (compartment_id) WHERE s.compartment_id=%s AND s.name=%s", (comp["compartment_id"], name))
+            r = cur.fetchone()
+            if not r:
+                raise ApiError(404, "no_secret", f"no secret {ref}")
+            return self._secret(r), comp
+        cur.execute(f"SELECT {self.SECRET_COLS} FROM maluos_secret s JOIN maluos_compartment c USING (compartment_id) WHERE s.name=%s ORDER BY (c.owner_principal_ref = %s) DESC NULLS LAST, c.name", (ref, caller.ref))
+        rows = [self._secret(r) for r in cur.fetchall()]
+        if not rows:
+            raise ApiError(404, "no_secret", f"no secret named {ref}")
+        own = [s for s in rows if s["compartment"] == caller.ref]
+        if own:
+            return own[0], self.compartment(cur, own[0]["compartment"])
+        reachable = []
+        for s in rows:
+            comp = self.compartment(cur, s["compartment"])
+            if self.access(cur, caller, s, comp)[0]:
+                reachable.append((s, comp))
+        if len(reachable) == 1:
+            return reachable[0]
+        if not reachable:
+            raise ApiError(404, "no_secret", f"no secret named {ref} that you may use")
+        raise ApiError(409, "ambiguous", f"{ref} exists in several compartments: " + ", ".join(s["ref"] for s, _ in reachable))
+
+    # -- operations
+    def add(self, cur, caller, body):
+        name = str(body.get("name") or "")
+        if not NAME_RE.match(name):
+            raise ApiError(400, "bad_name", "secret names: letters, digits, _ . @ -")
+        cname = body.get("compartment") or caller.ref
+        if cname == caller.ref and not caller.principal:
+            self.deny(cur, "secret.add", caller, "not_enrolled", f"{caller.user} is not an enrolled principal (maluctl principal add user:{caller.user} --kind human)")
+        comp = self.compartment(cur, cname, create=True, caller=caller)
+        if not comp:
+            raise ApiError(404, "no_compartment", f"no compartment {cname}")
+        if not self.may_manage(caller, comp):
+            self.deny(cur, "secret.add", caller, "forbidden", f"only the owner or an operator may add to {cname}", comp=comp)
+        kind = body.get("kind") or "api_key"
+        if kind not in KINDS:
+            raise ApiError(400, "bad_kind", f"kind must be one of {', '.join(KINDS)}")
+        value = body.get("value")
+        if not isinstance(value, str) or value == "":
+            raise ApiError(400, "no_value", "value is required")
+        expires = parse_ts(body.get("expires_at"))
+        cur.execute("SELECT secret_id FROM maluos_secret WHERE compartment_id=%s AND name=%s", (comp["compartment_id"], name))
+        if cur.fetchone():
+            if body.get("upsert"):
+                s, _ = self.resolve(cur, caller, f"{cname}/{name}")
+                return self.rotate(cur, caller, s, comp, value, body.get("grace_hours", 0), meta=body)
+            raise ApiError(409, "exists", f"{cname}/{name} exists (use rotate)")
+        ref = self.store.put(value.encode())
+        cur.execute("""INSERT INTO maluos_secret (compartment_id, name, kind, provider, env_var, cred_ref, created_by, expires_at)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING secret_id""",
+                    (comp["compartment_id"], name, kind, body.get("provider"), body.get("env_var"), ref, caller.ref, expires))
+        sid = cur.fetchone()[0]
+        s = {"secret_id": sid, "name": name}
+        self.ledger(cur, "secret.add", caller, "ok", secret=s, comp=comp, detail={"kind": kind, "provider": body.get("provider")})
+        secret, _ = self.resolve(cur, caller, f"{cname}/{name}")
+        return self.public(secret)
+
+    def value(self, cur, caller, secret, comp, mode, purpose, previous=False):
+        event = "secret.use" if mode == "use" else "secret.read"
+        if mode == "use" and not (caller.broker_ref or caller.operator or caller.broker):
+            # `use` is the broker's verb: the value goes to the gateway, never to the caller (FR-14).
+            self.deny(cur, event, caller, "use_requires_broker", "mode=use is only for brokers; request mode=read", secret=secret, comp=comp)
+        level, why = self.access(cur, caller, secret, comp)
+        need = "use" if mode == "use" else "read"
+        if level is None or (need == "read" and level != "read"):
+            self.deny(cur, event, caller, "forbidden", f"no {need} access to {secret['ref']}", secret=secret, comp=comp, level=level)
+        if comp["locked"]:
+            self.deny(cur, event, caller, "locked", f"compartment {comp['name']} is locked", status=423, secret=secret, comp=comp, level=level)
+        if secret["expires_at"] and parse_ts(secret["expires_at"]) <= utcnow():
+            self.deny(cur, event, caller, "expired", f"{secret['ref']} expired at {secret['expires_at']}", status=410, secret=secret, comp=comp, level=level)
+        ref = secret["cred_ref"]
+        if previous:
+            if not secret["previous_cred_ref"] or not secret["grace_until"] or parse_ts(secret["grace_until"]) <= utcnow():
+                self.deny(cur, event, caller, "no_previous", "no previous value within its grace window", status=404, secret=secret, comp=comp, level=level)
+            ref = secret["previous_cred_ref"]
+        try:
+            val = self.store.get(ref).decode()
+        except Exception as e:
+            self.ledger(cur, event, caller, "error", reason="store_error", secret=secret, comp=comp, level=level, purpose=purpose)
+            raise ApiError(500, "store_error", f"cannot open secret value: {e.__class__.__name__}")
+        self.ledger(cur, event, caller, "ok", reason=why, secret=secret, comp=comp, level=level, purpose=purpose,
+                    detail={"previous": previous} if previous else None)
+        return {"ref": secret["ref"], "name": secret["name"], "kind": secret["kind"], "provider": secret["provider"],
+                "env_var": secret["env_var"], "value": val, "level": level, "via": why}
+
+    def rotate(self, cur, caller, secret, comp, value, grace_hours=0, meta=None):
+        if not self.may_manage(caller, comp):
+            self.deny(cur, "secret.rotate", caller, "forbidden", f"only the owner or an operator may rotate {secret['ref']}", secret=secret, comp=comp)
+        if not isinstance(value, str) or value == "":
+            raise ApiError(400, "no_value", "value is required")
+        try:
+            same = self.store.get(secret["cred_ref"]).decode() == value
+        except Exception:
+            same = False
+        if same:
+            return self.public(secret)
+        new_ref = self.store.put(value.encode())
+        grace = float(grace_hours or 0)
+        self.store.delete(secret["previous_cred_ref"])
+        prev, until = (secret["cred_ref"], utcnow() + datetime.timedelta(hours=grace)) if grace > 0 else (None, None)
+        if not prev:
+            self.store.delete(secret["cred_ref"])
+        sets, args = ["cred_ref=%s", "previous_cred_ref=%s", "grace_until=%s", "rotated_at=now()"], [new_ref, prev, until]
+        for k in ("kind", "provider", "env_var"):
+            if meta and meta.get(k) is not None:
+                sets.append(f"{k}=%s"); args.append(meta[k])
+        if meta and "expires_at" in meta:
+            sets.append("expires_at=%s"); args.append(parse_ts(meta.get("expires_at")))
+        args.append(secret["secret_id"])
+        cur.execute(f"UPDATE maluos_secret SET {', '.join(sets)} WHERE secret_id=%s", args)
+        self.ledger(cur, "secret.rotate", caller, "ok", secret=secret, comp=comp, detail={"grace_hours": grace})
+        s, _ = self.resolve(cur, caller, secret["ref"])
+        return self.public(s)
+
+    def delete(self, cur, caller, secret, comp):
+        if not self.may_manage(caller, comp):
+            self.deny(cur, "secret.delete", caller, "forbidden", f"only the owner or an operator may delete {secret['ref']}", secret=secret, comp=comp)
+        cur.execute("DELETE FROM maluos_secret WHERE secret_id=%s", (secret["secret_id"],))
+        self.store.delete(secret["cred_ref"]); self.store.delete(secret["previous_cred_ref"])
+        self.ledger(cur, "secret.delete", caller, "ok", secret=secret, comp=comp)
+        return {"deleted": secret["ref"]}
+
+    def grant(self, cur, caller, secret, comp, body):
+        if not self.may_manage(caller, comp):
+            self.deny(cur, "grant.add", caller, "forbidden", f"only the owner or an operator may grant {secret['ref']}", secret=secret, comp=comp)
+        gk, gr, level = body.get("grantee_kind"), str(body.get("grantee_ref") or ""), body.get("level") or "use"
+        if gk not in ("principal", "scope") or not gr:
+            raise ApiError(400, "bad_grantee", "grantee_kind principal|scope and grantee_ref are required")
+        if level not in LEVELS:
+            raise ApiError(400, "bad_level", "level must be use or read")
+        if gk == "principal":
+            cur.execute("SELECT 1 FROM maludb_principal WHERE principal_ref=%s", (gr,))
+            if not cur.fetchone():
+                raise ApiError(404, "unknown_principal", f"no principal {gr}")
+        expires = parse_ts(body.get("expires_at"))
+        cur.execute("UPDATE maluos_secret_grant SET revoked_at=now(), revoked_by=%s WHERE secret_id=%s AND grantee_kind=%s AND grantee_ref=%s AND revoked_at IS NULL",
+                    (caller.ref, secret["secret_id"], gk, gr))
+        cur.execute("""INSERT INTO maluos_secret_grant (secret_id, grantee_kind, grantee_ref, level, budget, expires_at, granted_by)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING grant_id""",
+                    (secret["secret_id"], gk, gr, level, json.dumps(body["budget"]) if body.get("budget") else None, expires, caller.ref))
+        gid = cur.fetchone()[0]
+        self.ledger(cur, "grant.add", caller, "ok", secret=secret, comp=comp, level=level,
+                    detail={"grantee_kind": gk, "grantee_ref": gr, "expires_at": expires.isoformat() if expires else None})
+        return {"grant_id": gid, "secret": secret["ref"], "grantee_kind": gk, "grantee_ref": gr, "level": level}
+
+    def revoke(self, cur, caller, secret, comp, body):
+        if not self.may_manage(caller, comp):
+            self.deny(cur, "grant.revoke", caller, "forbidden", f"only the owner or an operator may revoke on {secret['ref']}", secret=secret, comp=comp)
+        gk, gr = body.get("grantee_kind"), str(body.get("grantee_ref") or "")
+        cur.execute("UPDATE maluos_secret_grant SET revoked_at=now(), revoked_by=%s WHERE secret_id=%s AND grantee_kind=%s AND grantee_ref=%s AND revoked_at IS NULL",
+                    (caller.ref, secret["secret_id"], gk, gr))
+        n = cur.rowcount
+        self.ledger(cur, "grant.revoke", caller, "ok" if n else "noop", secret=secret, comp=comp, detail={"grantee_kind": gk, "grantee_ref": gr})
+        return {"revoked": n}
+
+    def set_lock(self, cur, caller, comp, locked):
+        if not self.may_manage(caller, comp):
+            self.deny(cur, "compartment.lock", caller, "forbidden", f"only the owner or an operator may lock {comp['name']}", comp=comp)
+        cur.execute("UPDATE maluos_compartment SET locked=%s WHERE compartment_id=%s", (locked, comp["compartment_id"]))
+        self.ledger(cur, "compartment.lock" if locked else "compartment.unlock", caller, "ok", comp=comp)
+        return self.compartment(cur, comp["name"])
+
+    def create_compartment(self, cur, caller, body):
+        name = str(body.get("name") or "")
+        if not COMP_RE.match(name):
+            raise ApiError(400, "bad_name", "compartment names: letters, digits, : _ . @ -")
+        if self.compartment(cur, name):
+            raise ApiError(409, "exists", f"compartment {name} exists")
+        mode = body.get("lock_mode") or CFG["default_lock_mode"]
+        if mode not in LOCK_MODES:
+            raise ApiError(400, "bad_lock_mode", f"lock_mode must be one of {', '.join(LOCK_MODES)}")
+        owner = body.get("owner")
+        if owner:
+            cur.execute("SELECT 1 FROM maludb_principal WHERE principal_ref=%s", (owner,))
+            if not cur.fetchone():
+                raise ApiError(404, "unknown_principal", f"no principal {owner}")
+        if not caller.operator and not (caller.principal and owner == caller.ref):
+            self.deny(cur, "compartment.create", caller, "forbidden", "only an operator creates shared compartments")
+        cur.execute("INSERT INTO maluos_compartment (name, owner_principal_ref, scope, lock_mode) VALUES (%s,%s,%s,%s)",
+                    (name, owner, body.get("scope"), mode))
+        comp = self.compartment(cur, name)
+        self.ledger(cur, "compartment.create", caller, "ok", comp=comp, detail={"owner": owner, "scope": body.get("scope")})
+        return comp
+
+    def ledger_rows(self, cur, caller, q):
+        where, args = [], []
+        if not caller.operator:
+            if not caller.principal:
+                return []
+            where.append("(principal_ref=%s OR broker_ref=%s)"); args += [caller.ref, caller.ref]
+        for key, col in (("principal", "principal_ref"), ("secret", "secret_name"), ("compartment", "compartment"),
+                         ("event", "event"), ("status", "status"), ("user", "linux_user")):
+            if q.get(key):
+                where.append(f"{col}=%s"); args.append(q[key])
+        since = parse_ts(q.get("since"), past=True)
+        if since:
+            where.append("ts >= %s"); args.append(since)
+        limit = min(int(q.get("limit") or 500), 5000)
+        cur.execute(f"""SELECT ledger_id, ts, event, principal_ref, linux_user, process_ref, broker_ref, compartment, secret_name,
+                               grant_level, purpose, status, reason, backend, model, tokens_in, tokens_out, cost_actual, detail
+                        FROM maluos_ledger {'WHERE ' + ' AND '.join(where) if where else ''} ORDER BY ledger_id DESC LIMIT %s""", args + [limit])
+        cols = ["ledger_id", "ts", "event", "principal_ref", "linux_user", "process_ref", "broker_ref", "compartment", "secret_name",
+                "grant_level", "purpose", "status", "reason", "backend", "model", "tokens_in", "tokens_out", "cost_actual", "detail"]
+        out = []
+        for r in cur.fetchall():
+            d = dict(zip(cols, r)); d["ts"] = d["ts"].isoformat()
+            if d["cost_actual"] is not None:
+                d["cost_actual"] = float(d["cost_actual"])
+            out.append(d)
+        return out
+
+
+def parse_ts(v, past=False):
+    """ISO 8601, or a duration like 30d / 12h: from now (expiries) or ago (past=True, reports)."""
+    if v in (None, "", False):
+        return None
+    if isinstance(v, datetime.datetime):
+        return v if v.tzinfo else v.replace(tzinfo=datetime.timezone.utc)
+    s = str(v)
+    m = re.match(r"^(\d+)([smhdw])$", s)
+    if m:
+        n, u = int(m.group(1)), m.group(2)
+        delta = datetime.timedelta(seconds=n * {"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800}[u])
+        return utcnow() - delta if past else utcnow() + delta
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    try:
+        d = datetime.datetime.fromisoformat(s)
+    except ValueError:
+        raise ApiError(400, "bad_timestamp", f"cannot parse time {v!r} (ISO 8601 or 30d/12h)")
+    return d if d.tzinfo else d.replace(tzinfo=datetime.timezone.utc)
+
+
+# ---------------------------------------------------------------- HTTP
+class Handler(http.server.BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+    server_version = f"maluos-vault/{VERSION}"
+    vault = None
+
+    def address_string(self):
+        return "unix"
+
+    def log_message(self, fmt, *args):
+        if os.environ.get("MALUOS_VAULT_DEBUG"):
+            log(fmt % args)
+
+    def peer(self):
+        creds = self.connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("iII"))
+        pid, uid, gid = struct.unpack("iII", creds)
+        return Caller(pid, uid, gid)
+
+    def body(self):
+        n = int(self.headers.get("Content-Length") or 0)
+        if n == 0:
+            return {}
+        if n > 1 << 20:
+            raise ApiError(413, "too_large", "body over 1 MiB")
+        try:
+            return json.loads(self.rfile.read(n) or b"{}")
+        except json.JSONDecodeError:
+            raise ApiError(400, "bad_json", "body is not JSON")
+
+    def send(self, status, obj):
+        data = json.dumps(obj, default=str).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def do_GET(self):     self.dispatch("GET")
+    def do_POST(self):    self.dispatch("POST")
+    def do_DELETE(self):  self.dispatch("DELETE")
+
+    def dispatch(self, method):
+        try:
+            url = urllib.parse.urlsplit(self.path)
+            q = {k: v[-1] for k, v in urllib.parse.parse_qs(url.query).items()}
+            parts = [urllib.parse.unquote(p) for p in url.path.strip("/").split("/")]
+            if parts[:1] != ["v1"]:
+                raise ApiError(404, "not_found", "unknown path")
+            if parts[1:] == ["health"]:
+                return self.send(200, self.health())
+            caller = self.peer()
+            body = self.body() if method in ("POST", "DELETE") else {}
+            with connect() as conn:
+                cur = conn.cursor()
+                caller.resolve(cur, self.headers.get("X-MaluOS-Principal") or None)
+                status, obj = self.route(method, parts[1:], q, body, caller, cur)
+            self.send(status, obj)
+        except ApiError as e:
+            self.send(e.status, {"error": e.code, "message": e.message})
+        except psycopg.Error as e:
+            log(f"database error: {e}")
+            self.send(503, {"error": "database", "message": str(e).strip().splitlines()[0][:200]})
+        except Exception as e:  # never leak a traceback with a value in it
+            log(f"internal error: {e.__class__.__name__}: {e}")
+            self.send(500, {"error": "internal", "message": e.__class__.__name__})
+
+    def health(self):
+        ok_db = True
+        try:
+            with connect() as conn:
+                conn.execute("SELECT 1 FROM maluos_ledger LIMIT 0")
+        except Exception as e:
+            ok_db = f"{e.__class__.__name__}"
+        return {"ok": ok_db is True, "version": VERSION, "database": ok_db, "store": os.path.isdir(self.vault.store.dir)}
+
+    def route(self, method, p, q, body, caller, cur):
+        v = self.vault
+        if p == ["whoami"] and method == "GET":
+            return 200, caller.as_dict()
+        if p == ["compartments"]:
+            if method == "GET":
+                return 200, {"compartments": v.visible_compartments(cur, caller)}
+            if method == "POST":
+                return 201, v.create_compartment(cur, caller, body)
+        if len(p) == 3 and p[0] == "compartments" and method == "POST" and p[2] in ("lock", "unlock"):
+            comp = v.compartment(cur, p[1]) or self.nf(f"no compartment {p[1]}")
+            return 200, v.set_lock(cur, caller, comp, p[2] == "lock")
+        if p == ["secrets"]:
+            if method == "GET":
+                return 200, {"secrets": self.list_secrets(cur, caller, q)}
+            if method == "POST":
+                return 201, v.add(cur, caller, body)
+        if len(p) >= 2 and p[0] == "secrets":
+            secret, comp = v.resolve(cur, caller, p[1])
+            rest = p[2:]
+            if not rest and method == "GET":
+                level, why = v.access(cur, caller, secret, comp)
+                if level is None:
+                    v.deny(cur, "secret.read", caller, "forbidden", f"no access to {secret['ref']}", secret=secret, comp=comp)
+                out = v.public(secret); out["access"] = {"level": level, "via": why}
+                if v.may_manage(caller, comp):
+                    out["grants"] = v.live_grants(cur, secret["secret_id"])
+                return 200, out
+            if not rest and method == "DELETE":
+                return 200, v.delete(cur, caller, secret, comp)
+            if rest == ["value"] and method == "GET":
+                return 200, v.value(cur, caller, secret, comp, q.get("mode", "read"), q.get("purpose"), q.get("previous") in ("1", "true"))
+            if rest == ["rotate"] and method == "POST":
+                return 200, v.rotate(cur, caller, secret, comp, body.get("value"), body.get("grace_hours", 0), meta=body)
+            if rest == ["grants"] and method == "GET":
+                if not v.may_manage(caller, comp):
+                    raise ApiError(403, "forbidden", "only the owner or an operator lists grants")
+                return 200, {"grants": v.live_grants(cur, secret["secret_id"])}
+            if rest == ["grants"] and method == "POST":
+                return 201, v.grant(cur, caller, secret, comp, body)
+            if rest == ["revoke"] and method == "POST":
+                return 200, v.revoke(cur, caller, secret, comp, body)
+        if p == ["ledger"] and method == "GET":
+            return 200, {"events": v.ledger_rows(cur, caller, q)}
+        raise ApiError(404, "not_found", f"no route {method} /{'/'.join(p)}")
+
+    @staticmethod
+    def nf(msg):
+        raise ApiError(404, "not_found", msg)
+
+    def list_secrets(self, cur, caller, q):
+        v = self.vault
+        out = []
+        comps = v.visible_compartments(cur, caller)
+        if q.get("compartment"):
+            comps = [c for c in comps if c["name"] == q["compartment"]]
+            if not comps:
+                raise ApiError(404, "no_compartment", f"no compartment {q['compartment']}")
+        for c in comps:
+            for s in v.secrets_in(cur, c["compartment_id"]):
+                level, why = v.access(cur, caller, s, c)
+                if level or q.get("all") and caller.operator:
+                    d = v.public(s); d["access"] = {"level": level, "via": why}; d["locked"] = c["locked"]
+                    out.append(d)
+        return out
+
+
+class UnixHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
+    address_family = socket.AF_UNIX
+    daemon_threads = True
+    allow_reuse_address = False
+
+    def server_bind(self):
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = "maluos-vault", 0
+
+
+def serve(argv):
+    import argparse
+    ap = argparse.ArgumentParser(description="MaluOS secret vault daemon")
+    ap.add_argument("--socket", help="bind this path (default: inherit from systemd, else config)")
+    args = ap.parse_args(argv)
+    store = Store(load_master(), os.path.join(CFG["state_dir"], "blobs"))
+    Handler.vault = Vault(store)
+    fds = int(os.environ.get("LISTEN_FDS") or 0)
+    if fds and os.environ.get("LISTEN_PID") in (None, str(os.getpid())):
+        srv = UnixHTTPServer("", Handler, bind_and_activate=False)
+        srv.socket.close()
+        srv.socket = socket.socket(fileno=3)
+        log(f"serving on inherited socket (activation), tenant {CFG['tenant']}")
+    else:
+        path = args.socket or CFG["socket"]
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        if os.path.exists(path):
+            os.remove(path)
+        srv = UnixHTTPServer(path, Handler)
+        os.chmod(path, 0o666)
+        log(f"serving on {path}, tenant {CFG['tenant']}")
+    try:
+        srv.serve_forever()
+    except KeyboardInterrupt:
+        pass
+
+
+if __name__ == "__main__":
+    serve(sys.argv[1:])

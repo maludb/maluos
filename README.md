@@ -16,11 +16,13 @@ repository works.
 ## Layout
 
 ```
-packages/      source packages owned by MaluOS (keyring, archive, metapackages)
+packages/      source packages owned by MaluOS (keyring, archive, metapackages,
+               branding, first boot + maluctl, vault, vendored components)
 seeds/         package lists per variant; metapackage Depends are generated from these
 repo/          aptly configuration and publish scripts
 scripts/       build helpers and the client bootstrap installer
-tests/         install tests (clean mmdebstrap chroot)
+tests/         install tests (clean mmdebstrap chroot), image boot tests,
+               vault test harness (tests/vault-local-test.sh, no VM needed)
 ci/            CI build scripts (flat repo, in-container build); workflows in .github/
 autoinstall/   subiquity autoinstall templates             (Phase 2+)
 firstboot/     first-boot provisioning                      (Phase 4)

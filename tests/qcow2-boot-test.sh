@@ -67,6 +67,27 @@ curl -fsS --max-time 5 http://127.0.0.1:5329/healthz >/dev/null && echo "  ok   
 tok=$(sudo -n maluctl token 2>/dev/null); [ ${#tok} -ge 32 ] && echo "  ok   listener token present" || { echo "  FAIL token"; fail=1; }
 curl -fsS --max-time 5 -H "Authorization: Bearer $tok" -X POST http://127.0.0.1:5329/ -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | grep -q '"tools"' && echo "  ok   MCP tools/list with token" || echo "  warn MCP tools/list did not return tools"
 psql -Atd maludb -c "select current_user" 2>/dev/null | grep -q maluos && echo "  ok   operator psql peer login" || echo "  warn operator psql login failed"
+# --- the vault (Phase 6 slice 1)
+dpkg-query -W -f='${Status}' maluos-vault 2>/dev/null | grep -q 'install ok installed' && echo "  ok   maluos-vault" || { echo "  FAIL maluos-vault"; fail=1; }
+systemctl is-active --quiet maluos-vault.socket && echo "  ok   maluos-vault.socket active" || { echo "  FAIL maluos-vault.socket: $(systemctl is-active maluos-vault.socket)"; sudo -n journalctl -u maluos-vault --no-pager | tail -8; fail=1; }
+sudo -n test -s /var/lib/maluos-vault/master.cred && echo "  ok   master key credential sealed ($(sudo -n python3 -c "import json;print(json.load(open('/var/lib/maluos/firstboot/done'))['components']['maluos-vault'].get('sealing','?'))" 2>/dev/null))" || { echo "  FAIL no master.cred"; fail=1; }
+maluctl secret whoami | grep -q 'principal:  user:maluos' && echo "  ok   login user is principal user:maluos (peer credentials)" || { echo "  FAIL vault whoami"; maluctl secret whoami; sudo -n journalctl -u maluos-vault --no-pager | tail -8; fail=1; }
+sudo -n maluctl secret whoami | grep -q 'operator:   yes' && echo "  ok   root is an operator" || { echo "  FAIL root operator"; fail=1; }
+sudo -n maluctl secret list --all | grep -q 'system/mc2dbd-token' && echo "  ok   listener token imported into system compartment" || { echo "  FAIL mc2dbd-token not in vault"; sudo -n maluctl secret list --all; fail=1; }
+sudo -n maluctl secret list --all | grep -q 'system/maludb-api-token' && echo "  ok   API token stored by its component" || echo "  warn API token not in vault"
+sudo -n maluctl secret list --all | grep -q 'system/business-os-admin-password' && echo "  ok   Business OS admin password stored by its component" || echo "  warn BOS admin password not in vault"
+echo sk-test-maluos | maluctl secret add openai --provider openai --stdin >/dev/null && [ "$(maluctl secret show openai)" = sk-test-maluos ] && echo "  ok   user secret add/show round trip" || { echo "  FAIL user secret round trip"; fail=1; }
+[ "$(maluctl secret exec openai -- sh -c 'echo $OPENAI_API_KEY')" = sk-test-maluos ] && echo "  ok   maluctl secret exec injects OPENAI_API_KEY" || { echo "  FAIL secret exec"; fail=1; }
+sudo -n useradd -m -s /bin/bash edward 2>/dev/null; sudo -n maluctl principal add user:edward --kind human --name edward --home user:edward >/dev/null
+echo sk-test-edward | sudo -n -u edward maluctl secret add openai --provider openai --stdin >/dev/null
+[ "$(sudo -n -u edward maluctl secret show openai)" = sk-test-edward ] && echo "  ok   second user has their own openai key" || { echo "  FAIL edward's key"; fail=1; }
+! sudo -n -u edward maluctl secret show user:maluos/openai >/dev/null 2>&1 && echo "  ok   edward cannot read maluos's key" || { echo "  FAIL cross-user read allowed"; fail=1; }
+echo S-shared | sudo -n maluctl secret add system/shared-test --kind token --stdin >/dev/null; sudo -n maluctl secret grant system/shared-test --to user:edward --level read >/dev/null
+[ "$(sudo -n -u edward maluctl secret show shared-test)" = S-shared ] && echo "  ok   shared secret via grant" || { echo "  FAIL shared grant"; fail=1; }
+maluctl secret usage --raw | grep -q 'secret.read .*ok .*user:maluos' && echo "  ok   ledger records reads" || { echo "  FAIL ledger reads"; maluctl secret usage --raw | tail -3; fail=1; }
+sudo -n -u postgres psql -Atd maludb -c "select count(*) from maluos.maluos_ledger where status='denied' and principal_ref='user:edward'" | grep -qE '^[1-9]' && echo "  ok   denial recorded in maluos_ledger" || { echo "  FAIL denial not in ledger"; fail=1; }
+! sudo -n journalctl -u maluos-vault --no-pager | grep -q 'sk-test' && ! sudo -n -u postgres pg_dump -d maludb -n maluos --data-only 2>/dev/null | grep -q 'sk-test' && echo "  ok   no secret value in the journal or the database" || { echo "  FAIL secret value leaked"; fail=1; }
+sudo -n maluctl status | grep -q 'component:   maluos-vault  ok' && echo "  ok   maluctl status shows the vault component" || echo "  warn vault component line missing from maluctl status"
 # --- MaluDB API component
 for p in maluos-api maludb-api; do dpkg-query -W -f='${Status}' $p 2>/dev/null | grep -q 'install ok installed' && echo "  ok   $p" || { echo "  FAIL $p"; fail=1; }; done
 systemctl is-active --quiet maludb-api && echo "  ok   maludb-api active" || { echo "  FAIL maludb-api: $(systemctl is-active maludb-api)"; sudo -n journalctl -u maludb-api --no-pager | tail -8; fail=1; }

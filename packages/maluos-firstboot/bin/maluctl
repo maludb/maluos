@@ -7,6 +7,7 @@
   maluctl principal list              principals in the tenant
   maluctl principal add REF [--kind agent|human] [--name NAME] [--home SCOPE]
   maluctl provision [--force]         (re)run first-boot provisioning now
+  maluctl <plugin> ...                subcommands from /usr/lib/maluos/maluctl.d (e.g. secret)
 """
 import json, os, secrets, subprocess, sys, urllib.request
 sys.path.insert(0, "/usr/lib/maluos")
@@ -100,8 +101,30 @@ def cmd_provision(args):
     return mp.provision(force="--force" in args)
 
 
+PLUGIN_DIR = os.environ.get("MALUCTL_PLUGIN_DIR", "/usr/lib/maluos/maluctl.d")
+
+
+def plugins():
+    """name -> path for /usr/lib/maluos/maluctl.d/<name>.py; each defines main(args) -> int."""
+    import glob
+    return {os.path.basename(f)[:-3]: f for f in sorted(glob.glob(os.path.join(PLUGIN_DIR, "*.py")))}
+
+
+def run_plugin(path, args):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("maluctl_plugin_" + os.path.basename(path)[:-3], path)
+    mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+    return mod.main(args)
+
+
 if __name__ == "__main__":
     cmds = {"status": cmd_status, "token": cmd_token, "principal": cmd_principal, "provision": cmd_provision}
-    if len(sys.argv) < 2 or sys.argv[1] not in cmds:
-        print(__doc__); sys.exit(2)
-    sys.exit(cmds[sys.argv[1]](sys.argv[2:]))
+    ext = plugins()
+    if len(sys.argv) < 2 or (sys.argv[1] not in cmds and sys.argv[1] not in ext):
+        print(__doc__.rstrip())
+        if ext:
+            print("plugins: " + ", ".join(f"maluctl {n}" for n in ext))
+        sys.exit(2)
+    if sys.argv[1] in cmds:
+        sys.exit(cmds[sys.argv[1]](sys.argv[2:]))
+    sys.exit(run_plugin(ext[sys.argv[1]], sys.argv[2:]) or 0)

@@ -34,6 +34,9 @@ operators: auto
 # Components: packages that ship /usr/lib/maluos/components/<nn>-<name>.py run
 # after the core provisioning, in name order. Disable one with enabled: false.
 components:
+  # The secret vault (package maluos-vault): per-user credentials and the ledger.
+  maluos-vault:
+    enabled: true
   maludb-api:
     enabled: true
   # The Business OS kernel (package maludb-os-core). Names: <domain>, os.<domain>,

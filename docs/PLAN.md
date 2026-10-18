@@ -29,7 +29,7 @@ repository is the distribution layer.
 | 3 | Own rootfs from seeds (mmdebstrap) as ISO install source + qcow2 cloud image; branding package; offline install | rootfs + qcow2 + ISO built 2026-10-17; qcow2 boot test PASS (see phase3-images.md) |
 | 4 | First boot: maludb database, tenant, admin principal, listener role + token, operator logins; configured by /etc/maluos/firstboot.yaml (cloud-init writable); maluctl | done 2026-10-17, boot test PASS (see phase4-firstboot.md) |
 | 5 | CI: packages on every push/PR; rootfs + qcow2 built in a container and boot-tested on BIOS and UEFI under KVM on GitHub runners; ISO on demand | done 2026-10-17, both workflows green |
-| 6 | Inference gateway: scheduled GPU access, local-to-cloud routing, OS-held credentials per user/agent, usage ledger | requirements drafted 2026-10-17 (phase6-inference-gateway.md) |
+| 6 | Inference gateway: scheduled GPU access, local-to-cloud routing, OS-held credentials per user/agent, usage ledger | requirements 2026-10-17 (phase6-inference-gateway.md); slice 1 vault + ledger done 2026-10-18 (phase6-slice1-vault.md); slices 2-4 next |
 | 7 | Components (snap-like selection, Route B native packages): maludb-api done 2026-10-17, Business OS kernel done 2026-10-18 (boot test PASS); applications next; ISO catalogue layers and maluctl selector (docs/components.md) | in progress |
 | 8+ | Further agent-native features (sandboxing, journal to memory) and the desktop variant (after Phase 6 slices 1-2) | |
 
@@ -39,7 +39,7 @@ repository is the distribution layer.
 - Sandboxed agent execution profiles (systemd-nspawn, bubblewrap, Landlock) shipped as units.
 - MCP broker and mc2dbd as socket-activated system services; `maluctl` to enroll agents, grant scopes, inspect memory.
 - journald/audit events ingested into memory as episodes.
-- Secrets via systemd-creds.
+- Secrets via systemd-creds: done in Phase 6 slice 1 (maluos-vault).
 - Optional local inference packages wired to maludb_modeld.
 - Desktop variant with an agent-aware session.
 

@@ -1,0 +1,26 @@
+Source: maluos-vault
+Section: admin
+Priority: optional
+Maintainer: Edward Honour <ed@maludb.org>
+Build-Depends: debhelper-compat (= 13), dh-python, python3
+Standards-Version: 4.6.2
+Homepage: https://github.com/maludb/maluos
+Rules-Requires-Root: no
+
+Package: maluos-vault
+Architecture: all
+Depends: ${misc:Depends}, adduser, python3 (>= 3.12), python3-psycopg, python3-cryptography, python3-yaml,
+ systemd (>= 250), maluos-firstboot (>= 0.1.5)
+Recommends: postgresql-18-maludb-core
+Description: MaluOS secret vault: per-user credentials with a usage ledger
+ A daemon on a Unix socket that keeps API keys, tokens and passwords for the
+ humans and agents of a MaluOS host. The caller's identity is its Linux uid
+ (peer credentials), mapped to a MaluDB principal; each principal owns a
+ compartment, shared compartments are managed by operators, and grants give
+ other principals or scopes use or read access. Values are AES-256-GCM
+ blobs under a master key that systemd decrypts from a credential sealed to
+ the TPM when the host has one. Every add, read, use, rotation, grant and
+ denial is a row in the append-only ledger in the tenant schema.
+ .
+ Ships `maluctl secret` and the first-boot component that provisions the
+ vault. Phase 6 slice 1 of the MaluOS inference gateway.

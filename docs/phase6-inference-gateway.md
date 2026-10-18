@@ -4,7 +4,8 @@ Requirements for model access on a MaluOS host: one local gateway through
 which every human and agent calls a model, with GPU admission control,
 policy-driven routing from the local model to cloud fallbacks, per-caller
 credentials held by the OS, and a ledger of every call. Status: draft for
-review, 2026-10-17.
+review, 2026-10-17; defaults in §9 approved 2026-10-18; slice 1 (vault and
+ledger) delivered 2026-10-18, see phase6-slice1-vault.md.
 
 ## 1. Purpose
 

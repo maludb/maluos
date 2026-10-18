@@ -1,3 +1,11 @@
+maluos-firstboot (0.1.5) resolute; urgency=medium
+
+  * maluctl: plugin subcommands from /usr/lib/maluos/maluctl.d; every
+    operator account becomes principal user:<login>; components get
+    ctx.store_secret (vault); firstboot.yaml: maluos-vault component.
+
+ -- Edward Honour <ed@maludb.org>  Sun, 18 Oct 2026 12:16:10 +0000
+
 maluos-firstboot (0.1.4) resolute; urgency=medium
 
   * TimeoutStartSec=2h: the Business OS component's migrations exceed

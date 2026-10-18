@@ -1,0 +1,6 @@
+# MaluOS vault (maluos-vault). database and tenant are written by first boot.
+# brokers: Linux users allowed to act on behalf of a principal (the gateway).
+# identities: map a Linux user to a principal other than user:<name>, e.g.
+#   identities: {bos-agent: "agent:business-os"}
+brokers: []
+identities: {}

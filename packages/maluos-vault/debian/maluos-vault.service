@@ -1,0 +1,40 @@
+[Unit]
+Description=MaluOS secret vault
+Documentation=https://github.com/maludb/maluos
+Requires=maluos-vault.socket
+After=maluos-vault.socket postgresql.service
+
+[Service]
+Type=simple
+User=maluos-vault
+Group=maluos-vault
+ExecStart=/usr/bin/python3 -I /usr/lib/maluos/maluos_vault.py
+LoadCredentialEncrypted=maluos-vault.key:/var/lib/maluos-vault/master.cred
+StateDirectory=maluos-vault
+StateDirectoryMode=0700
+UMask=0077
+Restart=on-failure
+RestartSec=2
+
+# Hardening: no network, no privileges, nothing writable but the state directory.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+CapabilityBoundingSet=

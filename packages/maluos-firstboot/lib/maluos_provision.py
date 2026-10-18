@@ -243,8 +243,29 @@ def ensure_operators(db, tenant, users):
     for u in users:
         ensure_role(u, "LOGIN", "SUPERUSER", "CREATEDB")
         psql(f"ALTER ROLE {qi(u)} IN DATABASE {qi(db)} SET search_path TO {qi(tenant)}, maludb_core, public")
+        # Every human account is also a principal, so the vault (and later the
+        # gateway) can tell who is asking: user:<login>, home scope user:<login>.
+        ensure_principal(db, tenant, {"ref": f"user:{u}", "kind": "human", "display_name": u, "home_scope": f"user:{u}"})
     if users:
         log(f"operator roles: {', '.join(users)}")
+
+
+def store_system_secret(name, value, kind="token", provider=None, env_var=None):
+    """Keep a copy of a provisioning credential in the vault's shared `system`
+    compartment (component 40-maluos-vault). No-op when the vault is absent."""
+    try:
+        sys.path.insert(0, "/usr/lib/maluos")
+        from maluos_vault_client import Vault, VaultError
+    except ImportError:
+        return False
+    v = Vault()
+    if not v.available():
+        log(f"vault: not available, {name} not stored"); return False
+    try:
+        v.add(name, value, compartment="system", kind=kind, provider=provider, env_var=env_var, upsert=True)
+        return True
+    except VaultError as e:
+        log(f"vault: could not store {name}: {e}"); return False
 
 
 COMPONENTS_DIR = "/usr/lib/maluos/components"
@@ -257,7 +278,8 @@ def run_components(cfg, db, tenant):
     results = {}
     wanted = cfg.get("components") or {}
     ctx = {"cfg": cfg, "db": db, "tenant": tenant, "log": log, "psql": psql, "exists": exists,
-           "qi": qi, "ql": ql, "secrets_dir": SECRETS_DIR, "set_env": set_env, "read_env_file": read_env_file}
+           "qi": qi, "ql": ql, "secrets_dir": SECRETS_DIR, "set_env": set_env, "read_env_file": read_env_file,
+           "store_secret": store_system_secret}
     os.makedirs(SECRETS_DIR, mode=0o700, exist_ok=True)
     for path in sorted(glob.glob(os.path.join(COMPONENTS_DIR, "*.py"))):
         name = os.path.basename(path)[:-3].split("-", 1)[-1]

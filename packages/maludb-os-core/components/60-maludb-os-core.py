@@ -208,6 +208,8 @@ def provision(ctx):
         pw = cfg.get("admin_password") or secret("admin-password", gen=lambda: pysecrets.token_urlsafe(12))
         www("php", "bin/bootstrap_organizer.php", "--email", admin_email, "--name", admin_name, "--password", pw)
         log(f"super-admin {admin_email} created")
+    if ctx.get("store_secret") and os.path.exists(pw_file):
+        ctx["store_secret"]("business-os-admin-password", open(pw_file).read().strip(), kind="password", provider="business-os")
     if psql(f"SELECT count(*) FROM model_registry WHERE model_key={ql(model_key)}", DB) == "0":
         psql("INSERT INTO model_registry (model_key, display_name, provider, provider_model_id, harness, price_input_per_mtok, "
              "price_output_per_mtok, price_cache_read_per_mtok, price_cache_write_per_mtok, currency, status, auth_mode) VALUES "

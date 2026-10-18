@@ -1,3 +1,9 @@
+maluos-meta (0.1.5) resolute; urgency=medium
+
+  * maluos-server: add maluos-vault.
+
+ -- Edward Honour <ed@maludb.org>  Sun, 18 Oct 2026 12:16:11 +0000
+
 maluos-meta (0.1.4) resolute; urgency=medium
 
   * New metapackage maluos-business-os (the Business OS kernel component).

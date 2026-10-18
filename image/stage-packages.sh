@@ -56,5 +56,6 @@ echo 'LANG=C.UTF-8' > /etc/default/locale
 : > /etc/machine-id; rm -f /var/lib/dbus/machine-id
 rm -f /etc/ssh/ssh_host_*            # regenerated on first boot (cloud-init / ssh-keygen -A)
 rm -rf /var/lib/cloud/* /var/log/journal/* /tmp/stage /root/.bash_history
+rm -f /var/lib/systemd/credential.secret   # per-host key for systemd-creds; never shared between images
 find /var/log -type f -writable -exec truncate -s0 {} + 2>/dev/null || true
 rm -f /usr/sbin/policy-rc.d

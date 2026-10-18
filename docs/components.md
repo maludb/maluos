@@ -37,6 +37,19 @@ Modules must be idempotent: `maluctl provision --force` re-runs them all.
 
 ## Components today
 
+### maluos-vault (package maluos-vault, in maluos-server)
+
+The secret vault of Phase 6 slice 1 (docs/phase6-slice1-vault.md): a
+socket-activated daemon with peer-credential identity, per-principal
+compartments, grants, and the append-only ledger in the tenant schema.
+Component 40-maluos-vault runs before the others and gives them
+`ctx["store_secret"](name, value, kind=, provider=, env_var=)`, which keeps
+a copy of a provisioning credential in the shared `system` compartment.
+Seals the master key with systemd-creds (TPM when present), creates the
+vault's database role and tables, starts the socket, imports the listener
+token.
+
+
 ### maludb-api (package maludb-api, metapackage maluos-api)
 
 The MaluDB Python API server (github.com/maludb/maludb-python-api-server),
