@@ -59,6 +59,18 @@ MALUOS_SIGNING_UID="MaluOS Archive Signing Key (2026) <apt@maluos.com>" repo/pub
 MALUOS_REMOTE_RSYNC=deploy@apt.maluos.com:/srv/apt repo/publish-remote.sh
 ```
 
+Production key in use since 2026-10-19:
+
+```
+pub   ed25519 2026-10-19 [C] [expires: 2031-10-18]
+      6387 5A4A 5397 B902 E9C5  CFF8 731A DA39 4135 B9FF
+uid   MaluOS Archive Signing Key (2026) <apt@maluos.com>
+sub   ed25519 2026-10-19 [S] [expires: 2028-10-18]
+```
+
+This fingerprint belongs on the download page next to the verification
+commands.
+
 ## Hosting
 
 The repository is static files: `dists/` (signed indexes), `pool/`

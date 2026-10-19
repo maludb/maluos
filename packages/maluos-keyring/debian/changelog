@@ -1,3 +1,10 @@
+maluos-keyring (0.2.1) resolute; urgency=medium
+
+  * Add the production archive key MaluOS Archive Signing Key (2026),
+    fingerprint 6387 5A4A 5397 B902 E9C5 CFF8 731A DA39 4135 B9FF.
+
+ -- Edward Honour <ed@maludb.org>  Mon, 19 Oct 2026 01:43:24 +0000
+
 maluos-keyring (0.2.0) resolute; urgency=medium
 
   * Import every key in keys/*.asc: production keys and rotation.
