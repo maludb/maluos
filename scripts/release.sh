@@ -5,6 +5,8 @@
 # the OS release is the date of the build on top of the Ubuntu point release.
 #
 #   scripts/release.sh [--dry-run] [--no-upload]
+# Re-runnable: an existing tag or GitHub release is reused and the uploads
+# resume, so a dropped session is fixed by running it again (in tmux).
 # Needs: a clean tree on main, build/maluos-*.iso and build/image/*.qcow2 from
 # this tree (image/build-rootfs.sh, build-qcow2.sh, iso/build-iso.sh), gh auth.
 # Optional: MALUOS_DOWNLOAD_RSYNC=user@host:/srv/download/maluos for the ISO.
@@ -25,8 +27,11 @@ gpg --batch --list-secret-keys "$MALUOS_PUBLIC_SIGNING_UID" >/dev/null 2>&1 || {
 echo "== release $VERSION ($TAG)"
 cp -f "$ISO" "$OUT/maluos-$VERSION-server-amd64.iso"
 cp -f "$QCOW" "$OUT/maluos-$VERSION-server-amd64.qcow2"
-( cd "$OUT" && sha256sum maluos-$VERSION-server-amd64.iso maluos-$VERSION-server-amd64.qcow2 > SHA256SUMS \
-    && gpg --yes --clearsign -u "$MALUOS_PUBLIC_SIGNING_UID" -o SHA256SUMS.gpg SHA256SUMS )   # production key: asks for the passphrase
+( cd "$OUT" && sha256sum maluos-$VERSION-server-amd64.iso maluos-$VERSION-server-amd64.qcow2 > SHA256SUMS )
+if [ $DRY = 0 ]; then
+    ( cd "$OUT" && gpg --yes --clearsign -u "$MALUOS_PUBLIC_SIGNING_UID" -o SHA256SUMS.gpg SHA256SUMS )   # production key: asks for the passphrase
+    gpg --batch --verify "$OUT/SHA256SUMS.gpg" >/dev/null 2>&1 || { echo "SHA256SUMS.gpg did not verify" >&2; exit 1; }
+fi
 LAST=$(git describe --tags --abbrev=0 2>/dev/null || true)
 {
   echo "# MaluOS $VERSION"
@@ -38,12 +43,21 @@ LAST=$(git describe --tags --abbrev=0 2>/dev/null || true)
 } > "$OUT/RELEASE-NOTES.md"
 echo "$VERSION" > VERSION
 if [ $DRY = 1 ]; then echo "dry run: artefacts in $OUT"; cat "$OUT/RELEASE-NOTES.md"; exit 0; fi
-git add VERSION && git commit -q -m "Release $VERSION" && git tag -a "$TAG" -m "MaluOS $VERSION" && git push -q origin main "$TAG"
-echo "== tagged $TAG"
+if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+    echo "== $TAG already tagged; resuming the upload"
+else
+    git add VERSION && git commit -q -m "Release $VERSION" && git tag -a "$TAG" -m "MaluOS $VERSION" && git push -q origin main "$TAG"
+    echo "== tagged $TAG"
+fi
 if [ $UPLOAD = 1 ]; then
-    gh release create "$TAG" --title "MaluOS $VERSION" --notes-file "$OUT/RELEASE-NOTES.md" \
-        "$OUT/maluos-$VERSION-server-amd64.qcow2" "$OUT/SHA256SUMS" "$OUT/SHA256SUMS.gpg"
-    echo "== GitHub release created"
+    assets=("$OUT/maluos-$VERSION-server-amd64.qcow2" "$OUT/SHA256SUMS" "$OUT/SHA256SUMS.gpg")
+    if gh release view "$TAG" >/dev/null 2>&1; then
+        gh release upload "$TAG" --clobber "${assets[@]}"
+        echo "== GitHub release assets refreshed"
+    else
+        gh release create "$TAG" --title "MaluOS $VERSION" --notes-file "$OUT/RELEASE-NOTES.md" "${assets[@]}"
+        echo "== GitHub release created"
+    fi
     if [ -n "${MALUOS_DOWNLOAD_S3:-}" ]; then
         ep=(); [ -n "${MALUOS_S3_ENDPOINT:-}" ] && ep=(--endpoint-url "$MALUOS_S3_ENDPOINT")
         aws "${ep[@]}" s3 sync "$OUT/" "$MALUOS_DOWNLOAD_S3/$VERSION/" --cache-control "max-age=86400"
