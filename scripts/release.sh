@@ -21,11 +21,12 @@ TAG="v$VERSION"
 ISO=build/maluos-26.04.1-server-amd64.iso; QCOW=build/image/maluos-server-26.04-amd64.qcow2
 [ -f "$ISO" ] && [ -f "$QCOW" ] || { echo "build the ISO and the cloud image first" >&2; exit 1; }
 OUT=build/release/$VERSION; mkdir -p "$OUT"
+gpg --batch --list-secret-keys "$MALUOS_PUBLIC_SIGNING_UID" >/dev/null 2>&1 || { echo "production key not on this host" >&2; exit 1; }
 echo "== release $VERSION ($TAG)"
 cp -f "$ISO" "$OUT/maluos-$VERSION-server-amd64.iso"
 cp -f "$QCOW" "$OUT/maluos-$VERSION-server-amd64.qcow2"
 ( cd "$OUT" && sha256sum maluos-$VERSION-server-amd64.iso maluos-$VERSION-server-amd64.qcow2 > SHA256SUMS \
-    && gpg --batch --yes --clearsign -u "$MALUOS_SIGNING_UID" -o SHA256SUMS.gpg SHA256SUMS )
+    && gpg --yes --clearsign -u "$MALUOS_PUBLIC_SIGNING_UID" -o SHA256SUMS.gpg SHA256SUMS )   # production key: asks for the passphrase
 LAST=$(git describe --tags --abbrev=0 2>/dev/null || true)
 {
   echo "# MaluOS $VERSION"

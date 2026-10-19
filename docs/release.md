@@ -52,12 +52,23 @@ Custody rules:
    public key from the package.
 4. The development key never signs anything that leaves the LAN.
 
-Publish with the production key:
+Two published trees of the same repository, so nothing unattended ever
+needs the production passphrase:
+
+| Tree | Signed by | Used by |
+|---|---|---|
+| `~/.aptly/public/dists,pool` | development key | image builds, local tests, CI |
+| `~/.aptly/public/public/dists,pool` | production key | `repo/publish-remote.sh`, which refuses any other signature, and so apt.maluos.com |
 
 ```
-MALUOS_SIGNING_UID="MaluOS Archive Signing Key (2026) <apt@maluos.com>" repo/publish.sh
+repo/publish.sh --public                      # asks for the production passphrase once per session
 MALUOS_REMOTE_RSYNC=deploy@apt.maluos.com:/srv/apt repo/publish-remote.sh
+MALUOS_REMOTE_S3=s3://maluos-apt MALUOS_S3_ENDPOINT=https://<account>.r2.cloudflarestorage.com repo/publish-remote.sh
 ```
+
+The bootstrap keyring beside each tree carries both public keys, and the
+maluos-keyring package ships both, so a client trusts either signature.
+`scripts/release.sh` clearsigns SHA256SUMS with the production key.
 
 Production key in use since 2026-10-19:
 
