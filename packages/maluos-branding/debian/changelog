@@ -1,3 +1,13 @@
+maluos-branding (0.2.0) resolute; urgency=medium
+
+  * Remove Ubuntu from everything a user sees: os-release ID=maluos
+    ID_LIKE="ubuntu debian" with maluos.com URLs, lsb-release,
+    /etc/legal, motd extras off, Pro client hooks diverted and timers
+    masked, GRUB_DISTRIBUTOR MaluOS, explicit unattended-upgrades
+    origins.
+
+ -- Edward Honour <ed@maludb.org>  Mon, 19 Oct 2026 01:38:01 +0000
+
 maluos-branding (0.1.1) resolute; urgency=medium
 
   * Divert only /usr/lib/os-release; write /etc/issue and /etc/issue.net

@@ -1,2 +1,2 @@
 #!/bin/sh
-printf '\n  MaluOS memory server. MaluDB on PostgreSQL 18.\n  Repo and docs: https://github.com/maludb/maluos\n\n'
+printf '\n  MaluOS memory server. MaluDB on PostgreSQL 18.\n  Docs and support: https://maluos.com\n\n'

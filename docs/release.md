@@ -55,8 +55,8 @@ Custody rules:
 Publish with the production key:
 
 ```
-MALUOS_SIGNING_UID="MaluOS Archive Signing Key (2026) <apt@maludb.org>" repo/publish.sh
-MALUOS_REMOTE_RSYNC=deploy@apt.maludb.org:/srv/apt/maluos repo/publish-remote.sh
+MALUOS_SIGNING_UID="MaluOS Archive Signing Key (2026) <apt@maluos.com>" repo/publish.sh
+MALUOS_REMOTE_RSYNC=deploy@apt.maluos.com:/srv/apt repo/publish-remote.sh
 ```
 
 ## Hosting
@@ -68,9 +68,9 @@ tree with rsync or to S3-compatible storage, pool before indexes so a
 client never sees an index naming a missing file, then verifies the remote
 InRelease signature.
 
-Recommended shape: `apt.maludb.org` as a static site (nginx or object
+Recommended shape: `apt.maluos.com` as a static site (nginx or object
 storage behind a CDN) holding the repository under `/maluos`, matching the
-URL baked into maluos-archive; `download.maludb.org/maluos/VERSION/` for
+URL baked into maluos-archive; `download.maluos.com/VERSION/` for
 ISOs and cloud images with SHA256SUMS and SHA256SUMS.gpg beside them. Both
 are reads only; nothing on the public host can sign.
 
@@ -82,6 +82,6 @@ are today.
 
 - Creating the production key and storing the primary offline (a person
   with the passphrase must do it).
-- DNS and the static host for apt.maludb.org and download.maludb.org.
+- DNS and the static host for apt.maluos.com and download.maluos.com.
 - The first keyring publish signed by the development key, which is how
   existing installs learn the production key.

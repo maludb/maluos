@@ -4,6 +4,12 @@ case "$1" in
     install|upgrade)
         dpkg-divert --package maluos-branding --add --rename \
             --divert /usr/lib/os-release.ubuntu /usr/lib/os-release
+        # The Ubuntu Pro apt hooks print "Expanded Security Maintenance" advertising
+        # on every apt run; their config only calls them when the files exist.
+        for h in apt-esm-hook apt-esm-json-hook; do
+            dpkg-divert --package maluos-branding --add --rename \
+                --divert /usr/lib/ubuntu-advantage/$h.disabled /usr/lib/ubuntu-advantage/$h
+        done
         ;;
 esac
 #DEBHELPER#

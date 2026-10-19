@@ -1,3 +1,9 @@
+maluos-archive (0.2.0) resolute; urgency=medium
+
+  * Repository moves to https://apt.maluos.com.
+
+ -- Edward Honour <ed@maludb.org>  Mon, 19 Oct 2026 01:38:01 +0000
+
 maluos-archive (0.1.0) resolute; urgency=medium
 
   * Initial release.

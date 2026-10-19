@@ -1,12 +1,24 @@
 #!/bin/sh
-# /etc/issue and /etc/issue.net are conffiles of base-files; diverting
-# conffiles confuses dpkg on base-files upgrades, so we overwrite them here
-# instead (a legitimate local modification that base-files upgrades keep).
+# base-files owns /etc/issue, /etc/issue.net, /etc/lsb-release and /etc/legal
+# as conffiles; diverting conffiles confuses dpkg on upgrades, so they are
+# overwritten here (a local modification that base-files upgrades keep).
 set -e
 case "$1" in
     configure)
         cp /usr/share/maluos-branding/issue /etc/issue
         cp /usr/share/maluos-branding/issue.net /etc/issue.net
+        cp /usr/share/maluos-branding/lsb-release /etc/lsb-release
+        cp /usr/share/maluos-branding/legal /etc/legal
+        # Ubuntu's motd extras: help links, release-upgrade and Pro prompts, motd-news.
+        for f in 10-help-text 50-motd-news 91-release-upgrade 91-contract-ua-esm-status; do
+            [ -e /etc/update-motd.d/$f ] && chmod -x /etc/update-motd.d/$f || true
+        done
+        if [ -f /etc/default/motd-news ]; then sed -i 's/^ENABLED=.*/ENABLED=0/' /etc/default/motd-news; fi
+        # Ubuntu Pro client: no news, no timers (the hooks are diverted in preinst).
+        if command -v pro >/dev/null 2>&1; then pro config set apt_news=false >/dev/null 2>&1 || true; fi
+        for u in ua-timer.timer apt-news.service esm-cache.service ubuntu-advantage.service motd-news.timer; do
+            systemctl mask --quiet $u 2>/dev/null || true
+        done
         ;;
 esac
 #DEBHELPER#

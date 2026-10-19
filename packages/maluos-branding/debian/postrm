@@ -2,13 +2,16 @@
 set -e
 case "$1" in
     remove|abort-install|disappear)
-        dpkg-divert --package maluos-branding --remove --rename \
-            --divert /usr/lib/os-release.ubuntu /usr/lib/os-release
-        if [ -r /usr/lib/os-release ]; then
-            . /usr/lib/os-release
-            printf '%s \\n \\l\n\n' "$PRETTY_NAME" > /etc/issue
-            printf '%s\n' "$PRETTY_NAME" > /etc/issue.net
-        fi
+        dpkg-divert --package maluos-branding --remove --rename /usr/lib/os-release
+        for h in apt-esm-hook apt-esm-json-hook; do
+            dpkg-divert --package maluos-branding --remove --rename /usr/lib/ubuntu-advantage/$h || true
+        done
+        for u in ua-timer.timer apt-news.service esm-cache.service ubuntu-advantage.service motd-news.timer; do
+            systemctl unmask --quiet $u 2>/dev/null || true
+        done
+        for f in 10-help-text 50-motd-news 91-release-upgrade 91-contract-ua-esm-status; do
+            [ -e /etc/update-motd.d/$f ] && chmod +x /etc/update-motd.d/$f || true
+        done
         ;;
 esac
 #DEBHELPER#

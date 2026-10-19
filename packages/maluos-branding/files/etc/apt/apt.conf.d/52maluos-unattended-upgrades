@@ -1,0 +1,9 @@
+// MaluOS: with ID=maluos in os-release, ${distro_id} no longer matches the
+// Ubuntu archive, so name the origins explicitly. Security from the base
+// archive and everything from the MaluOS repository.
+Unattended-Upgrade::Allowed-Origins {
+    "Ubuntu:resolute-security";
+    "UbuntuESMApps:resolute-apps-security";
+    "UbuntuESM:resolute-infra-security";
+    "MaluOS:resolute";
+};

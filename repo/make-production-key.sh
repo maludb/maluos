@@ -9,7 +9,7 @@
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 YEAR=${1:-$(date +%Y)}
-UID_="MaluOS Archive Signing Key ($YEAR) <apt@maludb.org>"
+UID_="MaluOS Archive Signing Key ($YEAR) <apt@maluos.com>"
 KEYS="$ROOT/packages/maluos-keyring/keys"
 if gpg --batch --list-secret-keys "$UID_" >/dev/null 2>&1; then
     echo "key already exists: $UID_"
@@ -30,7 +30,7 @@ Next steps (custody):
        gpg --armor --export-secret-keys $FPR > maluos-archive-$YEAR-primary.asc   # then wipe it from this host
   2. Keep only the signing subkey on the publishing host:
        gpg --armor --export-secret-subkeys $FPR > subkeys.asc; gpg --delete-secret-keys $FPR; gpg --import subkeys.asc; shred -u subkeys.asc
-  3. Sign with it: MALUOS_SIGNING_UID="$UID_" repo/publish.sh   (gpg-agent asks for the passphrase once per session)
+  3. Sign with it: MALUOS_SIGNING_UID="$UID_" /home/maludb/maluos/repo/publish.sh   (gpg-agent asks for the passphrase once per session)
   4. Bump packages/maluos-keyring (dch) and publish it, still signed by the OLD key, so clients learn the new key
      before the first release signed with it. See docs/release.md.
 EOF

@@ -45,7 +45,7 @@ the published package points at the production URL from repo/config.env.
 On a stock Ubuntu 26.04 system:
 
 ```
-curl -fsSL https://apt.maludb.org/maluos/bootstrap/install-maluos.sh | sudo bash
+curl -fsSL https://apt.maluos.com/bootstrap/install-maluos.sh | sudo bash
 ```
 
 or, against a local server, `MALUOS_APT_URL=http://host:8080 sudo -E bash install-maluos.sh`.

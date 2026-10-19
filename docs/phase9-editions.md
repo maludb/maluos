@@ -91,7 +91,7 @@ contracts service  ──── issues ────▶  entitlement (signed JSON
    │ grants per-machine repository          ▼
    │ credentials                     host enables services:
    ▼                                  apt sources + auth, metapackages, config keys,
-pro.maludb.org (aptly, authenticated)   units, timers
+pro.maluos.com (aptly, authenticated)   units, timers
    suites: resolute-esm, resolute-models, resolute-compliance, resolute-enterprise
 
 fleet server (Enterprise)  ◀──── hosts enrol with the machine credential
@@ -199,7 +199,7 @@ entitlement document and pushed configuration, both signed.
 
 ### 7.4 Repositories and packaging
 
-- FR-23 Paid suites live on a separate host (`pro.maludb.org`) with
+- FR-23 Paid suites live on a separate host (`pro.maluos.com`) with
   per-machine HTTP credentials validated against the contracts service
   (web server auth request), published by aptly from the same build
   pipeline; `publish-remote` grows a target per suite.
@@ -271,7 +271,7 @@ state per host, drift, usage roll-ups, alerts, identity mappings.
 1. **Entitlements**: maluos-pro package with `maluctl pro` (attach, status,
    refresh, detach, enable/disable of repository services), the contracts
    service as a self-hostable stub (tokens by hand, signed entitlements,
-   repository credentials), the authenticated `pro.maludb.org` layout and
+   repository credentials), the authenticated `pro.maluos.com` layout and
    the `esm` suite, the edition seeds. Boot test: attach to a stub in the
    test VM, enable `esm`, apt sees the suite, detach.
 2. **Professional services**: `models` packs for two GPU classes,

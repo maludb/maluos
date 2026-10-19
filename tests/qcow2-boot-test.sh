@@ -41,7 +41,14 @@ done
 echo "== verifying"
 ssh "${ssh_opts[@]}" maluos@127.0.0.1 'bash -s' <<'REMOTE' | tee verify.log
 fail=0
-. /etc/os-release; echo "  os: $PRETTY_NAME (ID=$ID VARIANT_ID=${VARIANT_ID:-})"; cat /etc/maluos-release | head -1
+. /etc/os-release; echo "  os: $PRETTY_NAME (ID=$ID ID_LIKE=${ID_LIKE:-})"; cat /etc/maluos-release | head -1
+[ "$ID" = maluos ] && [ "$NAME" = MaluOS ] && echo "$ID_LIKE" | grep -q ubuntu && echo "  ok   os-release identifies MaluOS (ID_LIKE ubuntu)" || { echo "  FAIL os-release"; fail=1; }
+lsb_release -a 2>/dev/null | grep -q 'Distributor ID:.*MaluOS' && ! lsb_release -a 2>/dev/null | grep -qi ubuntu && echo "  ok   lsb_release says MaluOS" || { echo "  FAIL lsb_release"; lsb_release -a; fail=1; }
+! grep -qi ubuntu /etc/issue /etc/issue.net /etc/legal /etc/lsb-release && echo "  ok   issue, legal and lsb-release carry no Ubuntu branding" || { echo "  FAIL branding files"; fail=1; }
+sudo -n run-parts /etc/update-motd.d 2>/dev/null > /tmp/motd.txt; ! grep -qi 'ubuntu\|esm\|pro ' /tmp/motd.txt && grep -q MaluOS /tmp/motd.txt && echo "  ok   motd carries no Ubuntu, Pro or ESM text" || { echo "  FAIL motd"; cat /tmp/motd.txt; fail=1; }
+sudo -n grep -m1 '^menuentry' /boot/grub/grub.cfg | grep -q MaluOS && echo "  ok   GRUB menu names MaluOS" || { echo "  FAIL grub distributor"; sudo -n grep -m1 '^menuentry' /boot/grub/grub.cfg; fail=1; }
+sudo -n apt-get -s upgrade 2>&1 | grep -qi 'expanded security\|ubuntu pro' && { echo "  FAIL apt prints Pro advertising"; fail=1; } || echo "  ok   apt output has no Pro advertising"
+systemctl is-enabled ua-timer.timer 2>/dev/null | grep -q masked && echo "  ok   Pro client timers masked" || echo "  warn Pro client timer not masked"
 for p in maluos-server maluos-base maluos-branding postgresql-18 postgresql-18-maludb-core maludb-mc2dbd linux-generic cloud-init; do
   dpkg-query -W -f='${Status}' $p 2>/dev/null | grep -q 'install ok installed' && echo "  ok   $p" || { echo "  FAIL $p"; fail=1; }
 done

@@ -3,10 +3,10 @@
 # system. Installs the keyring and APT source packages, then the requested
 # metapackage (default: maluos-server).
 #
-#   curl -fsSL https://apt.maludb.org/maluos/bootstrap/install-maluos.sh | sudo bash
+#   curl -fsSL https://apt.maluos.com/bootstrap/install-maluos.sh | sudo bash
 #   MALUOS_APT_URL=http://127.0.0.1:8080 sudo -E bash install-maluos.sh maluos-base
 set -euo pipefail
-MALUOS_APT_URL=${MALUOS_APT_URL:-https://apt.maludb.org/maluos}
+MALUOS_APT_URL=${MALUOS_APT_URL:-https://apt.maluos.com}
 TARGET=${1:-maluos-server}
 
 [ "$(id -u)" = 0 ] || { echo "run as root" >&2; exit 1; }

@@ -33,7 +33,9 @@ repository is the distribution layer.
 | 7 | Components (snap-like selection, Route B native packages): maludb-api done 2026-10-17, Business OS kernel done 2026-10-18 (boot test PASS); applications next; ISO catalogue layers and maluctl selector (docs/components.md) | in progress |
 | 8 | Agents as system entities: `maluctl agent create` (user, principal, identity, compartment, policy, token, hardened unit) | done 2026-10-18 (docs/agents.md); polkit and nspawn/bubblewrap sandboxes later |
 | 9 | Editions, the Ubuntu Pro model: Community free, Professional per machine (esm, models, compliance, audit, backup, support), Enterprise per fleet (fleet, sso, scheduler); entitlements by token, services additive | requirements drafted 2026-10-18 (phase9-editions.md) |
-| 10+ | Further agent-native features (journal to memory, quality judge) and the desktop variant | |
+| 10 | Public release of the free edition on maluos.com: maluos.com domains baked in (done), production key, R2 hosting, download page, source page, release | in progress 2026-10-19 (docs/release.md, docs/branding.md) |
+| 11 | A MaluOS installer (text UI: disks, user, network, unpack the squashfs, seed first boot) replacing subiquity, the last Ubuntu-branded surface | proposed |
+| 12+ | Further agent-native features (journal to memory, quality judge) and the desktop variant | |
 
 ### Phase 6+ candidates
 
@@ -47,7 +49,7 @@ repository is the distribution layer.
 
 ## Open items
 
-- Public hosting for the repository: tooling ready (repo/publish-remote.sh, docs/release.md); DNS and the static host for apt.maludb.org are still to be provisioned.
+- Public hosting for the repository: tooling ready (repo/publish-remote.sh, docs/release.md); DNS and the static host for apt.maluos.com are still to be provisioned.
 - Production signing key custody: tooling and policy ready (repo/make-production-key.sh, keyring imports several keys, docs/release.md); the key itself is created by a person with the passphrase, primary stored offline.
 - maludb-mc2dbd OS user / PG user mismatch: handled since Phase 4 (first boot creates the listener role named after the unit's user).
 - Release cadence: decided, dated builds 26.04.YYYYMMDD on the Ubuntu point release (scripts/release.sh, release workflow, docs/release.md).

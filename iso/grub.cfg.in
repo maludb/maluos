@@ -11,14 +11,9 @@ menuentry "Install MaluOS Server" {
     linux  /casper/vmlinuz autoinstall ds=nocloud\;s=/cdrom/maluos/nocloud-interactive/ @EXTRA_ARGS@---
     initrd /casper/initrd
 }
-menuentry "Install MaluOS Server (automated, erases first disk)" {
+menuentry "Install MaluOS Server unattended (erases the first disk; login maluos, password change required)" {
     set gfxpayload=keep
     linux  /casper/vmlinuz autoinstall ds=nocloud\;s=/cdrom/maluos/nocloud-auto/ @EXTRA_ARGS@---
-    initrd /casper/initrd
-}
-menuentry "Stock Ubuntu Server installer (no MaluOS packages)" {
-    set gfxpayload=keep
-    linux  /casper/vmlinuz  ---
     initrd /casper/initrd
 }
 grub_platform

@@ -71,7 +71,7 @@ inside tmux (`tmux new -s maluos`, reattach with `tmux attach -t maluos`).
 ## Quick start (client)
 
 ```
-curl -fsSL https://apt.maludb.org/maluos/bootstrap/install-maluos.sh | sudo bash
+curl -fsSL https://apt.maluos.com/bootstrap/install-maluos.sh | sudo bash
 ```
 
 ## Releases

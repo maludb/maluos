@@ -1,5 +1,9 @@
-files/usr/lib/os-release      usr/lib
-files/etc/maluos-release      etc
-files/etc/update-motd.d/05-maluos etc/update-motd.d
-files/etc/issue               usr/share/maluos-branding
-files/etc/issue.net           usr/share/maluos-branding
+files/usr/lib/os-release                 usr/lib
+files/etc/maluos-release                 etc
+files/etc/update-motd.d/05-maluos        etc/update-motd.d
+files/etc/default/grub.d/40-maluos.cfg   etc/default/grub.d
+files/etc/apt/apt.conf.d/52maluos-unattended-upgrades etc/apt/apt.conf.d
+files/etc/issue                          usr/share/maluos-branding
+files/etc/issue.net                      usr/share/maluos-branding
+files/share/lsb-release                  usr/share/maluos-branding
+files/share/legal                        usr/share/maluos-branding

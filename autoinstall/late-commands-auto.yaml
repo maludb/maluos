@@ -1,0 +1,3 @@
+# Extra late-commands for the unattended profile only: its credentials are
+# public (maluos/maluos), so the first login must change the password.
+  - curtin in-target --target=/target -- chage -d 0 maluos

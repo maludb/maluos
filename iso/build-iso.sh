@@ -54,12 +54,14 @@ fi
 AUTOINSTALL_DIR=${AUTOINSTALL_DIR:-$ROOT/autoinstall}   # override for experiments
 for v in auto interactive; do
     d="$STAGE/maluos/nocloud-$v"; mkdir -p "$d"
-    python3 - "$AUTOINSTALL_DIR/server-$v.yaml" "$AUTOINSTALL_DIR/late-commands.yaml" "$keys" > "$d/user-data" <<'PY'
-import sys
+    python3 - "$AUTOINSTALL_DIR/server-$v.yaml" "$AUTOINSTALL_DIR/late-commands.yaml" "$keys" "$AUTOINSTALL_DIR/late-commands-$v.yaml" > "$d/user-data" <<'PY'
+import os, sys
 main, late, keys = open(sys.argv[1]).read(), open(sys.argv[2]).read(), sys.argv[3]
+extra = open(sys.argv[4]).read() if os.path.exists(sys.argv[4]) else ""   # profile-specific tail (late-commands-auto.yaml)
 main = main.replace("@AUTHORIZED_KEYS@", keys)
 late = "\n".join(("  " + l if l.strip() and not l.startswith("#") else "") for l in late.splitlines())
-print(main.rstrip() + "\n" + late + "\n")
+extra = "\n".join(("  " + l if l.strip() and not l.startswith("#") else "") for l in extra.splitlines())
+print(main.rstrip() + "\n" + late + "\n" + extra + "\n")
 PY
     : > "$d/meta-data"
     # Validate before spending a VM boot on it: well-formed YAML, and every
