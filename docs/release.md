@@ -160,8 +160,20 @@ are today.
 
 ## What is still manual
 
-- Creating the production key and storing the primary offline (a person
-  with the passphrase must do it).
-- DNS and the static host for apt.maluos.com and download.maluos.com.
-- The first keyring publish signed by the development key, which is how
-  existing installs learn the production key.
+- Moving the primary secret key offline (custody step 2); the signing
+  subkey stays on the build host. Done so far: key created 2026-10-19,
+  keyring 0.2.1 carries it, apt.maluos.com and every release are signed
+  with it.
+- Running `repo/publish.sh --public`, `repo/publish-remote.sh` and
+  `scripts/release.sh`: each asks for the production passphrase.
+- Publishing the download page: `docs/site/download.md` (source) and
+  `docs/site/download.html` (self-contained page) carry the links,
+  fingerprint, verify commands, requirements and install guide; copy the
+  HTML to maluos.com and bump the release number on each release (or read
+  it from `download.maluos.com/LATEST`).
+
+## Releases so far
+
+| Release | Date | Profiles | Built from | Notes |
+|---|---|---|---|---|
+| 26.04.20261019 | 2026-10-19 | server | bfa13ad (images), tagged at fe0476e | First public release. apt.maluos.com and download.maluos.com on Cloudflare R2; keyring 0.2.1; `--profiles=server` kept the unproven desktop pair out. |
