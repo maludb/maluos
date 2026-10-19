@@ -17,14 +17,14 @@ for a in "$@"; do case "$a" in --public) PUBLIC=1;; *) extra+=("$a");; esac; don
 debs=( "$BUILD"/*.deb "$ROOT"/vendor/maludb/*.deb "${extra[@]}" )
 aptly repo add -force-replace "$MALUOS_APTLY_REPO" "${debs[@]}"
 
-publish_tree() {   # prefix ("." for the root) and signing uid
-    local prefix=$1 uid=$2 pfx_args=()
-    [ "$prefix" = . ] || pfx_args=(-prefix="$prefix")
+publish_tree() {   # prefix ("." for the root) and signing uid; aptly takes the prefix positionally
+    local prefix=$1 uid=$2 pfx=()
+    [ "$prefix" = . ] || pfx=("$prefix")
     if aptly publish list -raw | grep -qx "$prefix $MALUOS_SUITE"; then
-        aptly publish update -force-overwrite -gpg-key="$uid" "${pfx_args[@]}" "$MALUOS_SUITE"
+        aptly publish update -force-overwrite -gpg-key="$uid" "$MALUOS_SUITE" "${pfx[@]}"
     else
-        aptly publish repo -force-overwrite -gpg-key="$uid" "${pfx_args[@]}" -distribution="$MALUOS_SUITE" \
-            -origin=MaluOS -label=MaluOS "$MALUOS_APTLY_REPO"
+        aptly publish repo -force-overwrite -gpg-key="$uid" -distribution="$MALUOS_SUITE" \
+            -origin=MaluOS -label=MaluOS "$MALUOS_APTLY_REPO" "${pfx[@]}"
     fi
 }
 
