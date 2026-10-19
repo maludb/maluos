@@ -44,11 +44,16 @@ if [ $UPLOAD = 1 ]; then
     gh release create "$TAG" --title "MaluOS $VERSION" --notes-file "$OUT/RELEASE-NOTES.md" \
         "$OUT/maluos-$VERSION-server-amd64.qcow2" "$OUT/SHA256SUMS" "$OUT/SHA256SUMS.gpg"
     echo "== GitHub release created"
-    if [ -n "${MALUOS_DOWNLOAD_RSYNC:-}" ]; then
+    if [ -n "${MALUOS_DOWNLOAD_S3:-}" ]; then
+        ep=(); [ -n "${MALUOS_S3_ENDPOINT:-}" ] && ep=(--endpoint-url "$MALUOS_S3_ENDPOINT")
+        aws "${ep[@]}" s3 sync "$OUT/" "$MALUOS_DOWNLOAD_S3/$VERSION/" --cache-control "max-age=86400"
+        printf '%s\n' "$VERSION" > "$OUT/LATEST" && aws "${ep[@]}" s3 cp "$OUT/LATEST" "$MALUOS_DOWNLOAD_S3/LATEST" --cache-control "max-age=300"
+        echo "== artefacts on the download bucket under $VERSION/ (LATEST updated)"
+    elif [ -n "${MALUOS_DOWNLOAD_RSYNC:-}" ]; then
         rsync -az --info=stats1 "$OUT/" "$MALUOS_DOWNLOAD_RSYNC/$VERSION/"
         echo "== artefacts on the download host under $VERSION/"
     else
-        echo "   (set MALUOS_DOWNLOAD_RSYNC to push the ISO to the download host; it is too large for a GitHub release asset)"
+        echo "   (set MALUOS_DOWNLOAD_S3 or MALUOS_DOWNLOAD_RSYNC to push the ISO to the download host; it is too large for a GitHub release asset)"
     fi
 fi
 echo "== done: $OUT"

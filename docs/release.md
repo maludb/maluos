@@ -97,6 +97,63 @@ URL baked into maluos-archive; `download.maluos.com/VERSION/` for
 ISOs and cloud images with SHA256SUMS and SHA256SUMS.gpg beside them. Both
 are reads only; nothing on the public host can sign.
 
+### Setting up Cloudflare R2 (step by step)
+
+Prerequisite: the maluos.com zone must be on Cloudflare's nameservers, since
+R2 custom domains attach only to zones Cloudflare serves. If the DNS is
+elsewhere, move it first (Cloudflare dashboard → Add a site → change the
+nameservers at the registrar; existing records are imported).
+
+1. **Buckets.** Dashboard → R2 Object Storage → Create bucket, twice:
+   `maluos-apt` and `maluos-download`. Location: automatic. Leave public
+   access off; the custom domain provides it.
+2. **Custom domains.** For each bucket: Settings → Custom Domains →
+   Connect Domain → `apt.maluos.com` for maluos-apt and
+   `download.maluos.com` for maluos-download. Cloudflare creates the DNS
+   record and the certificate; the status goes to Active within minutes.
+3. **API token for uploads.** R2 → Manage R2 API Tokens → Create API token:
+   name `maluos-publisher`, permission Object Read & Write, scope: the two
+   buckets, TTL as you prefer. Copy the three values shown once: Access Key
+   ID, Secret Access Key, and the endpoint
+   `https://<account id>.r2.cloudflarestorage.com`.
+4. **The aws CLI on the build host.** `sudo apt-get install awscli`, then
+   create `~/.aws/credentials` with mode 0600:
+
+   ```
+   [maluos]
+   aws_access_key_id = <Access Key ID>
+   aws_secret_access_key = <Secret Access Key>
+   ```
+
+   and `~/.aws/config` with `[profile maluos]` and `region = auto`.
+5. **Environment for the scripts** (put it in `~/.config/maluos/publish.env`
+   and `source` it before publishing; never commit it):
+
+   ```
+   export AWS_PROFILE=maluos
+   export MALUOS_S3_ENDPOINT=https://<account id>.r2.cloudflarestorage.com
+   export MALUOS_REMOTE_S3=s3://maluos-apt
+   export MALUOS_DOWNLOAD_S3=s3://maluos-download
+   ```
+
+6. **Test the credentials:** `aws --endpoint-url "$MALUOS_S3_ENDPOINT" s3 ls`
+   lists the two buckets.
+7. **First publish of the repository:** `repo/publish.sh --public` (the
+   production passphrase), then `repo/publish-remote.sh`. It verifies the
+   tree's signature, syncs pool then indexes, and fetches
+   `https://apt.maluos.com/dists/resolute/InRelease` back to verify it.
+8. **First release:** `scripts/release.sh` builds the dated release, tags,
+   creates the GitHub Release with the cloud image, and syncs the ISO,
+   image, SHA256SUMS and SHA256SUMS.gpg to
+   `https://download.maluos.com/<version>/`, updating `LATEST`.
+9. **Cache rules (optional, recommended):** in the zone's Caching → Cache
+   Rules, cache everything under `download.maluos.com/*` for a day and
+   `apt.maluos.com/pool/*` for a week; leave `apt.maluos.com/dists/*` at
+   the 5 minute max-age the sync sets, so index updates propagate.
+
+Costs: storage at R2's per-gigabyte rate (a release is about 6.5 GB),
+no egress charges, negligible operation charges.
+
 Until the public host exists, installs outside the LAN need the ISO (it
 carries the pool) and the maluos-archive sources stay disabled, as they
 are today.
