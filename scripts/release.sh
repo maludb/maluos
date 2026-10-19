@@ -4,7 +4,7 @@
 # download host (ISO + qcow2 + checksums). Packages keep their own versions;
 # the OS release is the date of the build on top of the Ubuntu point release.
 #
-#   scripts/release.sh [--dry-run] [--no-upload]
+#   scripts/release.sh [--dry-run] [--no-upload] [--profiles=server|server,desktop]
 # Re-runnable: an existing tag or GitHub release is reused and the uploads
 # resume, so a dropped session is fixed by running it again (in tmux).
 # Needs: a clean tree on main, build/maluos-*.iso and build/image/*.qcow2 from
@@ -16,7 +16,8 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd); cd "$ROOT"
 . repo/config.env
 DRY=0; UPLOAD=1
-for a in "$@"; do case "$a" in --dry-run) DRY=1;; --no-upload) UPLOAD=0;; esac; done
+ONLY=""
+for a in "$@"; do case "$a" in --dry-run) DRY=1;; --no-upload) UPLOAD=0;; --profiles=*) ONLY=${a#--profiles=};; esac; done
 [ -z "$(git status --porcelain)" ] || { echo "working tree not clean" >&2; exit 1; }
 [ "$(git branch --show-current)" = main ] || { echo "release from main" >&2; exit 1; }
 BASE=$(grep -oE 'VERSION_ID="[0-9.]+"' packages/maluos-branding/files/share/os-release.server | grep -oE '[0-9.]+')
@@ -26,6 +27,7 @@ ISO=build/maluos-26.04.1-server-amd64.iso; QCOW=build/image/maluos-server-26.04-
 [ -f "$ISO" ] && [ -f "$QCOW" ] || { echo "build the ISO and the cloud image first" >&2; exit 1; }
 PROFILES=server
 [ -f build/maluos-26.04.1-desktop-amd64.iso ] && [ -f build/image/maluos-desktop-26.04-amd64.qcow2 ] && PROFILES="server desktop"
+[ -n "$ONLY" ] && PROFILES=$(echo "$ONLY" | tr , " ")   # --profiles=server ships the server pair even when desktop images are present
 OUT=build/release/$VERSION; mkdir -p "$OUT"
 gpg --batch --list-secret-keys "$MALUOS_PUBLIC_SIGNING_UID" >/dev/null 2>&1 || { echo "production key not on this host" >&2; exit 1; }
 echo "== release $VERSION ($TAG): $PROFILES"
@@ -49,8 +51,8 @@ LAST=$(git describe --tags --abbrev=0 2>/dev/null || true)
   echo; echo "## Files"; echo; echo '```'; cat "$OUT/SHA256SUMS"; echo '```'
   echo; echo "The ISOs are on the download host; the cloud images and checksums are attached here. Verify SHA256SUMS.gpg with the MaluOS archive key."
 } > "$OUT/RELEASE-NOTES.md"
-echo "$VERSION" > VERSION
 if [ $DRY = 1 ]; then echo "dry run: artefacts in $OUT"; cat "$OUT/RELEASE-NOTES.md"; exit 0; fi
+echo "$VERSION" > VERSION
 if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
     echo "== $TAG already tagged; resuming the upload"
 else
