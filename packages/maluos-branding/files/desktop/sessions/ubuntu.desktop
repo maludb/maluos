@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=MaluOS
+Comment=This session logs you into MaluOS
+Exec=/usr/bin/gnome-session --session=ubuntu
+TryExec=/usr/bin/gnome-session
+Type=Application
+DesktopNames=ubuntu;GNOME
+X-GDM-SessionRegisters=true
+X-GDM-CanRunHeadless=true

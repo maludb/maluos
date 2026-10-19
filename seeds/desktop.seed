@@ -1,0 +1,70 @@
+# maluos-desktop: the MaluOS workstation. GNOME 50 with Ubuntu's session
+# extensions and the Yaru look, no snaps (so GNOME Web, not Firefox),
+# and no Ubuntu-branded update or reporting tools. Pair it with
+# maluos-server (image/profiles/desktop.pkgs does) for a local memory host.
+maluos-base
+maluos-desktop-branding
+# session and shell
+gdm3
+gnome-shell
+ubuntu-session
+gnome-shell-ubuntu-extensions
+gnome-settings-daemon
+gnome-control-center
+gsettings-ubuntu-schemas
+policykit-desktop-privileges
+xdg-desktop-portal-gnome
+xdg-user-dirs
+xdg-user-dirs-gtk
+xdg-utils
+xdg-terminal-exec
+gnome-keyring
+libpam-gnome-keyring
+gnome-menus
+at-spi2-core
+libnotify-bin
+zenity
+# look
+yaru-theme-gnome-shell
+yaru-theme-gtk
+yaru-theme-icon
+yaru-theme-sound
+fonts-ubuntu
+fonts-noto-core
+fonts-noto-color-emoji
+fonts-liberation
+plymouth-theme-spinner
+plymouth-label
+# applications
+nautilus
+ptyxis
+gnome-text-editor
+epiphany-browser
+loupe
+papers
+gnome-calculator
+gnome-disk-utility
+gnome-system-monitor
+gnome-logs
+seahorse
+gvfs-backends
+gvfs-fuse
+# hardware and services
+network-manager
+wpasupplicant
+pipewire-pulse
+pipewire-audio
+wireplumber
+libspa-0.2-bluetooth
+bluez
+gnome-bluetooth-sendto
+power-profiles-daemon
+spice-vdagent
+?qemu-guest-agent
+?fwupd
+?cups
+?cups-filters
+?ibus
+?ibus-gtk3
+?ibus-gtk4
+?ubuntu-drivers-common

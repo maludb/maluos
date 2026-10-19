@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<!DOCTYPE wallpapers SYSTEM "gnome-wp-list.dtd">
+<wallpapers>
+  <wallpaper deleted="false">
+    <name>MaluOS</name>
+    <filename>/usr/share/backgrounds/maluos/maluos-light.png</filename>
+    <filename-dark>/usr/share/backgrounds/maluos/maluos-dark.png</filename-dark>
+    <options>zoom</options>
+    <shade_type>solid</shade_type>
+    <pcolor>#16213a</pcolor>
+    <scolor>#16213a</scolor>
+  </wallpaper>
+</wallpapers>

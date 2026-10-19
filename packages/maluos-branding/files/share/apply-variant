@@ -1,0 +1,10 @@
+#!/bin/sh
+# Point /usr/lib/os-release at the os-release of the installed variant.
+# maluos-desktop-branding ships /usr/share/maluos-branding/variant ("desktop");
+# without it the system is a server. Called from both packages' maintainer
+# scripts so a maluos-branding upgrade keeps the desktop identity.
+set -e
+v=server
+[ -r /usr/share/maluos-branding/variant ] && v=$(head -1 /usr/share/maluos-branding/variant)
+[ -f "/usr/share/maluos-branding/os-release.$v" ] || v=server
+ln -sfn "../share/maluos-branding/os-release.$v" /usr/lib/os-release

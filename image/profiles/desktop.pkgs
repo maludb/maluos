@@ -1,0 +1,23 @@
+# Packages installed into the MaluOS Desktop root filesystem, on top of the
+# Ubuntu bootstrap. The desktop is also a memory host (maluos-server: PostgreSQL
+# 18, MaluDB, the vault, the gateway, agents) so agents on the workstation have
+# local memory; the API server and the Business OS kernel stay on the office.
+ubuntu-minimal
+maluos-desktop
+maluos-server
+linux-generic
+# dracut: the Ubuntu 26.04 initramfs builder. The kernel only recommends one
+# and ubuntu-minimal pulls none in (ubuntu-server-minimal does).
+dracut
+grub-pc-bin
+grub-efi-amd64-signed
+shim-signed
+grub2-common
+efibootmgr
+cloud-init
+cloud-guest-utils
+openssh-server
+locales
+tzdata
+less
+vim-tiny

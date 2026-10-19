@@ -11,9 +11,21 @@ Package: maluos-branding
 Architecture: all
 Multi-Arch: foreign
 Depends: ${misc:Depends}
-Description: MaluOS identity: os-release, issue and message of the day
- Diverts /usr/lib/os-release and writes /etc/issue and /etc/issue.net,
- so base-files upgrades keep working. os-release keeps
- ID=ubuntu and ID_LIKE=debian for tool compatibility (cloud-init,
- curtin, apt-add-repository, PGDG); NAME, PRETTY_NAME and VARIANT say
- MaluOS. Also ships /etc/maluos-release and a short motd banner.
+Description: MaluOS identity: os-release, issue, motd, GRUB, apt
+ /usr/lib/os-release is a symlink to the variant's file (server, or
+ desktop with maluos-desktop-branding), the base-files copy is diverted
+ so upgrades keep working. ID=maluos, ID_LIKE="ubuntu debian": tools that
+ know Ubuntu recognise a derivative; NAME, PRETTY_NAME and the URLs say
+ MaluOS. Also writes /etc/issue, issue.net, lsb-release and legal, the
+ MaluOS motd, GRUB_DISTRIBUTOR, unattended-upgrades origins, and turns
+ off Ubuntu's Pro and motd-news advertising.
+
+Package: maluos-desktop-branding
+Architecture: all
+Multi-Arch: foreign
+Depends: ${misc:Depends}, maluos-branding (>= 0.3.0)
+Description: MaluOS identity for the desktop: login screen, wallpaper, session name
+ Switches os-release to VARIANT="Desktop", puts the MaluOS logo and
+ wallpaper on the login screen and the desktop (gsettings overrides),
+ ships the MaluOS wallpapers and the distributor icon shown by Settings,
+ and names the session MaluOS on the login screen.

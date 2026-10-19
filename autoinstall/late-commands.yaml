@@ -15,6 +15,3 @@ late-commands:
     Components: main
     Signed-By: /var/lib/maluos/apt/bootstrap/maluos-archive-keyring.gpg
     SRC
-  # Serial console alongside the VGA console (headless servers, VM tests).
-  - sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT=.*/GRUB_CMDLINE_LINUX_DEFAULT="console=tty1 console=ttyS0,115200"/' /target/etc/default/grub
-  - curtin in-target --target=/target -- update-grub

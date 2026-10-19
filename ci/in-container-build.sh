@@ -4,9 +4,10 @@
 # from an unsigned flat repo, build the rootfs + squashfs + qcow2, and the ISO
 # when the base ISO is present at $BASE_ISO.
 # usage: ci/in-container-build.sh [packages|images|iso|all]   (default all)
+#   PROFILES="server desktop" builds both image profiles (default: server)
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd); cd "$ROOT"
-STEP=${1:-all}
+STEP=${1:-all}; PROFILES=${PROFILES:-server}
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
 apt-get install -y -q --no-install-recommends \
@@ -25,12 +26,17 @@ ci/build-flat-repo.sh build/ci-repo build/*.deb vendor/maludb/*.deb
 python3 -m http.server -d build/ci-repo -b 127.0.0.1 8089 >/dev/null 2>&1 &
 HTTP=$!; trap 'kill $HTTP 2>/dev/null || true' EXIT
 sleep 1
-REPO_URL=http://127.0.0.1:8089 REPO_FLAT=1 image/build-rootfs.sh
-image/build-qcow2.sh
+for profile in $PROFILES; do
+    REPO_URL=http://127.0.0.1:8089 REPO_FLAT=1 image/build-rootfs.sh -p "$profile"
+    image/build-qcow2.sh -p "$profile"
+    rm -rf "build/image/maluos-$profile.rootfs"      # the squashfs and the qcow2 are what CI keeps; the tree is disk
+done
 if [ "$STEP" = iso ] || [ "$STEP" = all ]; then
     if [ -f "${BASE_ISO:-/nonexistent}" ]; then
-        BASE_ISO=$BASE_ISO iso/build-iso.sh
-        xorriso -indev build/maluos-26.04.1-server-amd64.iso -report_el_torito plain 2>/dev/null | grep 'El Torito boot img'
+        for profile in $PROFILES; do
+            BASE_ISO=$BASE_ISO iso/build-iso.sh -p "$profile"
+            xorriso -indev "build/maluos-26.04.1-$profile-amd64.iso" -report_el_torito plain 2>/dev/null | grep 'El Torito boot img'
+        done
     else
         echo "BASE_ISO not present; skipping ISO"
     fi

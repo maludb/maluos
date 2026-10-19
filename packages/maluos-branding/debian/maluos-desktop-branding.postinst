@@ -1,0 +1,18 @@
+#!/bin/sh
+set -e
+case "$1" in
+    configure)
+        # os-release now says VARIANT="Desktop"; the gsettings overrides and the
+        # icon cache are compiled by the glib and hicolor dpkg triggers.
+        /usr/share/maluos-branding/apply-variant
+        # The boot splash watermark (diverted in preinst); the splash lives in the initramfs.
+        # A regular file, not a symlink: the initramfs builders copy the theme directory.
+        mkdir -p /usr/share/plymouth/themes/spinner
+        install -m 0644 /usr/share/maluos-branding/maluos-watermark.png /usr/share/plymouth/themes/spinner/watermark.png
+        if command -v update-initramfs >/dev/null 2>&1 && ls /boot/vmlinuz-* >/dev/null 2>&1; then
+            update-initramfs -u >/dev/null 2>&1 || true
+        fi
+        ;;
+esac
+#DEBHELPER#
+exit 0

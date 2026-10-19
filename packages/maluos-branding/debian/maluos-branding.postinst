@@ -5,6 +5,7 @@
 set -e
 case "$1" in
     configure)
+        /usr/share/maluos-branding/apply-variant
         cp /usr/share/maluos-branding/issue /etc/issue
         cp /usr/share/maluos-branding/issue.net /etc/issue.net
         cp /usr/share/maluos-branding/lsb-release /etc/lsb-release

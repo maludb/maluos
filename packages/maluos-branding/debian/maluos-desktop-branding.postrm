@@ -1,0 +1,12 @@
+#!/bin/sh
+set -e
+case "$1" in
+    remove|abort-install|disappear)
+        dpkg-divert --package maluos-desktop-branding --remove --rename /usr/share/wayland-sessions/ubuntu.desktop || true
+        rm -f /usr/share/plymouth/themes/spinner/watermark.png
+        dpkg-divert --package maluos-desktop-branding --remove --rename /usr/share/plymouth/themes/spinner/watermark.png || true
+        [ -x /usr/share/maluos-branding/apply-variant ] && /usr/share/maluos-branding/apply-variant || true
+        ;;
+esac
+#DEBHELPER#
+exit 0

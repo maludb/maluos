@@ -1,3 +1,15 @@
+maluos-meta (0.2.1) resolute; urgency=medium
+
+  * maluos-desktop: synopsis.
+
+ -- Edward Honour <ed@maludb.org>  Mon, 19 Oct 2026 15:30:00 +0000
+
+maluos-meta (0.2.0) resolute; urgency=medium
+
+  * New metapackage maluos-desktop: the GNOME workstation (seeds/desktop.seed).
+
+ -- Edward Honour <ed@maludb.org>  Mon, 19 Oct 2026 15:00:00 +0000
+
 maluos-meta (0.1.7) resolute; urgency=medium
 
   * maluos-server: add maluos-agent.

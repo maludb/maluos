@@ -1,0 +1,15 @@
+# MaluOS desktop identity. Later than ubuntu-settings' 10_ file, so it wins.
+[org.gnome.desktop.background:GNOME-Greeter]
+picture-uri = 'file:///usr/share/backgrounds/maluos/maluos-dark.png'
+picture-uri-dark = 'file:///usr/share/backgrounds/maluos/maluos-dark.png'
+
+[org.gnome.login-screen]
+logo = '/usr/share/pixmaps/maluos-logo-text.svg'
+
+[org.gnome.desktop.background:ubuntu]
+picture-uri = 'file:///usr/share/backgrounds/maluos/maluos-light.png'
+picture-uri-dark = 'file:///usr/share/backgrounds/maluos/maluos-dark.png'
+picture-options = 'zoom'
+
+[org.gnome.desktop.screensaver:ubuntu]
+picture-uri = 'file:///usr/share/backgrounds/maluos/maluos-dark.png'

@@ -61,9 +61,11 @@ tests/iso-boot-test.sh [--uefi]             # full ISO install (needs KVM in pra
 
 image/profiles/<name>.pkgs lists what goes into a rootfs on top of the
 Ubuntu bootstrap. `server` = ubuntu-server-minimal + maluos-server +
-linux-generic + grub/shim + cloud-init. Add a profile for a desktop or an
-agent appliance later; metapackages stay the single source of truth for
-what "MaluOS" means.
+linux-generic + grub/shim + cloud-init. `desktop` (Phase 12,
+docs/phase12-desktop.md) = ubuntu-minimal + maluos-desktop + maluos-server
++ the same kernel, boot loader and cloud-init. Every script takes
+`-p <profile>`; metapackages stay the single source of truth for what
+"MaluOS" means.
 
 ## Status (2026-10-17)
 

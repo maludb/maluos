@@ -10,7 +10,7 @@ on the ISO, listed at the end.
 
 | Surface | Source | State |
 |---|---|---|
-| /usr/lib/os-release (NAME, PRETTY_NAME, ID=maluos, ID_LIKE="ubuntu debian", maluos.com URLs) | maluos-branding, diverting base-files' copy | MaluOS |
+| /usr/lib/os-release (NAME, PRETTY_NAME, ID=maluos, ID_LIKE="ubuntu debian", maluos.com URLs, VARIANT Server or Desktop, LOGO) | maluos-branding, diverting base-files' copy; a symlink to the variant's file since 0.3.0 | MaluOS |
 | /etc/lsb-release, `lsb_release -a` | maluos-branding overwrites base-files' conffile | MaluOS |
 | /etc/issue, /etc/issue.net (console and SSH banners) | maluos-branding | MaluOS |
 | /etc/legal (login notice) | maluos-branding | MaluOS |
@@ -35,12 +35,25 @@ installer's curtin (falls back to `ID_LIKE`). The image boot test checks
 os-release, lsb_release, the banners, the motd, the GRUB menu and apt's
 output on every build.
 
+## Desktop (maluos-desktop-branding, Phase 12)
+
+| Surface | Source | State |
+|---|---|---|
+| Login screen logo and background | gsettings override 20_maluos-desktop (org.gnome.login-screen logo, GNOME-Greeter background) | MaluOS |
+| Session name in the greeter's chooser | ubuntu-session's wayland-sessions/ubuntu.desktop diverted, Name=MaluOS | MaluOS |
+| Desktop and lock screen wallpaper | override for the `ubuntu` session class; wallpapers in /usr/share/backgrounds/maluos, listed in Settings > Appearance | MaluOS |
+| Settings > About: name, logo | os-release PRETTY_NAME and LOGO=maluos-logo (hicolor icon) | MaluOS |
+| Software Updater, release upgrader, ubuntu-report, whoopsie, Ubuntu docs | not installed (seeds/desktop.seed) | absent |
+| Snap Store, Firefox and Chromium snaps | no snapd; GNOME Web is the browser | absent |
+| Plymouth boot splash watermark | plymouth-theme-spinner's watermark.png links to Ubuntu's logo; diverted, MaluOS watermark, initramfs refreshed | MaluOS |
+| Package and session mode names (`ubuntu-session`, `DesktopNames=ubuntu`, Yaru) | machine-facing | kept |
+
 ## Install media
 
 | Surface | State |
 |---|---|
 | ISO volume label, GRUB boot menu, default entry | MaluOS; the interactive install is the default, the unattended entry is labelled and forces a password change at first login; the stock Ubuntu installer entry is gone |
-| Installed result | the MaluOS root filesystem, branded as above |
+| Installed result | the MaluOS root filesystem, branded as above (server or desktop) |
 | The installer program itself (subiquity, the text UI during installation) | still Canonical's, shows "Ubuntu" in its screens |
 
 The installer runs from Canonical's signed snap inside the live

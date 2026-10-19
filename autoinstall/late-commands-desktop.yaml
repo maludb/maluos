@@ -1,0 +1,3 @@
+# Profile tail for the desktop: the plymouth splash instead of boot messages.
+  - sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT=.*/GRUB_CMDLINE_LINUX_DEFAULT="quiet splash"/' /target/etc/default/grub
+  - curtin in-target --target=/target -- update-grub

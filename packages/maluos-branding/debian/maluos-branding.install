@@ -1,4 +1,6 @@
-files/usr/lib/os-release                 usr/lib
+files/share/os-release.server           usr/share/maluos-branding
+files/share/os-release.desktop          usr/share/maluos-branding
+files/share/apply-variant               usr/share/maluos-branding
 files/etc/maluos-release                 etc
 files/etc/update-motd.d/05-maluos        etc/update-motd.d
 files/etc/default/grub.d/40-maluos.cfg   etc/default/grub.d

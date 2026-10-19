@@ -2,7 +2,8 @@
 # Phase 3: build the MaluOS root filesystem from the seeds, and from it a
 # squashfs install source for the ISO plus the inputs for the cloud image.
 #
-# usage: sudo image/build-rootfs.sh [-p server] [-o build/image]
+# usage: sudo image/build-rootfs.sh [-p server|desktop] [-o build/image]
+#        (profiles: image/profiles/<name>.pkgs)
 # needs: repo/serve.sh running (the chroot fetches MaluOS packages from it)
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -53,4 +54,4 @@ rm -f "$OUT/$NAME.squashfs"
 mksquashfs "$ROOTFS" "$OUT/$NAME.squashfs" -comp xz -b 1M -Xdict-size 100% -noappend -quiet -no-progress
 chown "$(stat -c %u:%g "$ROOT")" "$OUT" "$OUT"/$NAME.{manifest,size,squashfs,mmdebstrap.log}
 echo "packages: $(wc -l < "$OUT/$NAME.manifest")   uncompressed: $(numfmt --to=iec "$(cat "$OUT/$NAME.size")")   squashfs: $(du -h "$OUT/$NAME.squashfs" | cut -f1)"
-grep -E '^(maluos-|postgresql-18|linux-image-generic|cloud-init)' "$OUT/$NAME.manifest"
+grep -E '^(maluos-|postgresql-18|linux-image-generic|cloud-init|gnome-shell|gdm3)\s' "$OUT/$NAME.manifest"

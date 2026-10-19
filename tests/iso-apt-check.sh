@@ -3,7 +3,7 @@
 # without booting anything: mount the ISO, overlay its MaluOS squashfs, bind
 # the ISO at /cdrom, then run apt-get update inside like the installer does.
 # This is the step that failed on the first external install (unsigned pool).
-# usage: sudo tests/iso-apt-check.sh [iso]
+# usage: sudo tests/iso-apt-check.sh [iso]      (server or desktop ISO)
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 ISO=$(readlink -f "${1:-$ROOT/build/maluos-26.04.1-server-amd64.iso}")
@@ -13,10 +13,13 @@ cleanup() { for m in "$W"/m/dev "$W"/m/proc "$W"/m/cdrom "$W"/m "$W"/sq2 "$W"/sq
 trap cleanup EXIT
 mkdir -p "$W"/{cdrom,sq,sq2,upper,work,m}
 mount -o loop,ro "$ISO" "$W/cdrom"
-mount -o loop,ro "$W/cdrom/casper/maluos-server.squashfs" "$W/sq"
+SQ=$(ls "$W"/cdrom/casper/maluos-*.squashfs | grep -v '\.cdrom\.squashfs$' | head -1)
+[ -n "$SQ" ] || { echo "no maluos-*.squashfs on the ISO" >&2; exit 1; }
+echo "install source: $(basename "$SQ")"
+mount -o loop,ro "$SQ" "$W/sq"
 lower="$W/sq"
-if [ -f "$W/cdrom/casper/maluos-server.cdrom.squashfs" ]; then
-    mount -o loop,ro "$W/cdrom/casper/maluos-server.cdrom.squashfs" "$W/sq2"; lower="$W/sq2:$W/sq"
+if [ -f "${SQ%.squashfs}.cdrom.squashfs" ]; then
+    mount -o loop,ro "${SQ%.squashfs}.cdrom.squashfs" "$W/sq2"; lower="$W/sq2:$W/sq"
 fi
 mount -t overlay overlay -o lowerdir="$lower",upperdir="$W/upper",workdir="$W/work" "$W/m"
 mkdir -p "$W/m/cdrom"; mount --bind "$W/cdrom" "$W/m/cdrom"

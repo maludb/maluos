@@ -2,14 +2,21 @@
 # Build a bootable MaluOS disk image (qcow2, BIOS + UEFI) from the rootfs
 # produced by image/build-rootfs.sh. cloud-init configures it on first boot.
 #
-# usage: sudo image/build-qcow2.sh [-p server] [-o build/image] [-s 8G]
+# usage: sudo image/build-qcow2.sh [-p server|desktop] [-o build/image] [-s 8G]
+#   -s   disk size; default: the rootfs size rounded up plus 4 GiB, at least 8G
+#        (both profiles fit 8G today); cloud-init grows
+#        the root filesystem to the disk it boots from anyway
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-PROFILE=server; OUT=$ROOT/build/image; SIZE=8G
+PROFILE=server; OUT=$ROOT/build/image; SIZE=
 while [ $# -gt 0 ]; do case "$1" in -p) PROFILE=$2; shift 2;; -o) OUT=$2; shift 2;; -s) SIZE=$2; shift 2;; *) echo "bad arg $1" >&2; exit 2;; esac; done
 [ "$(id -u)" = 0 ] || { echo "run with sudo" >&2; exit 1; }
 NAME=maluos-$PROFILE; ROOTFS=$OUT/$NAME.rootfs
-[ -d "$ROOTFS/usr" ] || { echo "no rootfs at $ROOTFS; run image/build-rootfs.sh" >&2; exit 1; }
+[ -d "$ROOTFS/usr" ] || { echo "no rootfs at $ROOTFS; run image/build-rootfs.sh -p $PROFILE" >&2; exit 1; }
+if [ -z "$SIZE" ]; then
+    bytes=$(cat "$OUT/$NAME.size" 2>/dev/null || du -sb --apparent-size "$ROOTFS" | cut -f1)
+    g=$(( (bytes + (1<<30) - 1) / (1<<30) + 4 )); [ $g -lt 8 ] && g=8; SIZE=${g}G
+fi
 RAW=$OUT/$NAME.raw; QCOW=$OUT/$NAME-26.04-amd64.qcow2
 MNT=$(mktemp -d)
 cleanup() { umount -R "$MNT" 2>/dev/null || true; [ -n "${LOOP:-}" ] && losetup -d "$LOOP" 2>/dev/null || true; rmdir "$MNT" 2>/dev/null || true; }

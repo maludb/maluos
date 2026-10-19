@@ -1,0 +1,14 @@
+#!/bin/sh
+set -e
+case "$1" in
+    install|upgrade)
+        # ubuntu-session's entry says "Ubuntu" on the login screen; ours says MaluOS.
+        dpkg-divert --package maluos-desktop-branding --add --rename \
+            --divert /usr/share/wayland-sessions/ubuntu.desktop.ubuntu /usr/share/wayland-sessions/ubuntu.desktop
+        # plymouth-theme-spinner's watermark is a symlink to Ubuntu's logo (the boot splash).
+        dpkg-divert --package maluos-desktop-branding --add --rename \
+            --divert /usr/share/plymouth/themes/spinner/watermark.png.ubuntu /usr/share/plymouth/themes/spinner/watermark.png
+        ;;
+esac
+#DEBHELPER#
+exit 0

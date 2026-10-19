@@ -27,8 +27,9 @@ tests/         install tests (clean mmdebstrap chroot), image boot tests,
 ci/            CI build scripts (flat repo, in-container build); workflows in .github/
 autoinstall/   subiquity autoinstall templates             (Phase 2+)
 firstboot/     first-boot provisioning                      (Phase 4)
-image/         rootfs + cloud image builders from the seeds (Phase 3)
-iso/           ISO build: Ubuntu live installer + MaluOS rootfs (Phase 2/3)
+image/         rootfs + cloud image builders from the seeds (Phase 3); profiles
+               server and desktop (Phase 12)
+iso/           ISO build: Ubuntu live installer + MaluOS rootfs (Phase 2/3), -p desktop
 docs/          plan and design notes
 ```
 
@@ -55,6 +56,16 @@ scripts/run-detached.sh test-qcow2 tests/qcow2-boot-test.sh
 scripts/jobs.sh                 # what is running; scripts/jobs.sh <name> for status + log tail
 ```
 
+The desktop variant (docs/phase12-desktop.md) uses the same scripts with
+`-p desktop`:
+
+```
+scripts/run-detached.sh rootfs-desktop sudo image/build-rootfs.sh -p desktop
+scripts/run-detached.sh qcow2-desktop  sudo image/build-qcow2.sh -p desktop
+scripts/run-detached.sh iso-desktop    iso/build-iso.sh -p desktop
+scripts/run-detached.sh test-desktop   tests/qcow2-boot-test.sh build/image/maluos-desktop-26.04-amd64.qcow2
+```
+
 Logs land in build/logs/<name>.log. Run interactive sessions themselves
 inside tmux (`tmux new -s maluos`, reattach with `tmux attach -t maluos`).
 
@@ -65,7 +76,8 @@ inside tmux (`tmux new -s maluos`, reattach with `tmux attach -t maluos`).
 - `images`: on main (image-affecting paths) and on demand: packages, rootfs,
   squashfs and qcow2 are built in a privileged ubuntu:26.04 container from an
   unsigned flat repo (no signing key in CI), then the qcow2 is boot-tested on
-  BIOS and UEFI with KVM and uploaded. The manual run can also build the ISO.
+  BIOS and UEFI with KVM and uploaded. The manual run can also build the ISO
+  and the desktop image (input `desktop`).
 - The MaluDB engine packages come from vendor/maludb/ (see its README).
 
 ## Quick start (client)

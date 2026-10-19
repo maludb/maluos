@@ -13,6 +13,12 @@ Placeholders: `@AUTHORIZED_KEYS@` (SSH keys injected by `--ssh-key`).
 Default credentials of the automated variant are `maluos` / `maluos`.
 Change them on first login; the ISO is not meant for exposed networks as is.
 
-Both variants share the same `late-commands`: copy the MaluOS repository
-from the ISO to `/var/lib/maluos/apt`, enable PGDG, install `maluos-server`,
-then disable the network MaluOS source until public hosting exists.
+Both variants share the same `late-commands.yaml`: copy the MaluOS
+repository from the ISO to `/var/lib/maluos/apt` for later installs. Then
+a profile tail (`late-commands-server.yaml`: serial console;
+`late-commands-desktop.yaml`: quiet splash) and a variant tail
+(`late-commands-auto.yaml`: force a password change) are appended.
+
+The same templates serve the desktop ISO (`iso/build-iso.sh -p desktop`):
+the install source id becomes `maluos-desktop` and the menu says
+"Install MaluOS Desktop"; the installer screens are the same text UI.

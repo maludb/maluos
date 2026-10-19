@@ -1,0 +1,2 @@
+# Intentional: the session entry of ubuntu-session is replaced via dpkg-divert.
+maluos-desktop-branding: diversion-for-unknown-file *

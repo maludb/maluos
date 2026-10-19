@@ -1,3 +1,15 @@
+maluos-branding (0.3.2) resolute; urgency=medium
+
+  * /usr/lib/os-release is a symlink to the installed variant's file
+    (os-release.server or os-release.desktop), set by apply-variant; adds
+    LOGO=maluos-logo.
+  * New binary maluos-desktop-branding: VARIANT="Desktop", login screen
+    logo and background, MaluOS wallpapers (light and dark), the
+    distributor icon, the session entry named MaluOS, and the boot splash
+    watermark (plymouth-theme-spinner's links to Ubuntu's logo).
+
+ -- Edward Honour <ed@maludb.org>  Mon, 19 Oct 2026 15:00:00 +0000
+
 maluos-branding (0.2.0) resolute; urgency=medium
 
   * Remove Ubuntu from everything a user sees: os-release ID=maluos

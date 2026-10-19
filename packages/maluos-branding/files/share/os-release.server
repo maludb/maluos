@@ -1,0 +1,16 @@
+PRETTY_NAME="MaluOS 26.04 LTS"
+NAME="MaluOS"
+VERSION_ID="26.04"
+VERSION="26.04 LTS"
+VERSION_CODENAME=resolute
+ID=maluos
+ID_LIKE="ubuntu debian"
+VARIANT="Server"
+VARIANT_ID=server
+HOME_URL="https://maluos.com/"
+DOCUMENTATION_URL="https://maluos.com/docs"
+SUPPORT_URL="https://maluos.com/support"
+BUG_REPORT_URL="https://github.com/maludb/maluos/issues"
+PRIVACY_POLICY_URL="https://maluos.com/privacy"
+LOGO=maluos-logo
+UBUNTU_CODENAME=resolute

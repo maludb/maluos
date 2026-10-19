@@ -1,11 +1,16 @@
 #!/bin/bash
-# Boot the MaluOS cloud image under QEMU with a NoCloud seed, log in over SSH
-# and verify the MaluDB stack. Works without KVM (slower).
+# Boot a MaluOS cloud image (server or desktop) under QEMU with a NoCloud
+# seed, log in over SSH and verify the MaluDB stack; the checks for the API,
+# the Business OS kernel and the desktop run when the image carries them.
+# Works without KVM (slower).
+#   usage: tests/qcow2-boot-test.sh [image.qcow2] [--uefi]
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 WORK=${WORK:-/var/tmp/maluos-qcow2-test}; SSHPORT=${SSHPORT:-2223}; BOOT_TIMEOUT=${BOOT_TIMEOUT:-1500}
 IMG=$(readlink -f "${1:-$ROOT/build/image/maluos-server-26.04-amd64.qcow2}")
 UEFI=0; [ "${2:-}" = --uefi ] && UEFI=1
+# The desktop image runs a GNOME greeter under software rendering: more memory and cores.
+case "$(basename "$IMG")" in *desktop*) MEM=${MEM:-3072}; SMP=${SMP:-4} ;; *) MEM=${MEM:-2048}; SMP=${SMP:-2} ;; esac
 ACCEL=$([ -w /dev/kvm ] && echo kvm || echo tcg)
 mkdir -p "$WORK"; cd "$WORK"
 ss -ltn | grep -q ":$SSHPORT " && { echo "port $SSHPORT busy" >&2; exit 1; }
@@ -23,7 +28,7 @@ UD
 printf 'instance-id: maluos-test-%s\nlocal-hostname: maluos-test\n' "$(date +%s)" > meta-data
 cloud-localds seed.iso user-data meta-data
 qemu-img create -q -f qcow2 -b "$IMG" -F qcow2 disk.qcow2 20G
-QEMU=(qemu-system-x86_64 -machine q35,accel=$ACCEL -cpu max -smp 2 -m 2048
+QEMU=(qemu-system-x86_64 -machine q35,accel=$ACCEL -cpu max -smp $SMP -m $MEM
       -drive file=disk.qcow2,if=virtio,format=qcow2 -drive file=seed.iso,if=virtio,format=raw,readonly=on
       -netdev user,id=n0,hostfwd=tcp:127.0.0.1:$SSHPORT-:22 -device virtio-net-pci,netdev=n0
       -display none -monitor none -serial file:boot-serial.log)
@@ -41,6 +46,7 @@ done
 echo "== verifying"
 ssh "${ssh_opts[@]}" maluos@127.0.0.1 'bash -s' <<'REMOTE' | tee verify.log
 fail=0
+installed() { dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q 'install ok installed'; }
 . /etc/os-release; echo "  os: $PRETTY_NAME (ID=$ID ID_LIKE=${ID_LIKE:-})"; cat /etc/maluos-release | head -1
 [ "$ID" = maluos ] && [ "$NAME" = MaluOS ] && echo "$ID_LIKE" | grep -q ubuntu && echo "  ok   os-release identifies MaluOS (ID_LIKE ubuntu)" || { echo "  FAIL os-release"; fail=1; }
 lsb_release -a 2>/dev/null | grep -q 'Distributor ID:.*MaluOS' && ! lsb_release -a 2>/dev/null | grep -qi ubuntu && echo "  ok   lsb_release says MaluOS" || { echo "  FAIL lsb_release"; lsb_release -a; fail=1; }
@@ -158,14 +164,17 @@ sudo -n test -s /etc/maluos/agents/research.token && echo "  ok   gateway token 
 sudo -n maluctl agent show research | grep -q 'sandbox:     strict' && echo "  ok   strict sandbox drop-in" || { echo "  FAIL sandbox"; fail=1; }
 sudo -n maluctl agent remove research >/dev/null && ! systemctl is-active --quiet maluos-agent@research && sudo -n -u postgres psql -Atd maludb -c "set role maluos; set search_path to maluos, maludb_core, public; select enabled from maludb_principal where principal_ref='agent:research'" | grep -q f && echo "  ok   agent remove: unit stopped, principal disabled" || { echo "  FAIL agent remove"; fail=1; }
 sudo -n systemctl stop maluos-mock-ollama-2 2>/dev/null
-# --- MaluDB API component
+# --- MaluDB API component (when the image carries it)
+if installed maluos-api; then
 for p in maluos-api maludb-api; do dpkg-query -W -f='${Status}' $p 2>/dev/null | grep -q 'install ok installed' && echo "  ok   $p" || { echo "  FAIL $p"; fail=1; }; done
 systemctl is-active --quiet maludb-api && echo "  ok   maludb-api active" || { echo "  FAIL maludb-api: $(systemctl is-active maludb-api)"; sudo -n journalctl -u maludb-api --no-pager | tail -8; fail=1; }
 curl -fsS --max-time 5 http://127.0.0.1:8000/health | grep -q ok && echo "  ok   API /health" || { echo "  FAIL API /health"; fail=1; }
 atok=$(sudo -n maluctl token api 2>/dev/null); [ "${atok#malu_}" != "$atok" ] && echo "  ok   API token minted" || { echo "  FAIL API token"; fail=1; }
 curl -fsS --max-time 10 -H "Authorization: Bearer $atok" http://127.0.0.1:8000/v1/subjects >/dev/null && echo "  ok   API /v1/subjects with token (PostgreSQL 18 query path)" || { echo "  FAIL API /v1/subjects"; sudo -n journalctl -u maludb-api --no-pager | tail -5; fail=1; }
 systemctl is-active --quiet maludb-embedding-worker.timer && echo "  ok   embedding sweep timer" || echo "  warn embedding sweep timer not active"
-# --- Business OS kernel component
+else echo "  (no maluos-api in this image)"; fi
+# --- Business OS kernel component (when the image carries it)
+if installed maluos-business-os; then
 for p in maluos-business-os maludb-os-core; do dpkg-query -W -f='${Status}' $p 2>/dev/null | grep -q 'install ok installed' && echo "  ok   $p" || { echo "  FAIL $p"; fail=1; }; done
 bosdom=$(sudo -n python3 -c "import json;print(json.load(open('/var/lib/maluos/firstboot/done'))['components']['maludb-os-core'].get('domain',''))" 2>/dev/null)
 echo "  bos domain: ${bosdom:-?}"
@@ -182,9 +191,27 @@ curl -fsS --max-time 10 http://127.0.0.1:8815/health 2>/dev/null | grep -q '"ok"
 sudo -n -u postgres psql -Atd maludb_os -c "select count(*) from members where business_role='super_admin'" | grep -qE '^[1-9]' && echo "  ok   super-admin exists in maludb_os" || { echo "  FAIL super-admin"; fail=1; }
 sudo -n -u postgres psql -Atd maludb_os -c "select count(*) from pg_tables where schemaname='public'" | sed 's/^/  kernel tables: /'
 sudo -n test -s /var/lib/maluos/secrets/business-os/admin-password && echo "  ok   admin password stored" || echo "  warn no stored admin password"
+else echo "  (no maluos-business-os in this image)"; fi
+# --- the desktop (Phase 12): GNOME on gdm, the MaluOS identity on the login screen, no snaps
+if installed maluos-desktop; then
+for p in maluos-desktop maluos-desktop-branding gdm3 gnome-shell ubuntu-session gnome-control-center nautilus ptyxis epiphany-browser; do installed $p && echo "  ok   $p" || { echo "  FAIL $p"; fail=1; }; done
+for p in snapd firefox update-manager update-notifier ubuntu-release-upgrader-gtk ubuntu-report whoopsie apport; do ! installed $p && echo "  ok   no $p" || { echo "  FAIL $p is installed"; fail=1; }; done
+[ "$(systemctl get-default)" = graphical.target ] && echo "  ok   default target graphical" || { echo "  FAIL default target is $(systemctl get-default)"; fail=1; }
+systemctl is-active --quiet gdm && echo "  ok   gdm active" || { echo "  FAIL gdm: $(systemctl is-active gdm)"; sudo -n journalctl -u gdm --no-pager | tail -8; fail=1; }
+for i in $(seq 1 60); do pgrep -x gnome-shell >/dev/null && break; sleep 5; done   # the greeter under software rendering
+pgrep -x gnome-shell >/dev/null && echo "  ok   gnome-shell running as $(ps -o user= -p "$(pgrep -x gnome-shell | head -1)") (the greeter)" || { echo "  FAIL no gnome-shell process"; sudo -n journalctl -b --no-pager | grep -iE 'gnome-shell|gdm' | tail -15; fail=1; }
+grep -q '^VARIANT="Desktop"' /etc/os-release && echo "  ok   os-release VARIANT=Desktop" || { echo "  FAIL os-release variant: $(grep ^VARIANT= /etc/os-release)"; fail=1; }
+grep -q '^Name=MaluOS' /usr/share/wayland-sessions/ubuntu.desktop && echo "  ok   session entry says MaluOS" || { echo "  FAIL session entry still Ubuntu"; fail=1; }
+[ -f /usr/share/backgrounds/maluos/maluos-dark.png ] && [ -f /usr/share/pixmaps/maluos-logo-text.svg ] && [ -f /usr/share/icons/hicolor/scalable/apps/maluos-logo.svg ] && echo "  ok   wallpaper, login logo and distributor icon present" || { echo "  FAIL branding assets missing"; fail=1; }
+grep -aq maluos-logo-text /usr/share/glib-2.0/schemas/gschemas.compiled && echo "  ok   gsettings overrides compiled" || { echo "  FAIL gschemas.compiled lacks the MaluOS override"; fail=1; }
+logo=$(dbus-run-session -- gsettings get org.gnome.login-screen logo 2>/dev/null); echo "$logo" | grep -q maluos-logo-text && echo "  ok   login screen logo is MaluOS" || { echo "  FAIL login screen logo: ${logo:-unreadable}"; fail=1; }
+bg=$(XDG_CURRENT_DESKTOP=ubuntu:GNOME dbus-run-session -- gsettings get org.gnome.desktop.background picture-uri-dark 2>/dev/null); echo "$bg" | grep -q maluos-dark && echo "  ok   session background is the MaluOS wallpaper" || echo "  warn session background: ${bg:-unreadable}"
+grep -q 'file:///usr/share/backgrounds/maluos' /usr/share/glib-2.0/schemas/20_maluos-desktop.gschema.override && echo "  ok   desktop override file shipped" || { echo "  FAIL override file"; fail=1; }
+systemctl is-active --quiet NetworkManager && echo "  ok   NetworkManager active" || echo "  warn NetworkManager: $(systemctl is-active NetworkManager)"
+fi
 sudo -n maluctl status | sed 's/^/  maluctl: /'
 exit $fail
 REMOTE
 rc=${PIPESTATUS[0]}
 ssh "${ssh_opts[@]}" maluos@127.0.0.1 'sudo -n poweroff' 2>/dev/null || true; sleep 3
-[ "$rc" = 0 ] && echo "PASS: cloud image boots and runs the MaluDB stack" || { echo "FAIL (see $WORK)"; exit 1; }
+[ "$rc" = 0 ] && echo "PASS: $(basename "$IMG") boots and runs the MaluDB stack" || { echo "FAIL (see $WORK)"; exit 1; }

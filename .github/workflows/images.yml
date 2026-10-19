@@ -12,6 +12,10 @@ on:
         description: also build the ISO (downloads the 2.7 GB Ubuntu base image)
         type: boolean
         default: false
+      desktop:
+        description: also build and boot-test the desktop image (adds about 30 minutes)
+        type: boolean
+        default: false
 concurrency:
   group: images-${{ github.ref }}
   cancel-in-progress: true
@@ -40,6 +44,7 @@ jobs:
         run: |
           docker run --rm --privileged -v "$PWD:/work" -w /work \
             -e BASE_ISO=/work/iso-cache/ubuntu-26.04.1-live-server-amd64.iso \
+            -e PROFILES="${{ inputs.desktop && 'server desktop' || 'server' }}" \
             ubuntu:26.04 ci/in-container-build.sh ${{ inputs.iso && 'all' || 'images' }}
           sudo chown -R "$(id -u):$(id -g)" build
       - name: Enable KVM for the runner user
@@ -53,14 +58,17 @@ jobs:
         run: WORK=$PWD/build/test-bios tests/qcow2-boot-test.sh build/image/maluos-server-26.04-amd64.qcow2
       - name: Boot test (UEFI)
         run: WORK=$PWD/build/test-uefi SSHPORT=2224 tests/qcow2-boot-test.sh build/image/maluos-server-26.04-amd64.qcow2 --uefi
+      - name: Boot test (desktop, BIOS)
+        if: ${{ inputs.desktop }}
+        run: WORK=$PWD/build/test-desktop SSHPORT=2225 tests/qcow2-boot-test.sh build/image/maluos-desktop-26.04-amd64.qcow2
       - name: Upload image and logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: maluos-images-${{ github.run_number }}
           path: |
-            build/image/maluos-server-26.04-amd64.qcow2
-            build/image/maluos-server.manifest
+            build/image/maluos-*-26.04-amd64.qcow2
+            build/image/maluos-*.manifest
             build/SHA256SUMS
             build/test-*/boot-serial.log
             build/test-*/verify.log
