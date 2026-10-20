@@ -946,8 +946,9 @@ async def errors_middleware(request, handler):
         raise
     except (asyncio.CancelledError, ConnectionResetError):
         raise
-    except psycopg.OperationalError as e:
-        # The database is not there (yet): before first boot has provisioned it, or while PostgreSQL restarts.
+    except (psycopg.OperationalError, psycopg.errors.UndefinedTable) as e:
+        # The database is not there (yet): before first boot has provisioned it, or while PostgreSQL
+        # restarts; or it exists but the tenant schema does not yet (first boot still provisioning).
         log(f"not ready on {request.method} {request.path}: database unavailable: {str(e).strip()[:160]}")
         return web.json_response({"error": {"message": "the gateway's database is not available yet", "type": "unavailable", "code": "not_ready"}}, status=503)
     except Exception as e:

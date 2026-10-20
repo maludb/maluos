@@ -226,11 +226,20 @@ Slice 1 built and boot-tested 2026-10-19; slice 2 built 2026-10-19 (status below
 | Boot test | `tests/qcow2-boot-test.sh` PASS on BIOS under TCG, 125 checks, 0 failures, the same two expected warnings as slice 1. The test user auto-logs into the MaluOS session; the extension reads ENABLED in the running shell, the user unit is active, `GetState` shows the gateway with 6 backends, the vault and the gateway identifying `user:maluos`, tenant `maluos`, VARIANT=Desktop; an agent `desk` created, started and stopped is seen by the service within seconds and produces the three notifications, delivered to the shell without error |
 | Service on its own | `--once` and a private-bus harness on the dev host (no MaluOS services present): every section reads "not available", every D-Bus method answers, the signal fires, a bad agent name is refused, an unprivileged unit action returns the polkit "interactive authorisation required" error as expected |
 
-Not yet done: the desktop ISO is not rebuilt with slice 2 (`iso/build-iso.sh
--p desktop`), no UEFI run of this test, no CI run, and nobody has yet seen
-the indicator with eyes on real hardware: the menu's layout and the icon's
-recolouring are tested only in that the shell enabled the extension
-without a JS error.
+Follow-ups on 2026-10-20: the CI `images` run with the `desktop` input
+passed on KVM (server BIOS and UEFI, desktop BIOS, 124 checks, 29
+minutes). The first UEFI run under TCG found two timing problems that
+the faster runs had missed. The session service called the gateway while
+first boot had created the database but not yet the tenant schema, and
+the gateway answered 500 "internal error": maluos-gateway 0.3.3 treats a
+missing table like a missing database (503 `not_ready`). And one
+`Notify` call to the shell took longer than the service's 5 s
+synchronous limit under software rendering: maluos-desktop-session 0.1.1
+sends notifications asynchronously with a 30 s limit, so a slow shell
+stalls nothing. The desktop ISO is rebuilt with these. Still not done:
+nobody has yet seen the indicator with eyes on real hardware; the menu's
+layout and the icon's recolouring are tested only in that the shell
+enabled the extension without a JS error.
 
 ### Slice 1 status (2026-10-19)
 

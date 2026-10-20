@@ -380,7 +380,14 @@ class Service:
                 self.notify_proxy = self.Gio.DBusProxy.new_sync(self.session, self.Gio.DBusProxyFlags.DO_NOT_LOAD_PROPERTIES, None,
                                                                 "org.freedesktop.Notifications", "/org/freedesktop/Notifications", "org.freedesktop.Notifications", None)
             hints = {"urgency": GLib.Variant("y", urgency), "desktop-entry": GLib.Variant("s", "maluos-session")}
-            self.notify_proxy.call_sync("Notify", GLib.Variant("(susssasa{sv}i)", ("MaluOS", 0, "maluos-logo", summary, body, [], hints, -1)), 0, 5000, None)
+            def done(proxy, res, _):
+                try:
+                    proxy.call_finish(res)
+                except Exception as e:
+                    log(f"notification failed: {e.__class__.__name__}: {str(e)[:120]}")
+            # Asynchronous: the shell can be slow to answer (software rendering, a busy session), and
+            # neither the poll loop nor the main loop should wait on it. The reply lands in the main loop.
+            self.notify_proxy.call("Notify", GLib.Variant("(susssasa{sv}i)", ("MaluOS", 0, "maluos-logo", summary, body, [], hints, -1)), 0, 30000, None, done, None)
         except Exception as e:
             log(f"notification failed: {e.__class__.__name__}: {str(e)[:120]}")
 

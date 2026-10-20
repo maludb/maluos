@@ -1,3 +1,12 @@
+maluos-session (0.1.1) resolute; urgency=medium
+
+  * Notifications are sent asynchronously with a 30 s limit: a shell that
+    is slow to answer (software rendering in a VM, a busy session) no
+    longer stalls the poll loop, and a late answer is no longer a failure.
+    Seen in the emulated UEFI boot test.
+
+ -- Edward Honour <ed@maludb.org>  Tue, 20 Oct 2026 17:40:00 +0000
+
 maluos-session (0.1.0) resolute; urgency=medium
 
   * Phase 12 slice 2: the agent-aware session. maluos-desktop-session, a
