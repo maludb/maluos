@@ -33,11 +33,14 @@ gpg --batch --list-secret-keys "$MALUOS_PUBLIC_SIGNING_UID" >/dev/null 2>&1 || {
 echo "== release $VERSION ($TAG): $PROFILES"
 files=(); qcows=()
 for p in $PROFILES; do
+    echo "== staging $p ISO and image into $OUT (several GB, takes a while)"
     cp -f "build/maluos-26.04.1-$p-amd64.iso" "$OUT/maluos-$VERSION-$p-amd64.iso"
     cp -f "build/image/maluos-$p-26.04-amd64.qcow2" "$OUT/maluos-$VERSION-$p-amd64.qcow2"
     files+=("maluos-$VERSION-$p-amd64.iso" "maluos-$VERSION-$p-amd64.qcow2"); qcows+=("$OUT/maluos-$VERSION-$p-amd64.qcow2")
 done
+echo "== checksums (reads every file once)"
 ( cd "$OUT" && sha256sum "${files[@]}" > SHA256SUMS )
+[ $DRY = 1 ] || echo "== signing SHA256SUMS with the production key: the passphrase prompt follows"
 if [ $DRY = 0 ]; then
     ( cd "$OUT" && gpg --yes --clearsign -u "$MALUOS_PUBLIC_SIGNING_UID" -o SHA256SUMS.gpg SHA256SUMS )   # production key: asks for the passphrase
     gpg --batch --verify "$OUT/SHA256SUMS.gpg" >/dev/null 2>&1 || { echo "SHA256SUMS.gpg did not verify" >&2; exit 1; }
