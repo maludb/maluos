@@ -1,0 +1,4 @@
+[D-BUS Service]
+Name=com.maluos.Session
+Exec=/usr/lib/maluos/maluos-desktop-session
+SystemdService=maluos-desktop-session.service

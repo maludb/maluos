@@ -1,3 +1,14 @@
+maluos-gateway (0.3.2) resolute; urgency=medium
+
+  * whoami carries the caller's own spend for the day and the month, so a
+    session can show its budget without operator rights
+    (maluos-desktop-session, Phase 12).
+  * A request that finds no database (before first boot has provisioned
+    it, or while PostgreSQL restarts) is answered 503 not_ready and logged
+    as "not ready", not as an internal error.
+
+ -- Edward Honour <ed@maludb.org>  Mon, 19 Oct 2026 20:00:00 +0000
+
 maluos-gateway (0.3.0) resolute; urgency=medium
 
   * Slice 4: alerts (budget, backend down/recovered, usage anomaly,

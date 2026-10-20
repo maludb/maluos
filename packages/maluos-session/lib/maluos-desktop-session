@@ -1,0 +1,448 @@
+#!/usr/bin/python3
+"""maluos-desktop-session: the session's view of the MaluOS host.
+
+A per-user service (systemd --user, D-Bus activated as com.maluos.Session)
+that watches what the OS already knows and tells the session about it: the
+agents on this host and their units, the inference gateway (backends,
+queue, the user's own policy and spend), the vault (the user's secrets and
+delegations), the user's alerts in the ledger, and the memory host this
+desk runs. It talks to the gateway and the vault over their Unix sockets as
+the session user, so peer-credential identity applies and no token exists
+in the session. Changes become desktop notifications; the current state is
+one JSON document for the shell extension (maluos-session@maluos.com) and
+anything else on the session bus.
+
+  maluos-desktop-session            run (normally from the user unit)
+  maluos-desktop-session --once     print the state as JSON and exit
+
+D-Bus: com.maluos.Session at /com/maluos/Session, interface com.maluos.Session1:
+  GetState() -> s (JSON)   Refresh()   AgentAction(name, start|stop|restart)
+  signal StateChanged(s)   property Version
+"""
+import http.client, json, os, pwd, re, socket, subprocess, sys, threading, time, urllib.parse
+
+VERSION = "0.1.0"
+BUS_NAME, OBJ, IFACE = "com.maluos.Session", "/com/maluos/Session", "com.maluos.Session1"
+GW = os.environ.get("MALUOS_GATEWAY_SOCKET", "/run/maluos/gateway.sock")
+VAULT = os.environ.get("MALUOS_VAULT_SOCKET", "/run/maluos/vault.sock")
+AGENTS = "/etc/maluos/agents"
+PROVISIONED = "/var/lib/maluos/firstboot/done"
+POLL = int(os.environ.get("MALUOS_SESSION_POLL", "20"))
+NAME_RE = re.compile(r"^[a-z][a-z0-9-]{0,30}$")
+STEADY = ("active", "inactive", "failed")
+
+XML = """<node>
+<interface name="com.maluos.Session1">
+  <method name="GetState"><arg type="s" name="json" direction="out"/></method>
+  <method name="Refresh"/>
+  <method name="AgentAction"><arg type="s" name="name" direction="in"/><arg type="s" name="action" direction="in"/></method>
+  <signal name="StateChanged"><arg type="s" name="json"/></signal>
+  <property name="Version" type="s" access="read"/>
+</interface>
+</node>"""
+
+
+def log(msg):
+    print(f"maluos-desktop-session: {msg}", file=sys.stderr, flush=True)
+
+
+# ---------------------------------------------------------------- HTTP over a Unix socket
+class _UnixConn(http.client.HTTPConnection):
+    def __init__(self, path, timeout=8):
+        super().__init__("maluos", timeout=timeout); self.path = path
+
+    def connect(self):
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); s.settimeout(self.timeout); s.connect(self.path); self.sock = s
+
+
+def get(sock, path, query=None):
+    """GET a JSON document from a MaluOS daemon socket; (status, body) or raises OSError."""
+    if query:
+        path += "?" + urllib.parse.urlencode({k: v for k, v in query.items() if v not in (None, "")})
+    c = _UnixConn(sock)
+    try:
+        c.request("GET", path, headers={"Accept": "application/json"})
+        r = c.getresponse(); raw = r.read()
+    finally:
+        c.close()
+    try:
+        return r.status, (json.loads(raw) if raw else {})
+    except ValueError:
+        return r.status, {}
+
+
+def ok(sock, path, query=None, default=None):
+    try:
+        st, body = get(sock, path, query)
+        return body if st < 400 else default
+    except (OSError, http.client.HTTPException):
+        return default
+
+
+# ---------------------------------------------------------------- the state
+def os_release():
+    d = {}
+    try:
+        for line in open("/etc/os-release"):
+            if "=" in line:
+                k, v = line.rstrip("\n").split("=", 1); d[k] = v.strip('"')
+    except OSError:
+        pass
+    return d
+
+
+def host_state():
+    osr = os_release()
+    h = {"hostname": socket.gethostname(), "pretty_name": osr.get("PRETTY_NAME", "MaluOS"), "variant": osr.get("VARIANT", ""),
+         "user": pwd.getpwuid(os.getuid()).pw_name, "memory": None}
+    try:
+        with open(PROVISIONED) as f:
+            p = json.load(f)
+        h["memory"] = {"tenant": p.get("tenant"), "database": p.get("database"), "listener": p.get("listener"),
+                       "components": p.get("components"), "where": "local"}
+    except (OSError, ValueError):
+        pass
+    return h
+
+
+def gateway_state():
+    g = {"available": os.path.exists(GW), "ok": False}
+    if not g["available"]:
+        return g, None
+    health = ok(GW, "/v1/maluos/health")
+    if health is None:
+        return g, None
+    status = ok(GW, "/v1/maluos/status", default={})
+    backends = []
+    for b in status.get("backends") or []:
+        backends.append({"name": b.get("name"), "kind": b.get("kind"), "healthy": bool(b.get("healthy")),
+                         "cloud": b.get("kind") not in (None, "ollama_local", "mock"), "enabled": b.get("enabled", True),
+                         "error": b.get("error"), "loaded": [m.get("name") for m in b.get("loaded") or []]})
+    if not backends:
+        backends = [{"name": n, "healthy": bool(h), "kind": None, "cloud": False, "enabled": True} for n, h in (health.get("backends") or {}).items()]
+    g.update({"ok": bool(health.get("ok")), "version": status.get("version") or health.get("version"), "uptime_s": status.get("uptime_s"),
+              "backends": backends, "queue": status.get("queue") or {"queued": 0, "running": 0},
+              "expected_wait_s": status.get("expected_wait_s") or {}, "tiers": (status.get("catalog") or {}).get("tiers") or {}})
+    me = ok(GW, "/v1/maluos/whoami")
+    return g, me
+
+
+def me_state(me):
+    if not me:
+        return {"enrolled": False, "principal": None, "policy": None, "budget": {}}
+    pol = me.get("policy") or {}
+    budget = {}
+    for key, period in (("usd_per_day", "day"), ("usd_per_month", "month")):
+        limit = (pol.get("budget") or {}).get(key)
+        if limit is None:
+            continue
+        spent = (me.get("spend") or {}).get(period)
+        budget[period] = {"limit": float(limit), "spent": float(spent) if spent is not None else None,
+                          "warn_at": float((pol.get("budget") or {}).get("warn_at") or 0.8)}
+    routes = ok(GW, "/v1/maluos/routes", {"limit": 5}, default={}) or {}
+    recent = []
+    for r in routes.get("routes") or []:
+        route = r.get("route") or []
+        last = route[-1] if route else {}
+        recent.append({"ts": r.get("ts"), "requested": r.get("requested"), "status": r.get("status"), "reason": r.get("reason"),
+                       "backend": last.get("backend"), "model": last.get("model"), "class": r.get("class")})
+    return {"enrolled": bool(me.get("enrolled")), "principal": me.get("principal") or me.get("ref"), "kind": me.get("kind"),
+            "operator": bool(me.get("operator")), "scopes": me.get("scopes") or [],
+            "policy": {k: pol.get(k) for k in ("class", "default_class", "tiers", "allowed_tiers", "cloud", "cloud_allowed", "egress", "max_egress_sensitivity") if pol.get(k) is not None},
+            "budget": budget, "recent": recent}
+
+
+def vault_state():
+    v = {"available": os.path.exists(VAULT), "enrolled": False}
+    if not v["available"]:
+        return v
+    who = ok(VAULT, "/v1/whoami")
+    if who is None:
+        v["available"] = False
+        return v
+    v.update({"enrolled": bool(who.get("enrolled")), "principal": who.get("principal"), "operator": bool(who.get("operator"))})
+    if not v["enrolled"]:
+        return v
+    secrets = (ok(VAULT, "/v1/secrets", default={}) or {}).get("secrets") or []
+    comps = (ok(VAULT, "/v1/compartments", default={}) or {}).get("compartments") or []
+    dels = (ok(VAULT, "/v1/delegations", default={}) or {}).get("delegations") or []
+    v.update({"secrets": len(secrets), "compartments": [c.get("name") for c in comps],
+              "delegations": [{"to": d.get("to") or d.get("to_ref"), "secret": d.get("secret") or d.get("secret_name"),
+                               "expires_at": d.get("expires_at")} for d in dels]})
+    return v
+
+
+def alerts_state(since=None):
+    if not os.path.exists(VAULT):
+        return []
+    rows = ok(VAULT, "/v1/ledger", {"event_like": "alert.%", "limit": 20, "since": since}, default={}) or {}
+    out = []
+    for r in rows.get("events") or []:
+        out.append({"id": r.get("ledger_id"), "ts": str(r.get("ts") or "")[:19], "kind": (r.get("event") or "")[6:],
+                    "title": r.get("reason"), "principal": r.get("principal_ref"), "detail": r.get("detail")})
+    return out
+
+
+def agents_state(units):
+    """Every agent in /etc/maluos/agents, joined with its unit's state (inactive when the unit is not loaded)."""
+    names = []
+    try:
+        names = sorted(f[:-4] for f in os.listdir(AGENTS) if f.endswith(".env"))
+    except OSError:
+        pass
+    out = []
+    for n in names:
+        a = {"name": n, "principal": f"agent:{n}", "unit": f"maluos-agent@{n}.service", "active": "inactive", "sub": "dead", "exec": None, "sandbox": "standard"}
+        try:
+            for line in open(f"{AGENTS}/{n}.env"):
+                if line.startswith("MALUOS_PRINCIPAL="):
+                    a["principal"] = line.split("=", 1)[1].strip()
+                elif line.startswith("MALUOS_AGENT_EXEC="):
+                    a["exec"] = json.loads(line.split("=", 1)[1].strip())
+        except (OSError, ValueError):
+            pass
+        if os.path.exists(f"/etc/systemd/system/{a['unit']}.d/sandbox.conf"):
+            a["sandbox"] = "strict"
+        u = units.get(a["unit"])
+        if u:
+            a.update({"active": u[0], "sub": u[1], "since": u[2]})
+        out.append(a)
+    return out
+
+
+# ---------------------------------------------------------------- the service
+class Service:
+    def __init__(self, once=False):
+        from gi.repository import Gio, GLib
+        self.Gio, self.GLib = Gio, GLib
+        self.once = once
+        self.state = {"version": VERSION, "ts": 0, "host": host_state(), "gateway": {"available": False}, "me": {}, "vault": {}, "agents": [], "alerts": []}
+        self.prev = None
+        self.alert_floor = None          # ledger id of the newest alert seen; older ones are not notified
+        self.budget_notified = {}
+        self.lock = threading.Lock()
+        self.wake = threading.Event()
+        self.system = None
+        self.session = None
+        self.notify_proxy = None
+        self.conn = None
+        self.reg_id = None
+        self.pending_refresh = None
+
+    # -- systemd (system bus): agent units, read-only for anyone, start/stop through polkit
+    def systemd(self):
+        if self.system is None:
+            Gio = self.Gio
+            self.system = Gio.DBusProxy.new_for_bus_sync(Gio.BusType.SYSTEM, Gio.DBusProxyFlags.DO_NOT_LOAD_PROPERTIES, None,
+                                                         "org.freedesktop.systemd1", "/org/freedesktop/systemd1", "org.freedesktop.systemd1.Manager", None)
+        return self.system
+
+    def units(self):
+        GLib = self.GLib
+        try:
+            res = self.systemd().call_sync("ListUnitsByPatterns", GLib.Variant("(asas)", ([], ["maluos-agent@*.service"])), 0, 5000, None).unpack()[0]
+        except Exception as e:
+            log(f"systemd: {e.__class__.__name__}: {str(e)[:120]}")
+            return {}
+        out = {}
+        for row in res:
+            name, _desc, _load, active, sub = row[:5]
+            since = None
+            if active in ("active", "failed"):
+                try:
+                    p = self.Gio.DBusProxy.new_for_bus_sync(self.Gio.BusType.SYSTEM, self.Gio.DBusProxyFlags.DO_NOT_LOAD_PROPERTIES, None,
+                                                            "org.freedesktop.systemd1", row[6], "org.freedesktop.DBus.Properties", None)
+                    key = "ActiveEnterTimestamp" if active == "active" else "InactiveEnterTimestamp"
+                    v = p.call_sync("Get", GLib.Variant("(ss)", ("org.freedesktop.systemd1.Unit", key)), 0, 2000, None).unpack()[0]
+                    since = int(v / 1e6) if v else None
+                except Exception:
+                    pass
+            out[name] = (active, sub, since)
+        return out
+
+    def watch_units(self):
+        """JobRemoved fires when a start/stop/restart of a unit finishes: refresh then."""
+        Gio = self.Gio
+        try:
+            self.systemd().call_sync("Subscribe", None, 0, 5000, None)
+        except Exception as e:
+            log(f"systemd Subscribe: {str(e)[:120]}")
+        bus = Gio.bus_get_sync(Gio.BusType.SYSTEM, None)
+
+        def on_job(_c, _s, _p, _i, _sig, params):
+            # JobRemoved is (u id, o job, s unit, s result); UnitRemoved is (s unit, o path)
+            unit = next((a for a in params.unpack() if isinstance(a, str) and a.endswith(".service")), "")
+            if unit.startswith("maluos-agent@"):
+                self.refresh_soon(1.5)
+        bus.signal_subscribe("org.freedesktop.systemd1", "org.freedesktop.systemd1.Manager", "JobRemoved", "/org/freedesktop/systemd1", None, 0, on_job)
+        bus.signal_subscribe("org.freedesktop.systemd1", "org.freedesktop.systemd1.Manager", "UnitRemoved", "/org/freedesktop/systemd1", None, 0, on_job)
+
+    def agent_action(self, name, action):
+        GLib = self.GLib
+        if not NAME_RE.match(name):
+            raise ValueError(f"bad agent name {name!r}")
+        method = {"start": "StartUnit", "stop": "StopUnit", "restart": "RestartUnit"}.get(action)
+        if not method:
+            raise ValueError(f"unknown action {action!r} (start, stop, restart)")
+        # The user's own polkit prompt answers org.freedesktop.systemd1.manage-units.
+        self.systemd().call_sync(method, GLib.Variant("(ss)", (f"maluos-agent@{name}.service", "replace")),
+                                 self.Gio.DBusCallFlags.ALLOW_INTERACTIVE_AUTHORIZATION, 120000, None)
+
+    # -- collecting
+    def collect(self):
+        units = self.units()
+        gw, me = gateway_state()
+        st = {"version": VERSION, "ts": int(time.time()), "host": host_state(), "gateway": gw, "me": me_state(me),
+              "vault": vault_state(), "agents": agents_state(units), "alerts": alerts_state()}
+        return st
+
+    def poll_loop(self):
+        while True:
+            try:
+                st = self.collect()
+                self.GLib.idle_add(self.apply, st)
+            except Exception as e:
+                log(f"poll: {e.__class__.__name__}: {str(e)[:160]}")
+            self.wake.wait(POLL); self.wake.clear()
+
+    def refresh_soon(self, delay=0.0):
+        if delay <= 0:
+            self.wake.set(); return
+        if self.pending_refresh:
+            return
+        def fire():
+            self.pending_refresh = None; self.wake.set(); return False
+        self.pending_refresh = self.GLib.timeout_add(int(delay * 1000), fire)
+
+    # -- applying: diff, notify, publish
+    def apply(self, st):
+        prev = self.prev
+        with self.lock:
+            self.state = st
+            self.prev = st
+        if prev is not None:
+            self.diff(prev, st)
+        else:
+            self.alert_floor = max([a["id"] for a in st["alerts"] if a.get("id")] or [0])
+        if self.conn:
+            self.conn.emit_signal(None, OBJ, IFACE, "StateChanged", self.GLib.Variant("(s)", (json.dumps(st, default=str),)))
+        return False
+
+    def diff(self, old, new):
+        # agents: steady-state changes only
+        o = {a["name"]: a for a in old["agents"]}
+        for a in new["agents"]:
+            was = o.get(a["name"])
+            if was is None:
+                self.notify(f"Agent {a['name']} created", f"maluos-agent@{a['name']} ({a['active']})"); continue
+            if a["active"] != was["active"] and a["active"] in STEADY and was["active"] in STEADY:
+                if a["active"] == "failed":
+                    self.notify(f"Agent {a['name']} failed", f"{a['unit']} ({a['sub']}); see its logs", urgency=2)
+                elif a["active"] == "active":
+                    self.notify(f"Agent {a['name']} is running", a["exec"] or a["unit"])
+                else:
+                    self.notify(f"Agent {a['name']} stopped", a["unit"])
+        for name in set(o) - {a["name"] for a in new["agents"]}:
+            self.notify(f"Agent {name} removed", f"maluos-agent@{name} is gone from this host")
+        # the gateway and its backends
+        og, ng = old["gateway"], new["gateway"]
+        if og.get("available") != ng.get("available"):
+            self.notify("Inference gateway " + ("available" if ng.get("available") else "not available"),
+                        "models are reachable at the gateway socket again" if ng.get("available") else "the gateway socket is gone; model calls will fail")
+        ob = {b["name"]: b["healthy"] for b in og.get("backends") or []}
+        for b in ng.get("backends") or []:
+            if b["name"] in ob and ob[b["name"]] != b["healthy"]:
+                self.notify(f"Model backend {b['name']} " + ("is back" if b["healthy"] else "is down"),
+                            "calls route around it while it is unhealthy" if not b["healthy"] else "healthy again", urgency=2 if not b["healthy"] else 1)
+        # budget thresholds (the user's own policy), once per period
+        for period, b in (new["me"].get("budget") or {}).items():
+            if b.get("spent") is None or not b.get("limit"):
+                continue
+            key = f"{period}:{time.strftime('%Y-%m-%d' if period == 'day' else '%Y-%m')}"
+            level = "over" if b["spent"] >= b["limit"] else "warn" if b["spent"] >= b["warn_at"] * b["limit"] else None
+            if level and self.budget_notified.get(key) != level:
+                self.budget_notified[key] = level
+                self.notify(f"Model budget {'exhausted' if level == 'over' else 'nearly used'} ({period})",
+                            f"{b['spent']:.2f} of {b['limit']:.2f} USD this {period}", urgency=2 if level == "over" else 1)
+        # new alert rows for me in the ledger
+        for a in sorted(new["alerts"], key=lambda a: a.get("id") or 0):
+            if a.get("id") and (self.alert_floor is None or a["id"] > self.alert_floor):
+                self.alert_floor = a["id"]
+                self.notify(f"Alert: {a['kind']}", a.get("title") or "", urgency=1)
+
+    def notify(self, summary, body="", urgency=1):
+        log(f"notify: {summary}" + (f" — {body}" if body else ""))
+        if self.once or not self.session:
+            return
+        GLib = self.GLib
+        try:
+            if self.notify_proxy is None:
+                self.notify_proxy = self.Gio.DBusProxy.new_sync(self.session, self.Gio.DBusProxyFlags.DO_NOT_LOAD_PROPERTIES, None,
+                                                                "org.freedesktop.Notifications", "/org/freedesktop/Notifications", "org.freedesktop.Notifications", None)
+            hints = {"urgency": GLib.Variant("y", urgency), "desktop-entry": GLib.Variant("s", "maluos-session")}
+            self.notify_proxy.call_sync("Notify", GLib.Variant("(susssasa{sv}i)", ("MaluOS", 0, "maluos-logo", summary, body, [], hints, -1)), 0, 5000, None)
+        except Exception as e:
+            log(f"notification failed: {e.__class__.__name__}: {str(e)[:120]}")
+
+    # -- D-Bus
+    def on_call(self, conn, sender, path, iface, method, params, invocation):
+        GLib = self.GLib
+        try:
+            if method == "GetState":
+                with self.lock:
+                    invocation.return_value(GLib.Variant("(s)", (json.dumps(self.state, default=str),)))
+            elif method == "Refresh":
+                self.refresh_soon(); invocation.return_value(None)
+            elif method == "AgentAction":
+                name, action = params.unpack()
+                self.agent_action(name, action)
+                self.refresh_soon(1.0)
+                invocation.return_value(None)
+            else:
+                invocation.return_error_literal(self.Gio.dbus_error_quark(), self.Gio.DBusError.UNKNOWN_METHOD, method)
+        except Exception as e:
+            invocation.return_error_literal(self.Gio.dbus_error_quark(), self.Gio.DBusError.FAILED, f"{e.__class__.__name__}: {str(e)[:200]}")
+
+    def on_get_prop(self, conn, sender, path, iface, name):
+        if name == "Version":
+            return self.GLib.Variant("s", VERSION)
+        return None
+
+    def run(self):
+        Gio, GLib = self.Gio, self.GLib
+        node = Gio.DBusNodeInfo.new_for_xml(XML)
+        loop = GLib.MainLoop()
+
+        def on_bus(conn, _name):
+            self.conn = conn; self.session = conn
+            reg = getattr(conn, "register_object_with_closures2", None) or conn.register_object   # the former since GLib 2.86
+            self.reg_id = reg(OBJ, node.interfaces[0], self.on_call, self.on_get_prop, None)
+            log(f"on the session bus as {BUS_NAME}")
+
+        def on_lost(conn, _name):
+            log("lost the bus name; another instance owns it"); loop.quit()
+
+        Gio.bus_own_name(Gio.BusType.SESSION, BUS_NAME, Gio.BusNameOwnerFlags.NONE, on_bus, None, on_lost)
+        try:
+            self.watch_units()
+        except Exception as e:
+            log(f"no systemd watch: {str(e)[:120]}")
+        threading.Thread(target=self.poll_loop, daemon=True).start()
+        loop.run()
+
+
+def main(argv):
+    if "-h" in argv or "--help" in argv:
+        print(__doc__); return 0
+    import gi
+    gi.require_version("Gio", "2.0"); gi.require_version("GLib", "2.0")
+    if "--once" in argv:
+        s = Service(once=True)
+        print(json.dumps(s.collect(), indent=2, default=str))
+        return 0
+    Service().run()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

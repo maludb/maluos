@@ -1,0 +1,16 @@
+[Unit]
+Description=MaluOS session service: agents, gateway, vault and alerts for the desktop
+Documentation=https://github.com/maludb/maluos
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=dbus
+BusName=com.maluos.Session
+ExecStart=/usr/lib/maluos/maluos-desktop-session
+Restart=on-failure
+RestartSec=5
+Slice=background.slice
+
+[Install]
+WantedBy=graphical-session.target

@@ -1,0 +1,5 @@
+# maluos-desktop-session: the MaluOS indicator is on in the MaluOS (ubuntu-mode) session.
+# The session mode's own extensions (dock, app indicators, ...) come from
+# /usr/share/gnome-shell/modes/ubuntu.json and are added to this list by the shell.
+[org.gnome.shell:ubuntu]
+enabled-extensions=['maluos-session@maluos.com']

@@ -1,0 +1,26 @@
+Source: maluos-session
+Section: gnome
+Priority: optional
+Maintainer: Edward Honour <ed@maludb.org>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.6.2
+Homepage: https://github.com/maludb/maluos
+Rules-Requires-Root: no
+
+Package: maluos-desktop-session
+Architecture: all
+Depends: ${misc:Depends}, python3 (>= 3.12), python3-gi, gir1.2-glib-2.0, gnome-shell (>= 50), gnome-shell (<< 51), maluos-desktop-branding (>= 0.3.2)
+Recommends: maluos-gateway (>= 0.3.2), maluos-vault, maluos-agent, xdg-terminal-exec
+Description: MaluOS agent-aware session: indicator, notifications, session service
+ A per-user service (com.maluos.Session on the session bus, D-Bus
+ activated) that reads what the OS already knows about this desk: the
+ agents on the host and their units, the inference gateway with its
+ backends, queue and the user's own policy and spend, the user's vault
+ secrets and delegations, their alerts in the ledger, and the memory host
+ this desk runs. It talks to the gateway and the vault over their sockets
+ as the session user, so peer identity applies and no token lives in the
+ session. State changes become desktop notifications.
+ .
+ The GNOME Shell extension maluos-session@maluos.com puts that state in
+ the top panel: an indicator with a menu of agents (start, stop, restart,
+ logs through polkit), gateway and budget, vault, recent calls and alerts.

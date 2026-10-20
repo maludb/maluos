@@ -46,6 +46,11 @@ The demo agent (/usr/lib/maluos/maluos-agent-demo.py) asks the gateway one
 question through the socket as itself and then waits; the image boot test
 creates an agent around it and checks every part above.
 
+On a MaluOS desktop the session sees the agents too: maluos-desktop-session
+reads this directory and the units from systemd and shows them in the top
+panel with notifications on start, stop and failure (docs/phase12-desktop.md,
+slice 2).
+
 Not yet: polkit rules for agents that need to touch the system beyond the
 sockets, bubblewrap or nspawn sandboxes for agents that run untrusted code,
 and agent-specific resource limits. The unit template is the place for all

@@ -1,0 +1,12 @@
+maluos-session (0.1.0) resolute; urgency=medium
+
+  * Phase 12 slice 2: the agent-aware session. maluos-desktop-session, a
+    per-user D-Bus service (com.maluos.Session) that watches agent units
+    through systemd, the gateway and the vault through their sockets as
+    the session user, and the user's ledger alerts; state changes become
+    desktop notifications. The GNOME Shell extension
+    maluos-session@maluos.com shows the state in the top panel and offers
+    start/stop/restart of agents through polkit. Enabled in the MaluOS
+    session by a gsettings override.
+
+ -- Edward Honour <ed@maludb.org>  Mon, 19 Oct 2026 20:00:00 +0000

@@ -4,7 +4,7 @@ tiers and aliases to backend models under the caller's policy, admission
 through the per-backend scheduler, streaming passthrough, a ledger row per
 call, live status, and the engine's model request queue drained as batch work."""
 import asyncio, collections, json, os, pwd, secrets, signal, socket, struct, sys, time
-import aiohttp
+import aiohttp, psycopg
 from aiohttp import web
 
 from . import VERSION
@@ -946,6 +946,10 @@ async def errors_middleware(request, handler):
         raise
     except (asyncio.CancelledError, ConnectionResetError):
         raise
+    except psycopg.OperationalError as e:
+        # The database is not there (yet): before first boot has provisioned it, or while PostgreSQL restarts.
+        log(f"not ready on {request.method} {request.path}: database unavailable: {str(e).strip()[:160]}")
+        return web.json_response({"error": {"message": "the gateway's database is not available yet", "type": "unavailable", "code": "not_ready"}}, status=503)
     except Exception as e:
         log(f"internal error on {request.method} {request.path}: {e.__class__.__name__}: {str(e)[:200]}")
         return web.json_response({"error": {"message": f"internal error: {e.__class__.__name__}", "type": "internal", "code": "internal"}}, status=500)
@@ -1227,6 +1231,7 @@ async def h_whoami(request):
     caller = await gw.caller(request)
     d = caller.as_dict()
     d["policy"] = gw.catalog.policy_for(caller.ref, caller.scopes)
+    d["spend"] = {"day": await gw.spent(caller.ref, "day"), "month": await gw.spent(caller.ref, "month")}   # the caller's own, for budgets
     return web.json_response(d)
 
 

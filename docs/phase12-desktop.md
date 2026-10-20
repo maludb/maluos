@@ -82,15 +82,121 @@ background read back through gsettings. The desktop VM gets 3 GB and 4
 vCPUs. CI builds and boot-tests the desktop on demand (`images` workflow
 input `desktop`).
 
+## Slice 2 (2026-10-19): the agent-aware session
+
+```
+packages/maluos-session  ->  maluos-desktop-session (in seeds/desktop.seed)
+  /usr/lib/maluos/maluos-desktop-session        the session service (python3, Gio), com.maluos.Session
+  /usr/lib/systemd/user/maluos-desktop-session.service   enabled for every user, WantedBy graphical-session.target
+  /usr/share/dbus-1/services/com.maluos.Session.service  D-Bus activation (the extension's proxy starts it)
+  /usr/share/gnome-shell/extensions/maluos-session@maluos.com/   the indicator
+  /usr/share/glib-2.0/schemas/30_maluos-session.gschema.override  enables it in the MaluOS session
+maluos-desktop-session --once                   the state as JSON, for tests and debugging
+```
+
+The desk knows things a laptop does not: which agents live here, whether
+the gateway and its backends are up, how much of the user's model budget
+is spent, what the vault holds for them, and which memory host this is.
+Slice 2 puts that knowledge in the session.
+
+**The session service.** One process per logged-in user, D-Bus activated
+and owned by `systemd --user`. It reads the agents from
+`/etc/maluos/agents` and their units from systemd on the system bus (the
+unit list is readable by anyone; it subscribes to `JobRemoved` so a
+start or stop is seen within two seconds), the gateway at
+`/run/maluos/gateway.sock` (`health`, `status`, `whoami`, `routes`) and
+the vault at `/run/maluos/vault.sock` (`whoami`, `secrets`,
+`compartments`, `delegations`, `ledger?event_like=alert.%`), all as the
+session user: peer-credential identity means the service sees exactly
+what the user may see, with no token anywhere in the session. The gateway's
+`whoami` now carries the caller's own spend for the day and the month
+(maluos-gateway 0.3.2), so the budget needs no operator rights. The memory
+host comes from first boot's summary in `/var/lib/maluos/firstboot/done`.
+Every 20 seconds, or when systemd says an agent job finished, the service
+rebuilds one JSON document (`GetState`, signal `StateChanged`) and
+compares it with the last: an agent created, running, stopped, failed or
+removed, the gateway or a backend going away or coming back, the user's
+budget crossing its warning or its limit, and a new alert row for the
+user in the ledger each become a desktop notification
+(`org.freedesktop.Notifications`, so they work in any session, not only
+with the extension). `AgentAction(name, start|stop|restart)` forwards to
+systemd with interactive authorisation: the user's own polkit prompt
+decides, as it would for `systemctl start`.
+
+**The indicator.** A GNOME Shell extension (ESM, GNOME 50) with a panel
+icon and a menu: host and memory tenant; the agents, each with its unit
+state and a submenu (start or stop, restart, logs in a terminal); the
+gateway with healthy backends and the queue, a backend list with loaded
+models and errors; the user's principal and budget; recent calls; the
+vault's secrets, compartments and delegations; the latest alerts. The
+icon turns amber when a backend is down or the budget is nearly used, red
+when an agent has failed or the budget is exhausted, and dims when the
+gateway is not on this host. It renders only; everything comes over the
+session bus from the service, so a crash in the data path cannot take the
+shell down with it. It is enabled through `enabled-extensions` in a
+`:ubuntu` override: the shell adds the user's list to the session mode's
+own (`/usr/share/gnome-shell/modes/ubuntu.json`), and the user can turn it
+off in Extensions like any other.
+
+### Decisions
+
+- **A service, not a smart extension.** Shell extensions run inside
+  gnome-shell; an exception there is a shell crash. The extension holds a
+  D-Bus proxy and a menu, nothing else. The service is also what a
+  settings panel, a CLI or another desktop could read.
+- **What the user may see, nothing more.** The service never runs as root
+  and asks for no token. Agent units are public on the system bus; the
+  gateway's `routes` and the vault's `ledger` already filter for
+  non-operators. An operator (root) would see more, but the session is
+  not root. The consequence: alerts about an *agent's* budget belong to
+  the agent's principal and are not in the user's list yet. Attributing
+  agents to the person who owns them is the enrolment slice's job.
+- **Vault grant prompts are not here yet.** The vault has no pending
+  request state: a grant is made by the owner or an operator, or an agent
+  is simply denied. Prompting the person when an agent asks is a vault
+  feature (a request row, a notification with Allow/Deny, a grant with an
+  expiry) and comes with desk enrolment, when agents have an owner.
+- **Agent control through polkit.** Start and stop go to systemd on the
+  system bus with `ALLOW_INTERACTIVE_AUTHORIZATION`; GNOME's polkit agent
+  prompts for an administrator's password, as it does for `systemctl`.
+  No MaluOS-specific polkit rule yet; a desk rule ("the console user may
+  manage agents they own") also waits for ownership.
+
+### The test
+
+`tests/qcow2-boot-test.sh` now logs the test user straight into the
+MaluOS session on desktop images (GDM `AutomaticLogin` written by the
+NoCloud seed), waits for the graphical session, then as that user over
+the session bus: the extension reports state ENABLED through
+`org.gnome.Shell.Extensions`, the user unit is active, `GetState` shows
+the gateway ok, the vault and the gateway seeing `user:maluos`, the
+memory tenant and `VARIANT=Desktop`. It creates an agent `desk` without
+starting it, checks the session sees it inactive, starts and stops the
+unit with systemctl and checks the service saw both within thirty
+seconds, then reads the service's journal for the three notifications
+(created, running, stopped) and the absence of delivery errors. The
+whole desktop session runs under software rendering in QEMU, so this is a
+real GNOME session with the real shell loading the real extension.
+
+Found on the way: the session service was the first client ever to call
+the gateway before first boot had provisioned the database, and the
+gateway answered that with a 500 and an "internal error" in its journal
+(which the boot test treats as a failure). It now answers 503 `not_ready`
+and logs "not ready" (maluos-gateway 0.3.2). And GNOME disables
+extensions on the lock screen: the test session had idle-locked during
+the ten minutes of server checks, so the extension read as DISABLED with
+no error. The seed now writes a dconf system database that turns the idle
+lock off for the test user before gdm starts.
+
 ## Next slices
 
-1. **The agent-aware session.** A GNOME Shell extension and a settings
-   panel for what the OS already knows: the agents on this host
-   (`maluctl agent`), the gateway's state and budget, vault prompts when
-   an agent asks for a credential grant, and the memory host this desk is
-   enrolled with. First as a status indicator plus notifications; the
-   vault's socket and the gateway's socket already carry peer identity,
-   so the session user needs no token.
+1. **The agent-aware session, the rest.** Slice 2 delivered the
+   indicator, the notifications and the session service. Still to come:
+   a settings panel (a libadwaita window on the same D-Bus state: agents
+   with their policies and logs, the gateway's catalogue, the vault),
+   vault prompts when an agent asks for a credential grant (needs a
+   pending-request state in the vault), and agent ownership so a person's
+   agents and their alerts are theirs on the desk.
 2. **Desk enrolment.** `maluctl enroll <office>`: this desk joins a
    Business OS estate as a desk location, the person's principal is
    delegated here, and local agents can reach the office's memory through
@@ -108,7 +214,23 @@ input `desktop`).
 
 ## Status
 
-Slice 1 built and boot-tested 2026-10-19; details below.
+Slice 1 built and boot-tested 2026-10-19; slice 2 built 2026-10-19 (status below).
+
+### Slice 2 status (2026-10-19)
+
+| Artefact | Result |
+|---|---|
+| Packages | maluos-desktop-session 0.1.0 (new source packages/maluos-session), maluos-gateway 0.3.2, maluos-meta 0.2.2; lintian clean |
+| Rootfs | 969 packages (one more than slice 1), 2.7 GB uncompressed, 1.5 GB squashfs |
+| Cloud image | maluos-desktop-26.04-amd64.qcow2, 1.7 GB |
+| Boot test | `tests/qcow2-boot-test.sh` PASS on BIOS under TCG, 125 checks, 0 failures, the same two expected warnings as slice 1. The test user auto-logs into the MaluOS session; the extension reads ENABLED in the running shell, the user unit is active, `GetState` shows the gateway with 6 backends, the vault and the gateway identifying `user:maluos`, tenant `maluos`, VARIANT=Desktop; an agent `desk` created, started and stopped is seen by the service within seconds and produces the three notifications, delivered to the shell without error |
+| Service on its own | `--once` and a private-bus harness on the dev host (no MaluOS services present): every section reads "not available", every D-Bus method answers, the signal fires, a bad agent name is refused, an unprivileged unit action returns the polkit "interactive authorisation required" error as expected |
+
+Not yet done: the desktop ISO is not rebuilt with slice 2 (`iso/build-iso.sh
+-p desktop`), no UEFI run of this test, no CI run, and nobody has yet seen
+the indicator with eyes on real hardware: the menu's layout and the icon's
+recolouring are tested only in that the shell enabled the extension
+without a JS error.
 
 ### Slice 1 status (2026-10-19)
 
@@ -122,6 +244,7 @@ Slice 1 built and boot-tested 2026-10-19; details below.
 
 Found and fixed on the way: the first rootfs had no initramfs (dracut now
 in the profile) and the boot splash carried Ubuntu's logo through
-plymouth-theme-spinner's watermark symlink (diverted). Not yet done: an ISO install test (needs KVM), a look at
-the splash and the greeter on real hardware, and the CI run with the
-`desktop` input.
+plymouth-theme-spinner's watermark symlink (diverted). The CI `images`
+run with the `desktop` input passed the same day (server BIOS and UEFI,
+desktop BIOS boot tests on KVM, 44 minutes). Not yet done: an ISO install
+test (needs KVM) and a look at the splash and the greeter on real hardware.

@@ -15,6 +15,20 @@ ACCEL=$([ -w /dev/kvm ] && echo kvm || echo tcg)
 mkdir -p "$WORK"; cd "$WORK"
 ss -ltn | grep -q ":$SSHPORT " && { echo "port $SSHPORT busy" >&2; exit 1; }
 [ -f testkey ] || ssh-keygen -q -t ed25519 -N '' -f testkey -C maluos-qcow2-test
+# The desktop image logs the test user straight into the MaluOS session, so the
+# shell extension and the session service run as a real user (Phase 12 slice 2).
+# The session must not idle-lock during the long server checks: GNOME disables
+# extensions on the lock screen. A dconf system database set before gdm starts.
+DESKTOP_SEED=""
+case "$(basename "$IMG")" in *desktop*) DESKTOP_SEED="write_files:
+  - path: /etc/gdm3/custom.conf
+    content: |
+      [daemon]
+      AutomaticLoginEnable=true
+      AutomaticLogin=maluos
+bootcmd:
+  - [sh, -c, \"mkdir -p /etc/dconf/profile /etc/dconf/db/local.d; printf 'user-db:user\\nsystem-db:local\\n' > /etc/dconf/profile/user; printf '[org/gnome/desktop/session]\\nidle-delay=uint32 0\\n[org/gnome/desktop/screensaver]\\nlock-enabled=false\\n' > /etc/dconf/db/local.d/00-boot-test; dconf update\"]
+";; esac
 cat > user-data <<UD
 #cloud-config
 hostname: maluos-test
@@ -24,6 +38,7 @@ users:
     shell: /bin/bash
     ssh_authorized_keys:
       - $(cat testkey.pub)
+$DESKTOP_SEED
 UD
 printf 'instance-id: maluos-test-%s\nlocal-hostname: maluos-test\n' "$(date +%s)" > meta-data
 cloud-localds seed.iso user-data meta-data
@@ -208,6 +223,45 @@ logo=$(dbus-run-session -- gsettings get org.gnome.login-screen logo 2>/dev/null
 bg=$(XDG_CURRENT_DESKTOP=ubuntu:GNOME dbus-run-session -- gsettings get org.gnome.desktop.background picture-uri-dark 2>/dev/null); echo "$bg" | grep -q maluos-dark && echo "  ok   session background is the MaluOS wallpaper" || echo "  warn session background: ${bg:-unreadable}"
 grep -q 'file:///usr/share/backgrounds/maluos' /usr/share/glib-2.0/schemas/20_maluos-desktop.gschema.override && echo "  ok   desktop override file shipped" || { echo "  FAIL override file"; fail=1; }
 systemctl is-active --quiet NetworkManager && echo "  ok   NetworkManager active" || echo "  warn NetworkManager: $(systemctl is-active NetworkManager)"
+
+# --- the agent-aware session (Phase 12 slice 2): auto-login into the MaluOS session, the indicator, the session service
+installed maluos-desktop-session && echo "  ok   maluos-desktop-session" || { echo "  FAIL maluos-desktop-session"; fail=1; }
+gs=$(dpkg-query -W -f='${Version}' gnome-shell | cut -d. -f1)
+grep -q "\"$gs\"" /usr/share/gnome-shell/extensions/maluos-session@maluos.com/metadata.json && echo "  ok   extension declares shell version $gs" || { echo "  FAIL extension metadata lacks shell version $gs"; fail=1; }
+grep -q "maluos-session@maluos.com" /usr/share/glib-2.0/schemas/30_maluos-session.gschema.override && echo "  ok   extension enabled for the MaluOS session (override)" || { echo "  FAIL session override"; fail=1; }
+uid=$(id -u); export XDG_RUNTIME_DIR=/run/user/$uid DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus
+for i in $(seq 1 90); do loginctl list-sessions --no-legend 2>/dev/null | grep -qE "maluos +seat0" && [ -S /run/user/$uid/bus ] && systemctl --user is-active --quiet graphical-session.target 2>/dev/null && break; sleep 5; done
+loginctl list-sessions --no-legend | grep -qE "maluos +seat0" && systemctl --user is-active --quiet graphical-session.target && echo "  ok   auto-login: maluos has a graphical session on seat0" || { echo "  FAIL no graphical session for maluos"; loginctl list-sessions --no-legend; sudo -n journalctl -u gdm --no-pager | tail -5; fail=1; }
+[ "$(gsettings get org.gnome.desktop.screensaver lock-enabled 2>/dev/null)" = false ] && echo "  ok   test session does not idle-lock (dconf system db from the seed)" || { echo "  warn idle lock not disabled; unlocking"; loginctl unlock-session "$(loginctl list-sessions --no-legend | awk '/seat0/{print $1}')" 2>/dev/null; gdbus call --session --dest org.gnome.ScreenSaver --object-path /org/gnome/ScreenSaver --method org.gnome.ScreenSaver.SetActive false >/dev/null 2>&1; }
+extinfo() { gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/Shell --method org.gnome.Shell.Extensions.GetExtensionInfo maluos-session@maluos.com 2>&1; }
+for i in $(seq 1 60); do extinfo | grep -q "'state': <1\.0>" && break; sleep 5; done
+info=$(extinfo)
+echo "$info" | grep -q "'state': <1\.0>" && echo "  ok   maluos-session extension enabled in the user's shell" || { echo "  FAIL extension state: $(echo "$info" | grep -o "'state': <[^>]*>\|'error': <[^>]*>" | head -2 | tr '\n' ' ')"; sudo -n journalctl -b --no-pager _UID=$uid 2>/dev/null | grep -i "maluos-session\|extension" | tail -8; fail=1; }
+for i in $(seq 1 12); do systemctl --user is-active --quiet maluos-desktop-session && break; sleep 5; done
+systemctl --user is-active --quiet maluos-desktop-session && echo "  ok   session service active (user unit, D-Bus activated by the extension)" || { echo "  FAIL session service: $(systemctl --user is-active maluos-desktop-session)"; sudo -n journalctl -b --no-pager _SYSTEMD_USER_UNIT=maluos-desktop-session.service | tail -8; fail=1; }
+state() { gdbus call --session --dest com.maluos.Session --object-path /com/maluos/Session --method com.maluos.Session1.GetState 2>/dev/null | python3 -c "import ast,sys,json; print(json.dumps(json.loads(ast.literal_eval(sys.stdin.read())[0])))"; }
+state | python3 -c "
+import json,sys; s=json.load(sys.stdin)
+assert s['gateway']['available'] and s['gateway']['ok'], s['gateway']
+assert s['vault']['available'] and s['vault']['enrolled'] and s['vault']['principal']=='user:maluos', s['vault']
+assert s['me']['enrolled'] and s['me']['principal']=='user:maluos', s['me']
+assert s['host']['memory'] and s['host']['memory']['tenant'], s['host']
+assert s['host']['variant']=='Desktop', s['host']
+print('  ok   session state: gateway ok (%d backends), vault and gateway see user:maluos, memory tenant %s' % (len(s['gateway']['backends']), s['host']['memory']['tenant']))" || { echo "  FAIL session state: $(state | head -c 400)"; fail=1; }
+sudo -n maluctl agent create desk --exec /usr/lib/maluos/maluos-agent-idle --scope org:read --no-start >/dev/null 2>&1 && echo "  ok   agent desk created, not started" || { echo "  FAIL agent create desk"; fail=1; }
+gdbus call --session --dest com.maluos.Session --object-path /com/maluos/Session --method com.maluos.Session1.Refresh >/dev/null 2>&1; sleep 4
+agent_is() { state | python3 -c "import json,sys; s=json.load(sys.stdin); a=[x for x in s['agents'] if x['name']=='desk']; sys.exit(0 if a and a[0]['active']=='$1' else 1)"; }
+agent_is inactive && echo "  ok   session sees agent desk: inactive" || { echo "  FAIL session agents: $(state | python3 -c 'import json,sys; print(json.load(sys.stdin)["agents"])')"; fail=1; }
+sudo -n systemctl start maluos-agent@desk
+for i in $(seq 1 15); do agent_is active && break; sleep 2; done
+agent_is active && echo "  ok   session saw the unit start (systemd JobRemoved -> refresh)" || { echo "  FAIL session did not see desk start: $(state | python3 -c 'import json,sys; print(json.load(sys.stdin)["agents"])')"; fail=1; }
+sudo -n systemctl stop maluos-agent@desk
+for i in $(seq 1 15); do agent_is inactive && break; sleep 2; done
+agent_is inactive && echo "  ok   session saw the unit stop" || { echo "  FAIL session did not see desk stop"; fail=1; }
+sleep 2; sj=$(sudo -n journalctl -b --no-pager _SYSTEMD_USER_UNIT=maluos-desktop-session.service 2>/dev/null)
+echo "$sj" | grep -q "notify: Agent desk created" && echo "$sj" | grep -q "notify: Agent desk is running" && echo "$sj" | grep -q "notify: Agent desk stopped" && echo "  ok   notifications: created, running, stopped" || { echo "  FAIL notifications missing:"; echo "$sj" | grep notify | tail -5; fail=1; }
+! echo "$sj" | grep -q "notification failed" && echo "  ok   notifications delivered to the shell" || { echo "  FAIL notification delivery:"; echo "$sj" | grep "notification failed" | tail -3; fail=1; }
+sudo -n maluctl agent remove desk --purge >/dev/null 2>&1 || true
 fi
 sudo -n maluctl status | sed 's/^/  maluctl: /'
 exit $fail

@@ -1,0 +1,10 @@
+.maluos-indicator { }
+.maluos-indicator.maluos-warn { color: #f5a623; }
+.maluos-indicator.maluos-bad { color: #e5484d; }
+.maluos-indicator.maluos-off { opacity: 0.45; }
+.maluos-header { font-weight: bold; }
+.maluos-dim { opacity: 0.65; }
+.maluos-dot-ok { color: #2ec27e; }
+.maluos-dot-warn { color: #f5a623; }
+.maluos-dot-bad { color: #e5484d; }
+.maluos-dot-off { opacity: 0.4; }

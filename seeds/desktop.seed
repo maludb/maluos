@@ -4,6 +4,7 @@
 # maluos-server (image/profiles/desktop.pkgs does) for a local memory host.
 maluos-base
 maluos-desktop-branding
+maluos-desktop-session
 # session and shell
 gdm3
 gnome-shell

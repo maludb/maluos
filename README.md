@@ -17,7 +17,8 @@ repository works.
 
 ```
 packages/      source packages owned by MaluOS (keyring, archive, metapackages,
-               branding, first boot + maluctl, vault, inference gateway, vendored components)
+               branding, first boot + maluctl, vault, inference gateway, agents,
+               the desktop session service + shell extension, vendored components)
 seeds/         package lists per variant; metapackage Depends are generated from these
 repo/          aptly configuration and publish scripts
 scripts/       build helpers and the client bootstrap installer
