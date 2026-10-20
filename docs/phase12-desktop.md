@@ -236,7 +236,7 @@ missing table like a missing database (503 `not_ready`). And one
 `Notify` call to the shell took longer than the service's 5 s
 synchronous limit under software rendering: maluos-desktop-session 0.1.1
 sends notifications asynchronously with a 30 s limit, so a slow shell
-stalls nothing. The desktop ISO is rebuilt with these. Still not done:
+stalls nothing. The desktop ISO and image were rebuilt with these and the UEFI run then passed (124 checks, journal clean, every notification delivered); they are what release 26.04.20261020 ships, the first desktop release (docs/release.md). Still not done:
 nobody has yet seen the indicator with eyes on real hardware; the menu's
 layout and the icon's recolouring are tested only in that the shell
 enabled the extension without a JS error.
