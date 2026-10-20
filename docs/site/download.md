@@ -6,23 +6,43 @@ holds it, so a site script can substitute it at render time.
 
 ---
 
-## MaluOS Server 26.04.20261019
+## MaluOS 26.04.20261020
 
 MaluOS is an operating system built around MaluDB: the database, its API,
 the credential vault, the model gateway and the agent runtime install and
-provision themselves on first boot. The free edition is the full server;
-no account or licence is needed.
+provision themselves on first boot. The free edition is the full system;
+no account or licence is needed. It comes as a server and, new in this
+release, as a desktop.
 
 | File | Size | Use |
 |---|---|---|
-| [maluos-26.04.20261019-server-amd64.iso](https://download.maluos.com/26.04.20261019/maluos-26.04.20261019-server-amd64.iso) | 4.7 GB | Installer for physical machines and VMs (BIOS and UEFI, Secure Boot) |
-| [maluos-26.04.20261019-server-amd64.qcow2](https://download.maluos.com/26.04.20261019/maluos-26.04.20261019-server-amd64.qcow2) | 1.7 GB | Cloud image with cloud-init, for KVM, Proxmox, OpenStack and similar |
-| [SHA256SUMS](https://download.maluos.com/26.04.20261019/SHA256SUMS) · [SHA256SUMS.gpg](https://download.maluos.com/26.04.20261019/SHA256SUMS.gpg) | | Checksums and their signature |
-| [RELEASE-NOTES.md](https://download.maluos.com/26.04.20261019/RELEASE-NOTES.md) | | Package versions and changes in this release |
+| [maluos-26.04.20261020-server-amd64.iso](https://download.maluos.com/26.04.20261020/maluos-26.04.20261020-server-amd64.iso) | 4.7 GB | Server installer for physical machines and VMs (BIOS and UEFI, Secure Boot) |
+| [maluos-26.04.20261020-server-amd64.qcow2](https://download.maluos.com/26.04.20261020/maluos-26.04.20261020-server-amd64.qcow2) | 1.7 GB | Server cloud image with cloud-init, for KVM, Proxmox, OpenStack and similar |
+| [maluos-26.04.20261020-desktop-amd64.iso](https://download.maluos.com/26.04.20261020/maluos-26.04.20261020-desktop-amd64.iso) | 4.8 GB | Desktop installer (GNOME) for workstations, laptops and VMs (BIOS and UEFI, Secure Boot) |
+| [maluos-26.04.20261020-desktop-amd64.qcow2](https://download.maluos.com/26.04.20261020/maluos-26.04.20261020-desktop-amd64.qcow2) | 1.7 GB | Desktop image with cloud-init, for a workstation VM |
+| [SHA256SUMS](https://download.maluos.com/26.04.20261020/SHA256SUMS) · [SHA256SUMS.gpg](https://download.maluos.com/26.04.20261020/SHA256SUMS.gpg) | | Checksums and their signature |
+| [RELEASE-NOTES.md](https://download.maluos.com/26.04.20261020/RELEASE-NOTES.md) | | Package versions and changes in this release |
 
-Releases are dated: `26.04` is the package base, `20261019` the build
-date. Every release is also on GitHub with the cloud image and checksums
-attached: https://github.com/maludb/maluos/releases/tag/v26.04.20261019
+Releases are dated: `26.04` is the package base, `20261020` the build
+date. Every release is also on GitHub with the cloud images and checksums
+attached: https://github.com/maludb/maluos/releases/tag/v26.04.20261020
+
+## The desktop
+
+MaluOS Desktop is the server with a GNOME 50 workstation on top: the same
+database, vault, model gateway and agent runtime run on the machine, so
+agents on your desk have local memory and credentials while it is on.
+The MaluOS session adds an indicator to the top panel that shows the
+agents on the host and lets you start and stop them, the gateway and its
+backends, your model budget, your vault secrets and delegations, and the
+latest alerts; changes arrive as desktop notifications. There are no
+snaps; the browser is GNOME Web, and updates come through apt.
+
+This is the first desktop release. It is tested in virtual machines
+(BIOS and UEFI); the graphics stack and the boot splash have not yet been
+seen on a range of real hardware. The desktop needs at least 4 GB of
+memory and 40 GB of disk; 8 GB or more is recommended, plus the memory of
+any local model you run.
 
 ## Verify the download
 
@@ -37,7 +57,7 @@ Fetch the key from the package repository, check the signature on the
 checksum file, then check the file you downloaded:
 
 ```sh
-V=26.04.20261019
+V=26.04.20261020
 curl -fsSLO https://download.maluos.com/$V/SHA256SUMS
 curl -fsSLO https://download.maluos.com/$V/SHA256SUMS.gpg
 curl -fsSL  https://apt.maluos.com/bootstrap/maluos-archive-keyring.gpg -o maluos-archive-keyring.gpg
@@ -68,16 +88,17 @@ the cloud backends you configure.
 
 1. Write the ISO to a USB stick (`dd`, Rufus, balenaEtcher) or attach it
    to a VM, and boot from it.
-2. Choose **Install MaluOS Server**. The installer asks for language,
-   keyboard, network, proxy, disk layout, your user account and SSH
-   access, then installs and reboots.
-3. For a hands-off install choose **Install MaluOS Server unattended**.
-   It erases the first disk without asking, creates the user `maluos`
-   with the password `maluos`, and forces a password change at the first
-   login.
+2. Choose **Install MaluOS Server** (or **Install MaluOS Desktop** on the
+   desktop ISO). The installer asks for language, keyboard, network,
+   proxy, disk layout, your user account and SSH access, then installs
+   and reboots.
+3. For a hands-off install choose the **unattended** entry. It erases
+   the first disk without asking, creates the user `maluos` with the
+   password `maluos`, and forces a password change at the first login.
 4. On the first boot MaluOS provisions itself: the database cluster, the
    tenant, the API, the credential vault and the model gateway. This takes
-   a few minutes. Log in and check:
+   a few minutes. On the desktop the login screen appears while this runs
+   in the background; log into the **MaluOS** session. On either, check:
 
 ```sh
 maluctl status          # provisioning summary and service health
@@ -105,7 +126,7 @@ users:
 UD
 echo 'instance-id: maluos-1' > meta-data
 cloud-localds seed.iso user-data meta-data
-qemu-img create -f qcow2 -b maluos-26.04.20261019-server-amd64.qcow2 -F qcow2 disk.qcow2 40G
+qemu-img create -f qcow2 -b maluos-26.04.20261020-server-amd64.qcow2 -F qcow2 disk.qcow2 40G
 qemu-system-x86_64 -enable-kvm -m 4096 -smp 2 -drive file=disk.qcow2,if=virtio \
   -drive file=seed.iso,if=virtio,format=raw -nic user,hostfwd=tcp::2222-:22
 ssh -p 2222 maluos@127.0.0.1 maluctl status
