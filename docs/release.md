@@ -168,9 +168,21 @@ are today.
   `scripts/release.sh`: each asks for the production passphrase.
 - Publishing the download page: `docs/site/download.md` (source) and
   `docs/site/download.html` (self-contained page) carry the links,
-  fingerprint, verify commands, requirements and install guide; copy the
-  HTML to maluos.com and bump the release number on each release (or read
-  it from `download.maluos.com/LATEST`).
+  fingerprint, verify commands, requirements and install guide. The page
+  is published on the download bucket as `download.html` and `index.html`
+  (https://download.maluos.com/download.html), after each release:
+  ```sh
+  source ~/.config/maluos/publish.env
+  for k in index.html download.html; do
+    aws --endpoint-url "$MALUOS_S3_ENDPOINT" s3 cp docs/site/download.html "$MALUOS_DOWNLOAD_S3/$k" \
+      --content-type "text/html; charset=utf-8" --cache-control "max-age=300"
+  done
+  ```
+  R2 custom domains serve objects by key only, so the bare
+  `https://download.maluos.com/` is a 404 until a Cloudflare transform rule
+  rewrites the path `/` to `/index.html` (dashboard: Rules, Transform
+  Rules, Rewrite URL). The maluos.com landing page should link to the
+  page and to the release files rather than to `/downloads/*.iso`.
 
 ## Releases so far
 
