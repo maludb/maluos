@@ -4,7 +4,7 @@ picture-uri = 'file:///usr/share/backgrounds/maluos/maluos-dark.png'
 picture-uri-dark = 'file:///usr/share/backgrounds/maluos/maluos-dark.png'
 
 [org.gnome.login-screen]
-logo = '/usr/share/pixmaps/maluos-logo-text.svg'
+logo = '/usr/share/pixmaps/maluos-logo-text.png'
 
 [org.gnome.desktop.background:ubuntu]
 picture-uri = 'file:///usr/share/backgrounds/maluos/maluos-light.png'

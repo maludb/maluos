@@ -1,7 +1,7 @@
 files/desktop/variant                        usr/share/maluos-branding
 files/desktop/20_maluos-desktop.gschema.override usr/share/glib-2.0/schemas
-files/desktop/maluos-logo-text.svg           usr/share/pixmaps
-files/desktop/maluos-logo.svg                usr/share/icons/hicolor/scalable/apps
+files/desktop/maluos-logo-text.png           usr/share/pixmaps
+files/desktop/icons/*                        usr/share/icons/hicolor
 files/desktop/backgrounds/*.png              usr/share/backgrounds/maluos
 files/desktop/maluos-wallpapers.xml          usr/share/gnome-background-properties
 files/desktop/sessions/ubuntu.desktop        usr/share/wayland-sessions
