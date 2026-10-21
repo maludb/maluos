@@ -353,7 +353,8 @@ so until the graphical live session (next slices).
 ## Status
 
 Slice 1 built and boot-tested 2026-10-19; slice 2 built 2026-10-19 and
-released in 26.04.20261020; slice 3 built 2026-10-20 (status below).
+released in 26.04.20261020; slices 3 and 4 built 2026-10-20 and
+2026-10-21 and released in 26.04.20261021 (docs/release.md).
 
 ### Slice 4 status (2026-10-21)
 
@@ -376,9 +377,11 @@ real screen; the test only proves the files are in place and selected.
 | Rootfs, image, ISO | rebuilt with the three packages; ISO apt replay PASS |
 | Boot test | `tests/qcow2-boot-test.sh --uefi` under TCG: 138 ok; the one failure was the test itself reading /etc/polkit-1/rules.d as the user (root-only directory), fixed to `sudo test -f`. Every slice 3 check passed: default owner and registry row, the owner starting and stopping the unit without sudo, the session marking the agent as theirs, the refusal filing request #2, the notification "Agent desk asks for user:maluos/deskkey", RequestDecide over the bus, the grant and the agent then reading the key, `maluctl secret requests`, and `maluos-desk --self-test` building the window on the session's Wayland display |
 
-Not yet done: a BIOS run of this test (CI does it on push with the
-`desktop` input), eyes on the Desk window and the notification buttons on
-real hardware.
+The BIOS run: the CI `images` run with the `desktop` input dispatched
+after the 26.04.20261021 release (run 39655336719, KVM) passed all three
+boot tests, the desktop one with the slice 3 and slice 4 checks. Not yet
+done: eyes on the Desk window and the notification buttons on real
+hardware.
 
 ### The first external desktop install (2026-10-20)
 
