@@ -51,6 +51,16 @@ reads this directory and the units from systemd and shows them in the top
 panel with notifications on start, stop and failure (docs/phase12-desktop.md,
 slice 2).
 
+An agent belongs to a person (Phase 12 slice 3). `create` records the owner
+(`--owner user:NAME`; by default the sudo user, when enrolled; `--owner none`
+for a system agent) in the registry `maluos_agent` in the tenant schema and
+as `MALUOS_AGENT_OWNER` in the env file, and writes a polkit rule so the
+owner's session can start, stop and restart the unit without an
+administrator's password. The vault shows the owner their agents' ledger
+rows and alerts; when an agent is refused one of the owner's secrets, the
+refusal files a grant request the owner answers from the desk or with
+`maluctl secret approve`.
+
 Not yet: polkit rules for agents that need to touch the system beyond the
 sockets, bubblewrap or nspawn sandboxes for agents that run untrusted code,
 and agent-specific resource limits. The unit template is the place for all

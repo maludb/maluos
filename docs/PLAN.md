@@ -35,7 +35,7 @@ repository is the distribution layer.
 | 9 | Editions, the Ubuntu Pro model: Community free, Professional per machine (esm, models, compliance, audit, backup, support), Enterprise per fleet (fleet, sso, scheduler); entitlements by token, services additive | requirements drafted 2026-10-18 (phase9-editions.md) |
 | 10 | Public release of the free edition on maluos.com: maluos.com domains baked in (done), production key, R2 hosting, download page, source page, release | in progress 2026-10-19 (docs/release.md, docs/branding.md) |
 | 11 | A MaluOS installer (text UI: disks, user, network, unpack the squashfs, seed first boot) replacing subiquity, the last Ubuntu-branded surface | proposed |
-| 12 | The desktop variant: maluos-desktop (GNOME 50, no snaps, MaluOS identity), desktop rootfs, cloud image and ISO from the same scripts with `-p desktop`, profile-aware boot test (docs/phase12-desktop.md); the agent-aware session: session service, indicator, notifications; then desk enrolment | slice 1 built 2026-10-19; slice 2 (session) built 2026-10-19 |
+| 12 | The desktop variant: maluos-desktop (GNOME 50, no snaps, MaluOS identity), desktop rootfs, cloud image and ISO from the same scripts with `-p desktop`, profile-aware boot test (docs/phase12-desktop.md); the agent-aware session: session service, indicator, notifications; ownership, vault grant requests, the Desk window; then desk enrolment | slices 1 and 2 released in 26.04.20261020; slice 3 (ownership, requests, Desk) built 2026-10-20 |
 | 13+ | Further agent-native features (journal to memory, quality judge) | |
 
 ### Phase 6+ candidates

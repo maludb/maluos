@@ -58,6 +58,43 @@ CREATE TABLE IF NOT EXISTS maluos_delegation (
     revoked_at          timestamptz
 );
 
+-- Agents as system entities (maluos-agent): the registry, with the person who owns each
+-- (Phase 12 slice 3). The owner sees the agent's ledger rows and alerts, and may
+-- manage its unit from the desk. NULL owner = a system agent, operators only.
+CREATE TABLE IF NOT EXISTS maluos_agent (
+    name                text PRIMARY KEY CHECK (name ~ '^[a-z][a-z0-9-]{0,30}$'),
+    principal_ref       text NOT NULL,
+    owner_principal_ref text,
+    exec                text,
+    sandbox             text,
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    removed_at          timestamptz
+);
+
+-- A principal refused a secret may ask the compartment's owner for a grant; the vault
+-- files the request itself on a refusal (Phase 12 slice 3). One pending request per
+-- (secret, requester); asking again bumps it. The owner's desk answers it.
+CREATE TABLE IF NOT EXISTS maluos_secret_request (
+    request_id              bigserial PRIMARY KEY,
+    secret_id               bigint NOT NULL REFERENCES maluos_secret(secret_id) ON DELETE CASCADE,
+    requester_principal_ref text NOT NULL,
+    owner_principal_ref     text,                   -- NULL: a shared compartment, operators decide
+    level                   text NOT NULL DEFAULT 'use' CHECK (level IN ('use','read')),
+    purpose                 text,
+    process_ref             text,
+    status                  text NOT NULL DEFAULT 'pending'
+                            CHECK (status IN ('pending','approved','denied','withdrawn')),
+    created_at              timestamptz NOT NULL DEFAULT now(),
+    last_asked_at           timestamptz NOT NULL DEFAULT now(),
+    asked_count             integer NOT NULL DEFAULT 1,
+    decided_at              timestamptz,
+    decided_by              text,
+    grant_id                bigint,
+    expires_at              timestamptz             -- of the grant made on approval
+);
+CREATE UNIQUE INDEX IF NOT EXISTS maluos_secret_request_pending_uq
+    ON maluos_secret_request (secret_id, requester_principal_ref) WHERE status = 'pending';
+
 -- The ledger: one row per secret event now, per model call from slice 2.
 CREATE TABLE IF NOT EXISTS maluos_ledger (
     ledger_id           bigserial PRIMARY KEY,

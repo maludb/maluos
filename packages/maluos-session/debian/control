@@ -9,8 +9,8 @@ Rules-Requires-Root: no
 
 Package: maluos-desktop-session
 Architecture: all
-Depends: ${misc:Depends}, python3 (>= 3.12), python3-gi, gir1.2-glib-2.0, gnome-shell (>= 50), gnome-shell (<< 51), maluos-desktop-branding (>= 0.3.2)
-Recommends: maluos-gateway (>= 0.3.2), maluos-vault, maluos-agent, xdg-terminal-exec
+Depends: ${misc:Depends}, python3 (>= 3.12), python3-gi, gir1.2-glib-2.0, gir1.2-gtk-4.0, gir1.2-adw-1, gnome-shell (>= 50), gnome-shell (<< 51), maluos-desktop-branding (>= 0.3.2)
+Recommends: maluos-gateway (>= 0.3.2), maluos-vault (>= 0.3.0), maluos-agent (>= 0.2.0), xdg-terminal-exec
 Description: MaluOS agent-aware session: indicator, notifications, session service
  A per-user service (com.maluos.Session on the session bus, D-Bus
  activated) that reads what the OS already knows about this desk: the
@@ -24,3 +24,8 @@ Description: MaluOS agent-aware session: indicator, notifications, session servi
  The GNOME Shell extension maluos-session@maluos.com puts that state in
  the top panel: an indicator with a menu of agents (start, stop, restart,
  logs through polkit), gateway and budget, vault, recent calls and alerts.
+ .
+ Agents carry their owner; the owner's session controls them without an
+ administrator's password. A vault grant request (an agent refused one of
+ your secrets) becomes a notification with Allow and Deny. The MaluOS Desk
+ window (maluos-desk, GTK 4 and libadwaita) shows the same state in full.

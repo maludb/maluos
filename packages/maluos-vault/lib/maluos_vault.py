@@ -18,7 +18,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives import hashes
 
-VERSION = "0.1.0"
+VERSION = "0.3.0"
 CONFIG = os.environ.get("MALUOS_VAULT_CONFIG", "/etc/maluos/vault.yaml")
 DEFAULTS = {
     "socket": "/run/maluos/vault.sock",
@@ -134,8 +134,8 @@ def connect():
 
 # ---------------------------------------------------------------- errors
 class ApiError(Exception):
-    def __init__(self, status, code, message):
-        super().__init__(message); self.status, self.code, self.message = status, code, message
+    def __init__(self, status, code, message, extra=None):
+        super().__init__(message); self.status, self.code, self.message, self.extra = status, code, message, extra or {}
 
 
 # ---------------------------------------------------------------- caller identity
@@ -218,9 +218,9 @@ class Vault:
                      secret["secret_id"] if secret else None, level, purpose, status, reason,
                      json.dumps(detail) if detail is not None else None))
 
-    def deny(self, cur, event, caller, code, message, status=403, **kw):
+    def deny(self, cur, event, caller, code, message, status=403, extra=None, **kw):
         self.ledger(cur, event, caller, "denied", reason=code, **kw)
-        raise ApiError(status, code, message)
+        raise ApiError(status, code, message, extra)
 
     # -- compartments
     def compartment(self, cur, name, create=False, caller=None):
@@ -489,7 +489,10 @@ class Vault:
         level, why = self.access(cur, caller, secret, comp)
         need = "use" if mode == "use" else "read"
         if level is None or (need == "read" and level != "read"):
-            self.deny(cur, event, caller, "forbidden", f"no {need} access to {secret['ref']}", secret=secret, comp=comp, level=level)
+            # The refusal itself asks the owner: a pending request the owner's desk can answer (slice 3).
+            req = self.file_request(cur, caller, secret, comp, need, purpose)
+            msg = f"no {need} access to {secret['ref']}" + (f"; grant request #{req} is pending for its owner" if req else "")
+            self.deny(cur, event, caller, "forbidden", msg, secret=secret, comp=comp, level=level, extra={"request_id": req} if req else None)
         if comp["locked"]:
             self.deny(cur, event, caller, "locked", f"compartment {comp['name']} is locked", status=423, secret=secret, comp=comp, level=level)
         if secret["expires_at"] and parse_ts(secret["expires_at"]) <= utcnow():
@@ -582,6 +585,84 @@ class Vault:
         self.ledger(cur, "grant.revoke", caller, "ok" if n else "noop", secret=secret, comp=comp, detail={"grantee_kind": gk, "grantee_ref": gr})
         return {"revoked": n}
 
+    # -- grant requests (Phase 12 slice 3): a refused principal asks, the owner's desk answers
+    def file_request(self, cur, caller, secret, comp, level="use", purpose=None, explicit=False):
+        """Create or bump the pending request of caller for secret. None when it makes no sense:
+        unenrolled callers, operators, the owner asking for their own secret."""
+        if not caller.principal or caller.operator or comp["owner"] == caller.ref:
+            return None
+        if level not in LEVELS:
+            raise ApiError(400, "bad_level", "level must be use or read")
+        if not explicit:
+            # A refusal does not nag: a request the owner denied in the last day stays denied.
+            cur.execute("""SELECT 1 FROM maluos_secret_request WHERE secret_id=%s AND requester_principal_ref=%s AND status='denied'
+                             AND decided_at > now() - interval '1 day' LIMIT 1""", (secret["secret_id"], caller.ref))
+            if cur.fetchone():
+                return None
+        cur.execute("""INSERT INTO maluos_secret_request (secret_id, requester_principal_ref, owner_principal_ref, level, purpose, process_ref)
+                       VALUES (%s,%s,%s,%s,%s,%s)
+                       ON CONFLICT (secret_id, requester_principal_ref) WHERE status = 'pending'
+                       DO UPDATE SET last_asked_at = now(), asked_count = maluos_secret_request.asked_count + 1,
+                                     purpose = coalesce(EXCLUDED.purpose, maluos_secret_request.purpose),
+                                     level = CASE WHEN EXCLUDED.level = 'read' THEN 'read' ELSE maluos_secret_request.level END
+                       RETURNING request_id, asked_count""",
+                    (secret["secret_id"], caller.ref, comp["owner"], level, purpose, caller.process_ref))
+        rid, n = cur.fetchone()
+        self.ledger(cur, "request.add", caller, "ok" if n == 1 else "noop", reason="asked" if explicit else "refused", secret=secret, comp=comp, level=level,
+                    purpose=purpose, detail={"request_id": rid, "asked_count": n, "owner": comp["owner"]})
+        return rid
+
+    REQ_COLS = """r.request_id, r.secret_id, s.name, c.name, r.requester_principal_ref, r.owner_principal_ref, r.level, r.purpose, r.process_ref,
+                  r.status, r.created_at, r.last_asked_at, r.asked_count, r.decided_at, r.decided_by, r.grant_id, r.expires_at, p.principal_kind"""
+
+    def _request(self, r):
+        return {"request_id": r[0], "secret_id": r[1], "secret": f"{r[3]}/{r[2]}", "compartment": r[3], "requester": r[4], "owner": r[5], "level": r[6],
+                "purpose": r[7], "process": r[8], "status": r[9], "created_at": r[10].isoformat() if r[10] else None,
+                "last_asked_at": r[11].isoformat() if r[11] else None, "asked_count": r[12], "decided_at": r[13].isoformat() if r[13] else None,
+                "decided_by": r[14], "grant_id": r[15], "expires_at": r[16].isoformat() if r[16] else None, "requester_kind": r[17]}
+
+    def requests(self, cur, caller, status="pending"):
+        """What the caller may see: operators everything; otherwise requests they made or must decide."""
+        where, args = [], []
+        if status and status != "all":
+            where.append("r.status=%s"); args.append(status)
+        if not caller.operator:
+            if not caller.principal:
+                return []
+            where.append("(r.requester_principal_ref=%s OR r.owner_principal_ref=%s)"); args += [caller.ref, caller.ref]
+        cur.execute(f"""SELECT {self.REQ_COLS} FROM maluos_secret_request r JOIN maluos_secret s USING (secret_id)
+                        JOIN maluos_compartment c ON c.compartment_id = s.compartment_id
+                        LEFT JOIN maludb_principal p ON p.principal_ref = r.requester_principal_ref
+                        {'WHERE ' + ' AND '.join(where) if where else ''} ORDER BY r.request_id DESC LIMIT 200""", args)
+        return [self._request(r) for r in cur.fetchall()]
+
+    def request_by_id(self, cur, rid):
+        cur.execute(f"""SELECT {self.REQ_COLS} FROM maluos_secret_request r JOIN maluos_secret s USING (secret_id)
+                        JOIN maluos_compartment c ON c.compartment_id = s.compartment_id
+                        LEFT JOIN maludb_principal p ON p.principal_ref = r.requester_principal_ref WHERE r.request_id=%s""", (rid,))
+        r = cur.fetchone()
+        if not r:
+            raise ApiError(404, "no_request", f"no request #{rid}")
+        return self._request(r)
+
+    def decide_request(self, cur, caller, rid, approve, body):
+        req = self.request_by_id(cur, rid)
+        secret, comp = self.resolve(cur, caller, req["secret"])
+        if not self.may_manage(caller, comp):
+            self.deny(cur, "request.approve" if approve else "request.deny", caller, "forbidden", f"only the owner of {req['secret']} or an operator decides request #{rid}", secret=secret, comp=comp)
+        if req["status"] != "pending":
+            raise ApiError(409, "decided", f"request #{rid} is already {req['status']}")
+        grant = None
+        if approve:
+            level = body.get("level") or req["level"]
+            grant = self.grant(cur, caller, secret, comp, {"grantee_kind": "principal", "grantee_ref": req["requester"], "level": level,
+                                                          "expires_at": body.get("expires_at"), "budget": body.get("budget")})
+        cur.execute("UPDATE maluos_secret_request SET status=%s, decided_at=now(), decided_by=%s, grant_id=%s, expires_at=%s WHERE request_id=%s",
+                    ("approved" if approve else "denied", caller.ref, grant["grant_id"] if grant else None, parse_ts(body.get("expires_at")) if approve else None, rid))
+        self.ledger(cur, "request.approve" if approve else "request.deny", caller, "ok", secret=secret, comp=comp, level=grant["level"] if grant else None,
+                    detail={"request_id": rid, "requester": req["requester"], "grant_id": grant["grant_id"] if grant else None, "reason": body.get("reason")})
+        return self.request_by_id(cur, rid)
+
     def set_lock(self, cur, caller, comp, locked):
         if not self.may_manage(caller, comp):
             self.deny(cur, "compartment.lock", caller, "forbidden", f"only the owner or an operator may lock {comp['name']}", comp=comp)
@@ -616,7 +697,9 @@ class Vault:
         if not caller.operator:
             if not caller.principal:
                 return []
-            where.append("(principal_ref=%s OR broker_ref=%s)"); args += [caller.ref, caller.ref]
+            # own rows, rows brokered for me, and the rows of agents I own (maluos_agent, Phase 12 slice 3)
+            where.append("(principal_ref=%s OR broker_ref=%s OR principal_ref IN (SELECT principal_ref FROM maluos_agent WHERE owner_principal_ref=%s AND removed_at IS NULL))")
+            args += [caller.ref, caller.ref, caller.ref]
         for key, col in (("principal", "principal_ref"), ("secret", "secret_name"), ("compartment", "compartment"),
                          ("event", "event"), ("status", "status"), ("user", "linux_user")):
             if q.get(key):
@@ -736,7 +819,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 status, obj = self.route(method, parts[1:], q, body, caller, cur)
             self.send(status, obj)
         except ApiError as e:
-            self.send(e.status, {"error": e.code, "message": e.message})
+            self.send(e.status, dict(e.extra, error=e.code, message=e.message))
         except psycopg.Error as e:
             log(f"database error: {e}")
             self.send(503, {"error": "database", "message": str(e).strip().splitlines()[0][:200]})
@@ -795,8 +878,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return 201, v.grant(cur, caller, secret, comp, body)
             if rest == ["revoke"] and method == "POST":
                 return 200, v.revoke(cur, caller, secret, comp, body)
+            if rest == ["request"] and method == "POST":
+                rid = v.file_request(cur, caller, secret, comp, body.get("level") or "use", body.get("purpose"), explicit=True)
+                if rid is None:
+                    raise ApiError(400, "no_request", "nothing to ask: you own this secret, are an operator, or are not enrolled")
+                return 201, v.request_by_id(cur, rid)
         if p == ["ledger"] and method == "GET":
             return 200, {"events": v.ledger_rows(cur, caller, q)}
+        if p == ["requests"] and method == "GET":
+            return 200, {"requests": v.requests(cur, caller, q.get("status") or "pending")}
+        if len(p) == 3 and p[0] == "requests" and method == "POST" and p[2] in ("approve", "deny"):
+            try:
+                rid = int(p[1])
+            except ValueError:
+                raise ApiError(400, "bad_request", "request id must be a number")
+            return 200, v.decide_request(cur, caller, rid, p[2] == "approve", body)
         if p == ["delegations"]:
             if method == "GET":
                 return 200, {"delegations": v.delegations(cur, caller)}

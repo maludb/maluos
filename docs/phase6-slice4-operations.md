@@ -95,3 +95,14 @@ backend down and recovered alerts with the mock stopped and restarted,
 long engine request lost across a gateway restart, the usage anomaly after
 a burst, export (encrypted, logged, operators only) and import (restores a
 deleted secret; wrong passphrase refused), and the retired-key alert.
+
+## Later: grant requests (Phase 12 slice 3, maluos-vault 0.3.0)
+
+A refusal now files a pending request for the secret's owner
+(`maluos_secret_request`; one pending per secret and requester, asking
+again bumps it; a refusal within a day of a denial does not re-file).
+`GET /v1/requests`, `POST /v1/secrets/REF/request`,
+`POST /v1/requests/ID/approve|deny`; `maluctl secret requests | request |
+approve | deny`. The error body of a refusal carries `request_id`. The
+registry `maluos_agent` (written by maluctl agent) lets the ledger scoping
+show a person the rows of the agents they own. See docs/phase12-desktop.md.

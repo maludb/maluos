@@ -1,8 +1,8 @@
 {
     "uuid": "maluos-session@maluos.com",
     "name": "MaluOS Session",
-    "description": "The MaluOS indicator: the agents on this host, the inference gateway and your budget, the vault, recent model calls and alerts. Reads com.maluos.Session (maluos-desktop-session).",
+    "description": "The MaluOS indicator: the agents on this host, the inference gateway and your budget, the vault, recent model calls, grant requests and alerts. Reads com.maluos.Session (maluos-desktop-session).",
     "shell-version": ["50"],
     "url": "https://github.com/maludb/maluos",
-    "version": 1
+    "version": 2
 }

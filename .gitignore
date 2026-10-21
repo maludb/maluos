@@ -16,3 +16,4 @@ iso-cache/
 build/logs/
 *.swp
 docs/claude-log/
+__pycache__/

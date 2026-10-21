@@ -1,3 +1,18 @@
+maluos-vault (0.3.0) resolute; urgency=medium
+
+  * Grant requests (Phase 12 slice 3): a refusal files a pending request
+    for the secret's owner (table maluos_secret_request, one pending per
+    secret and requester, asking again bumps it); GET /v1/requests,
+    POST /v1/secrets/REF/request, POST /v1/requests/ID/approve|deny;
+    `maluctl secret requests | request | approve | deny`. Approval makes
+    the grant and records it on the request.
+  * The agent registry maluos_agent (name, principal, owner) in the tenant
+    schema, written by maluctl agent; a person's ledger view includes the
+    rows of the agents they own.
+  * Error bodies may carry extra fields (request_id on a refusal).
+
+ -- Edward Honour <ed@maludb.org>  Tue, 20 Oct 2026 20:30:00 +0000
+
 maluos-vault (0.2.0) resolute; urgency=medium
 
   * Slice 4: delegation (use only), export/import of encrypted bundles,

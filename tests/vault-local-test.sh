@@ -121,6 +121,31 @@ check "unenrolled user refused" "sudo -n -u daemon env $ENV python3 -c 'import m
 try: c.Vault().add(\"k\",\"v\"); raise SystemExit(1)
 except c.VaultError as e: raise SystemExit(0 if e.code==\"not_enrolled\" else 2)'"
 
+echo "== grant requests and ownership (Phase 12 slice 3)"
+check "a refusal files a request for the owner" "nobody show user:$ME/openai 2>&1 | grep -q 'grant request #.* is pending'"
+check "$ME sees the pending request" "me requests | grep -q 'user:$ME/openai .*user:nobody .*read'"
+check "nobody sees their own request" "nobody requests | grep -q 'user:nobody'"
+check "root sees every request" "root requests | grep -q 'user:nobody'"
+check "asking again bumps the same request" "nobody request user:$ME/openai --purpose 'need it' | grep -q 'asked [0-9]* times' && [ \"\$(me requests | awk '\$2==\"user:$ME/openai\" && \$3==\"user:nobody\"' | wc -l)\" = 1 ]"
+rid=$(me requests | awk '$2=="user:'"$ME"'/openai" && $3=="user:nobody"{print $1}' | head -1)
+check "the requester cannot approve" "nobody approve $rid 2>&1 | grep -q 'only the owner'"
+check "$ME approves with an expiry" "me approve $rid --expires 1h | grep -q 'user:nobody may read user:$ME/openai until'"
+check "nobody now reads the secret" "[ \"\$(nobody show user:$ME/openai)\" = sk-A-NEW2 ]"
+check "the request is recorded approved with its grant" "me requests --all | grep -q \"approved by user:$ME\" && sudo -n -u postgres psql -Atd $DB -c \"select count(*) from $T.maluos_secret_request where request_id=$rid and status='approved' and grant_id is not null\" | grep -q 1"
+check "approving twice is refused" "me approve $rid 2>&1 | grep -q 'already approved'"
+echo d-444 | me add deny-me --stdin >/dev/null
+check "refusal on another secret files a second request" "nobody show user:$ME/deny-me 2>&1 | grep -q 'grant request #'"
+rid2=$(me requests | awk '/deny-me/{print $1}' | head -1)
+check "$ME denies it" "me deny $rid2 --reason no | grep -q 'denied request #$rid2'"
+check "a denied request is not re-filed by the next refusal" "nobody show user:$ME/deny-me 2>&1 | grep -q 'no read access' && ! nobody show user:$ME/deny-me 2>&1 | grep -q 'request #' && [ -z \"\$(me requests | grep deny-me)\" ]"
+check "an explicit ask after a denial is filed again" "nobody request user:$ME/deny-me | grep -q pending"
+check "the owner asking for their own secret is refused" "me request user:$ME/openai 2>&1 | grep -q 'nothing to ask'"
+check "request events in the ledger" "me usage --raw | grep -q 'request.approve .*ok' && me usage --raw | grep -q 'request.deny .*ok'"
+check "agent rows hidden before ownership" "! me usage --raw | grep -q 'agent:bot'"
+sudo -n -u postgres psql -Atqd $DB -c "set role $T; insert into $T.maluos_agent (name, principal_ref, owner_principal_ref) values ('bot', 'agent:bot', 'user:$ME')" >/dev/null
+check "the owner sees their agent's ledger rows" "me usage --raw | grep -q 'secret.read .*ok .*agent:bot'"
+check "nobody still does not" "! nobody usage --raw | grep -q 'agent:bot'"
+
 echo "== ledger"
 check "usage lists my events" "me usage --raw | grep -q 'secret.read .*ok .*user:$ME .*user:$ME/openai'"
 check "usage shows denials" "me usage --raw | grep -q 'denied'"

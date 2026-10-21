@@ -14,9 +14,9 @@ ROLE = "maluos-vault"
 SCHEMA = "/usr/share/maluos-vault/schema.sql"
 CONF = "/etc/maluos/vault.yaml"
 DAEMON = "/usr/lib/maluos/maluos_vault.py"
-TABLES = ("maluos_compartment", "maluos_secret", "maluos_secret_grant", "maluos_delegation")
+TABLES = ("maluos_compartment", "maluos_secret", "maluos_secret_grant", "maluos_delegation", "maluos_secret_request", "maluos_agent")
 SEQUENCES = ("maluos_compartment_compartment_id_seq", "maluos_secret_secret_id_seq", "maluos_secret_grant_grant_id_seq",
-             "maluos_delegation_delegation_id_seq", "maluos_ledger_ledger_id_seq")
+             "maluos_delegation_delegation_id_seq", "maluos_ledger_ledger_id_seq", "maluos_secret_request_request_id_seq")
 
 
 def provision(ctx):

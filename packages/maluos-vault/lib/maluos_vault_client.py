@@ -82,6 +82,13 @@ class Vault:
         return self.request("POST", "/v1/delegations", {"to": to, "secret": secret, "expires_at": expires_at, "budget": budget, "from": frm})
     def undelegate(self, to, secret=None, frm=None):
         return self.request("POST", "/v1/delegations/revoke", {"to": to, "secret": secret, "from": frm})
+    def requests(self, status="pending"): return self.request("GET", "/v1/requests", query={"status": status})["requests"]
+    def ask(self, ref, level="use", purpose=None):
+        return self.request("POST", f"/v1/secrets/{q(ref)}/request", {"level": level, "purpose": purpose})
+    def approve(self, request_id, level=None, expires_at=None, budget=None):
+        return self.request("POST", f"/v1/requests/{int(request_id)}/approve", {"level": level, "expires_at": expires_at, "budget": budget})
+    def deny_request(self, request_id, reason=None):
+        return self.request("POST", f"/v1/requests/{int(request_id)}/deny", {"reason": reason})
     def export(self, compartment=None): return self.request("GET", "/v1/export", query={"compartment": compartment})
     def import_bundle(self, bundle):  return self.request("POST", "/v1/import", {"bundle": bundle})
 

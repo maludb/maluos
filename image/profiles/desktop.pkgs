@@ -9,6 +9,15 @@ linux-generic
 # dracut: the Ubuntu 26.04 initramfs builder. The kernel only recommends one
 # and ubuntu-minimal pulls none in (ubuntu-server-minimal does).
 dracut
+# Storage tools the installer (curtin) expects in the target for the layouts
+# it offers: LVM (the guided default), LUKS, RAID, btrfs and XFS. The server
+# gets them from ubuntu-server-minimal; ubuntu-minimal has none, and the ISO's
+# pool cannot supply them (the first external desktop install died on lvm2).
+lvm2
+cryptsetup
+mdadm
+btrfs-progs
+xfsprogs
 grub-pc-bin
 grub-efi-amd64-signed
 shim-signed

@@ -9,7 +9,7 @@ Rules-Requires-Root: no
 
 Package: maluos-agent
 Architecture: all
-Depends: ${misc:Depends}, adduser, python3 (>= 3.12), python3-yaml, maluos-firstboot (>= 0.1.6), maluos-vault (>= 0.2.0), maluos-gateway (>= 0.3.0)
+Depends: ${misc:Depends}, adduser, python3 (>= 3.12), python3-yaml, maluos-firstboot (>= 0.1.6), maluos-vault (>= 0.3.0), maluos-gateway (>= 0.3.0)
 Description: MaluOS agents as system entities: maluctl agent
  `maluctl agent create` makes an agent real on the host in one step: a
  Linux system user, a MaluDB principal with scope grants, the identity

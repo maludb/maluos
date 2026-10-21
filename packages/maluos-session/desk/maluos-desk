@@ -1,0 +1,276 @@
+#!/usr/bin/python3
+"""maluos-desk: the MaluOS Desk window (GTK 4, libadwaita).
+
+The same state the top-panel indicator shows, with room to read it: the
+agents on this host (yours first) with start, stop, restart and logs; the
+inference gateway, its backends and queue, your policy, budget and recent
+calls; the vault (your secrets, compartments, delegations) and the grant
+requests waiting for your answer; the latest alerts. Everything comes from
+maluos-desktop-session over the session bus (com.maluos.Session); this
+window renders and forwards.
+
+  maluos-desk                 open the window
+  maluos-desk --self-test     build the window from the live state (or an empty one), print a summary, exit
+"""
+import json, os, subprocess, sys, time
+
+import gi
+gi.require_version("Gtk", "4.0"); gi.require_version("Adw", "1")
+from gi.repository import Adw, Gio, GLib, Gtk
+
+BUS_NAME, OBJ, IFACE = "com.maluos.Session", "/com/maluos/Session", "com.maluos.Session1"
+XML = """<node><interface name="com.maluos.Session1">
+  <method name="GetState"><arg type="s" name="json" direction="out"/></method>
+  <method name="Refresh"/>
+  <method name="AgentAction"><arg type="s" name="name" direction="in"/><arg type="s" name="action" direction="in"/></method>
+  <method name="RequestDecide"><arg type="i" name="id" direction="in"/><arg type="s" name="decision" direction="in"/><arg type="s" name="expires" direction="in"/><arg type="s" name="json" direction="out"/></method>
+  <signal name="StateChanged"><arg type="s" name="json"/></signal>
+</interface></node>"""
+
+
+def usd(v):
+    return "?" if v is None else f"${float(v):.2f}"
+
+
+def hhmm(ts):
+    try:
+        t = time.localtime(ts if isinstance(ts, (int, float)) else time.mktime(time.strptime(str(ts)[:19], "%Y-%m-%dT%H:%M:%S")))
+        return time.strftime("%H:%M", t)
+    except Exception:
+        return ""
+
+
+def row(title, subtitle="", icon=None):
+    r = Adw.ActionRow(title=GLib.markup_escape_text(str(title)), subtitle=GLib.markup_escape_text(str(subtitle)) if subtitle else "")
+    if icon:
+        r.add_prefix(Gtk.Image.new_from_icon_name(icon))
+    return r
+
+
+def button(label, cb, style=None):
+    b = Gtk.Button(label=label, valign=Gtk.Align.CENTER)
+    if style:
+        b.add_css_class(style)
+    b.connect("clicked", lambda *_: cb())
+    return b
+
+
+def terminal(argv):
+    try:
+        subprocess.Popen(["xdg-terminal-exec", *argv])
+    except OSError:
+        pass
+
+
+class Desk(Adw.ApplicationWindow):
+    def __init__(self, app, proxy):
+        super().__init__(application=app, title="MaluOS Desk", default_width=820, default_height=640)
+        self.proxy = proxy
+        self.state = None
+        self.toasts = Adw.ToastOverlay()
+        self.set_content(self.toasts)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.toasts.set_child(box)
+        header = Adw.HeaderBar()
+        self.stack = Adw.ViewStack()
+        switcher = Adw.ViewSwitcher(stack=self.stack, policy=Adw.ViewSwitcherPolicy.WIDE)
+        header.set_title_widget(switcher)
+        refresh = Gtk.Button(icon_name="view-refresh-symbolic", tooltip_text="Refresh")
+        refresh.connect("clicked", lambda *_: self.proxy and self.proxy.call("Refresh", None, 0, 5000, None, None, None))
+        header.pack_end(refresh)
+        box.append(header)
+        box.append(self.stack)
+        self.pages = {}
+        for name, title, icon in (("agents", "Agents", "system-run-symbolic"), ("models", "Models", "network-server-symbolic"),
+                                  ("vault", "Vault", "dialog-password-symbolic"), ("alerts", "Alerts", "dialog-warning-symbolic")):
+            page = Adw.PreferencesPage()
+            self.pages[name] = page
+            self.stack.add_titled_with_icon(page, name, title, icon)
+        self.stack.set_vexpand(True)
+        self.render()
+
+    # -- rendering
+    def clear(self, name):
+        page = self.pages[name]
+        for g in list(getattr(page, "_groups", [])):
+            page.remove(g)
+        page._groups = []
+
+    def group(self, name, title, description=""):
+        g = Adw.PreferencesGroup(title=title, description=description)
+        self.pages[name].add(g); self.pages[name]._groups.append(g)
+        return g
+
+    def render(self):
+        s = self.state
+        for n in self.pages:
+            self.clear(n)
+        if not s:
+            self.group("agents", "MaluOS Desk", "The session service (maluos-desktop-session) is not running or not reachable.")
+            return
+        h = s.get("host") or {}
+        self.set_title(f"MaluOS Desk · {h.get('hostname', '')}")
+        self.render_agents(s); self.render_models(s); self.render_vault(s); self.render_alerts(s)
+
+    def render_agents(self, s):
+        agents = sorted(s.get("agents") or [], key=lambda a: (not a.get("mine"), a["name"]))
+        mine = [a for a in agents if a.get("mine")]; others = [a for a in agents if not a.get("mine")]
+        if not agents:
+            self.group("agents", "Agents", "No agents on this host. Create one with: sudo maluctl agent create NAME --exec CMD")
+        for title, lst, desc in (("Your agents", mine, "You may start and stop these without an administrator's password."),
+                                 ("Other agents on this host", others, "")):
+            if not lst:
+                continue
+            g = self.group("agents", title, desc)
+            for a in lst:
+                st = a.get("active", "inactive"); sub = a.get("sub") or ""
+                icon = {"active": "emblem-ok-symbolic", "failed": "dialog-error-symbolic"}.get(st, "media-playback-stop-symbolic")
+                r = row(a["name"], f"{st}{' (' + sub + ')' if sub and sub not in ('dead', 'running') else ''} · {a.get('principal')}"
+                        + (f" · owner {a['owner']}" if a.get("owner") and not a.get("mine") else "")
+                        + (" · strict sandbox" if a.get("sandbox") == "strict" else "") + (f"\n{a['exec']}" if a.get("exec") else ""), icon)
+                if st == "active":
+                    r.add_suffix(button("Stop", lambda n=a["name"]: self.agent(n, "stop")))
+                    r.add_suffix(button("Restart", lambda n=a["name"]: self.agent(n, "restart")))
+                else:
+                    r.add_suffix(button("Start", lambda n=a["name"]: self.agent(n, "start"), "suggested-action"))
+                r.add_suffix(button("Logs", lambda u=a["unit"]: terminal(["sh", "-c", f"journalctl -f -u {u} || sudo journalctl -f -u {u}"])))
+                g.add(r)
+
+    def render_models(self, s):
+        g = s.get("gateway") or {}; me = s.get("me") or {}; h = s.get("host") or {}
+        if not g.get("available"):
+            self.group("models", "Inference gateway", "Not available on this host."); return
+        q = g.get("queue") or {}
+        backends = g.get("backends") or []
+        grp = self.group("models", "Inference gateway", f"version {g.get('version') or '?'} · {q.get('queued', 0)} queued, {q.get('running', 0)} running · {sum(1 for b in backends if b.get('healthy'))}/{len(backends)} backends healthy")
+        for b in backends:
+            grp.add(row(b.get("name"), f"{'cloud' if b.get('cloud') else 'local'} · {'healthy' if b.get('healthy') else 'down'}"
+                        + (" · " + ", ".join(b["loaded"]) if b.get("loaded") else "") + (f" · {b['error']}" if b.get("error") else ""),
+                        "emblem-ok-symbolic" if b.get("healthy") else "dialog-error-symbolic"))
+        who = me.get("principal") or f"user:{h.get('user')}"
+        grp = self.group("models", "You", f"{who}{' · operator' if me.get('operator') else ''}{'' if me.get('enrolled') else ' · not enrolled as a principal'}")
+        pol = me.get("policy") or {}
+        if pol:
+            grp.add(row("Policy", ", ".join(f"{k} {v}" for k, v in pol.items())))
+        for period, b in (me.get("budget") or {}).items():
+            level = "" if b.get("spent") is None else " · exhausted" if b["spent"] >= b["limit"] else " · nearly used" if b["spent"] >= b.get("warn_at", 0.8) * b["limit"] else ""
+            grp.add(row(f"Budget this {period}", f"{usd(b.get('spent'))} of {usd(b.get('limit'))}{level}"))
+        recent = me.get("recent") or []
+        if recent:
+            grp = self.group("models", "Recent calls")
+            for c in recent:
+                grp.add(row(f"{hhmm(c.get('ts'))}  {c.get('requested') or '?'} → {c.get('backend') or '-'}/{c.get('model') or '-'}",
+                            f"{c.get('status') or ''}{' · ' + c['reason'] if c.get('reason') else ''}{' · class ' + c['class'] if c.get('class') else ''}"))
+
+    def render_vault(self, s):
+        v = s.get("vault") or {}
+        if not v.get("available"):
+            self.group("vault", "Vault", "Not available on this host."); return
+        if not v.get("enrolled"):
+            self.group("vault", "Vault", "You are not enrolled as a principal."); return
+        asks = [r for r in v.get("requests") or [] if r.get("mine_to_decide")]
+        if asks:
+            grp = self.group("vault", "Requests for your secrets", "An agent or a person was refused one of your secrets and asks for a grant.")
+            for r in asks:
+                who = r.get("requester") or "?"
+                rr = row(f"{who} asks for {r.get('secret')}", f"{r.get('level')} access{' · ' + r['purpose'] if r.get('purpose') else ''}"
+                         + (f" · asked {r['asked_count']} times" if (r.get("asked_count") or 1) > 1 else "") + (f" · {r['process']}" if r.get("process") else ""), "dialog-question-symbolic")
+                rr.add_suffix(button("Allow for a week", lambda i=r["id"]: self.decide(i, "approve", "7d"), "suggested-action"))
+                rr.add_suffix(button("Deny", lambda i=r["id"]: self.decide(i, "deny", ""), "destructive-action"))
+                grp.add(rr)
+        grp = self.group("vault", "Your vault", f"{v.get('principal')} · {v.get('secrets', 0)} secrets · maluctl secret list")
+        for c in v.get("compartments") or []:
+            grp.add(row(c, "compartment", "folder-symbolic"))
+        dels = v.get("delegations") or []
+        if dels:
+            grp = self.group("vault", "Delegations", "Agents that may use your keys (use only, never read).")
+            for d in dels:
+                grp.add(row(f"{d.get('secret') or 'all secrets'} → {d.get('to')}", f"until {d['expires_at'][:10]}" if d.get("expires_at") else "no expiry"))
+        mine_asks = [r for r in v.get("requests") or [] if not r.get("mine_to_decide")]
+        if mine_asks:
+            grp = self.group("vault", "Your pending requests")
+            for r in mine_asks:
+                grp.add(row(r.get("secret"), f"{r.get('level')} access, waiting for the owner"))
+
+    def render_alerts(self, s):
+        alerts = s.get("alerts") or []
+        if not alerts:
+            self.group("alerts", "Alerts", "Nothing recent."); return
+        grp = self.group("alerts", "Alerts", "From the ledger: budgets, backends, anomalies, restarts.")
+        for a in alerts[:30]:
+            grp.add(row(f"{(a.get('ts') or '')[11:16]}  {a.get('kind')}", a.get("title") or "", "dialog-warning-symbolic"))
+
+    # -- actions
+    def toast(self, text):
+        self.toasts.add_toast(Adw.Toast(title=text[:120]))
+
+    def agent(self, name, action):
+        if not self.proxy:
+            return
+        def done(proxy, res, _):
+            try:
+                proxy.call_finish(res)
+            except Exception as e:
+                self.toast(f"Agent {name}: {action} failed: {str(e)[:100]}")
+        self.proxy.call("AgentAction", GLib.Variant("(ss)", (name, action)), 0, 120000, None, done, None)
+
+    def decide(self, rid, decision, expires):
+        if not self.proxy:
+            return
+        def done(proxy, res, _):
+            try:
+                proxy.call_finish(res)
+                self.toast(f"Request #{rid}: {'allowed' if decision == 'approve' else 'denied'}")
+            except Exception as e:
+                self.toast(f"Request #{rid}: {decision} failed: {str(e)[:100]}")
+        self.proxy.call("RequestDecide", GLib.Variant("(iss)", (int(rid), decision, expires)), 0, 30000, None, done, None)
+
+    def set_state(self, text):
+        try:
+            self.state = json.loads(text) if text else None
+        except ValueError:
+            self.state = None
+        self.render()
+
+
+class App(Adw.Application):
+    def __init__(self, self_test=False):
+        super().__init__(application_id="com.maluos.Desk", flags=Gio.ApplicationFlags.NON_UNIQUE if self_test else Gio.ApplicationFlags.DEFAULT_FLAGS)
+        self.self_test = self_test
+        self.proxy = None
+        self.win = None
+
+    def do_activate(self):
+        if self.win:
+            self.win.present(); return
+        try:
+            node = Gio.DBusNodeInfo.new_for_xml(XML)
+            self.proxy = Gio.DBusProxy.new_for_bus_sync(Gio.BusType.SESSION, Gio.DBusProxyFlags.NONE, node.interfaces[0], BUS_NAME, OBJ, IFACE, None)
+            self.proxy.connect("g-signal", lambda _p, _s, sig, params: sig == "StateChanged" and self.win and self.win.set_state(params.unpack()[0]))
+        except Exception as e:
+            print(f"maluos-desk: no session bus or service: {e}", file=sys.stderr); self.proxy = None
+        self.win = Desk(self, self.proxy)
+        if self.proxy:
+            try:
+                self.win.set_state(self.proxy.call_sync("GetState", None, 0, 10000, None).unpack()[0])
+            except Exception as e:
+                print(f"maluos-desk: GetState: {e}", file=sys.stderr); self.win.set_state(None)
+        self.win.present()
+        if self.self_test:
+            def report():
+                s = self.win.state or {}
+                print(f"self-test ok: service {'reachable' if s else 'unreachable'}, {len(s.get('agents') or [])} agents, "
+                      f"{len((s.get('vault') or {}).get('requests') or [])} requests, pages {', '.join(self.win.pages)}")
+                self.quit(); return False
+            GLib.timeout_add(1500, report)
+
+
+def main(argv):
+    if "-h" in argv or "--help" in argv:
+        print(__doc__); return 0
+    app = App(self_test="--self-test" in argv)
+    return app.run([a for a in argv if a != "--self-test"])
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

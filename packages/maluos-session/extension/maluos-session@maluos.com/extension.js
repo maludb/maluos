@@ -18,6 +18,7 @@ const IFACE_XML = `<node>
   <method name="GetState"><arg type="s" name="json" direction="out"/></method>
   <method name="Refresh"/>
   <method name="AgentAction"><arg type="s" name="name" direction="in"/><arg type="s" name="action" direction="in"/></method>
+  <method name="RequestDecide"><arg type="i" name="id" direction="in"/><arg type="s" name="decision" direction="in"/><arg type="s" name="expires" direction="in"/><arg type="s" name="json" direction="out"/></method>
   <signal name="StateChanged"><arg type="s" name="json"/></signal>
   <property name="Version" type="s" access="read"/>
 </interface>
@@ -133,7 +134,8 @@ class Indicator extends PanelMenu.Button {
             return;
         }
         const failed = (s.agents || []).some(a => a.active === 'failed');
-        const down = (s.gateway?.backends || []).some(b => b.enabled && !b.healthy);
+        const asked = (s.vault?.requests || []).some(r => r.mine_to_decide);
+        const down = (s.gateway?.backends || []).some(b => b.enabled && !b.healthy) || asked;
         const over = Object.values(s.me?.budget || {}).some(b => b.spent !== null && b.spent >= b.limit);
         const warn = Object.values(s.me?.budget || {}).some(b => b.spent !== null && b.spent >= b.warn_at * b.limit);
         if (failed || over)
@@ -167,13 +169,21 @@ class Indicator extends PanelMenu.Button {
             m.addMenuItem(new InfoItem('Memory host: not provisioned on this desk', true));
 
         m.addMenuItem(new PopupMenu.PopupSeparatorMenuItem('Agents'));
-        const agents = s.agents || [];
+        const agents = [...(s.agents || [])].sort((a, b) => Number(b.mine) - Number(a.mine) || a.name.localeCompare(b.name));
         if (agents.length === 0) {
             m.addMenuItem(new InfoItem('No agents on this host', true));
             m.addMenuItem(new InfoItem('sudo maluctl agent create NAME --exec CMD', true));
         }
         for (const a of agents)
             m.addMenuItem(this._agentItem(a));
+
+        // vault grant requests the user must decide (slice 3)
+        const asks = (s.vault?.requests || []).filter(r => r.mine_to_decide);
+        if (asks.length) {
+            m.addMenuItem(new PopupMenu.PopupSeparatorMenuItem(`Requests (${asks.length})`));
+            for (const r of asks)
+                m.addMenuItem(this._requestItem(r));
+        }
 
         m.addMenuItem(new PopupMenu.PopupSeparatorMenuItem('Models'));
         const g = s.gateway || {};
@@ -230,6 +240,9 @@ class Indicator extends PanelMenu.Button {
         }
 
         m.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        const desk = new PopupMenu.PopupMenuItem('Open MaluOS Desk');
+        desk.connect('activate', () => spawn(['maluos-desk']));
+        m.addMenuItem(desk);
         const term = new PopupMenu.PopupMenuItem('Agents in a terminal');
         term.connect('activate', () => spawn(['xdg-terminal-exec', 'sh', '-c', 'maluctl agent list; maluctl gateway status; exec "${SHELL:-bash}"']));
         m.addMenuItem(term);
@@ -238,10 +251,27 @@ class Indicator extends PanelMenu.Button {
         m.addMenuItem(refresh);
     }
 
+    _requestItem(r) {
+        const who = r.requester?.includes(':') ? r.requester.split(':')[1] : r.requester;
+        const item = new PopupMenu.PopupSubMenuMenuItem(`${r.requester_kind === 'agent' ? 'Agent' : ''} ${who} asks for ${r.secret}`);
+        item.label.add_style_class_name('maluos-dot-warn');
+        item.menu.addMenuItem(new InfoItem(`${r.level} access${r.purpose ? ' · ' + r.purpose : ''}${r.asked_count > 1 ? ' · asked ' + r.asked_count + ' times' : ''}`, true));
+        for (const [label, decision, expires] of [['Allow for a week', 'approve', '7d'], ['Allow for a day', 'approve', '1d'], ['Deny', 'deny', '']]) {
+            const it = new PopupMenu.PopupMenuItem(label);
+            it.connect('activate', () => this._proxy?.RequestDecideRemote(r.id, decision, expires, (_res, error) => {
+                if (error)
+                    Main.notify(`Request #${r.id}: ${decision} failed`, error.message);
+            }));
+            item.menu.addMenuItem(it);
+        }
+        return item;
+    }
+
     _agentItem(a) {
-        const item = new PopupMenu.PopupSubMenuMenuItem(`${DOT[a.active] || '○'} ${a.name}  ${a.active}${a.sub && a.sub !== 'dead' && a.sub !== 'running' ? ' (' + a.sub + ')' : ''}`);
+        const owner = a.mine ? ' · yours' : a.owner ? ` · ${a.owner}` : '';
+        const item = new PopupMenu.PopupSubMenuMenuItem(`${DOT[a.active] || '○'} ${a.name}  ${a.active}${a.sub && a.sub !== 'dead' && a.sub !== 'running' ? ' (' + a.sub + ')' : ''}${owner}`);
         item.label.add_style_class_name(DOT_CLASS[a.active] || '');
-        item.menu.addMenuItem(new InfoItem(`${a.principal} · ${a.unit}${a.sandbox === 'strict' ? ' · strict sandbox' : ''}`, true));
+        item.menu.addMenuItem(new InfoItem(`${a.principal} · ${a.unit}${a.sandbox === 'strict' ? ' · strict sandbox' : ''}${a.mine ? ' · you may start and stop it' : ''}`, true));
         if (a.exec)
             item.menu.addMenuItem(new InfoItem(a.exec, true));
         const actions = a.active === 'active' ? [['Stop', 'stop'], ['Restart', 'restart']] : [['Start', 'start']];

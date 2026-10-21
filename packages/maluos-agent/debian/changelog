@@ -1,3 +1,15 @@
+maluos-agent (0.2.0) resolute; urgency=medium
+
+  * Ownership (Phase 12 slice 3): `--owner user:NAME` (default: the sudo
+    user when enrolled; `--owner none` for a system agent). Recorded in
+    the registry maluos_agent (maluos-vault 0.3.0 schema) and as
+    MALUOS_AGENT_OWNER in the agent's env file; a polkit rule in
+    /etc/polkit-1/rules.d lets the owner's session start, stop and restart
+    the unit. list and show print the owner; remove retires the row and the
+    rule.
+
+ -- Edward Honour <ed@maludb.org>  Tue, 20 Oct 2026 20:30:00 +0000
+
 maluos-agent (0.1.0) resolute; urgency=medium
 
   * Initial release: maluctl agent create/list/show/run/start/stop/logs/remove,

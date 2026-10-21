@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=MaluOS Desk
+Comment=Agents, models, vault and alerts on this desk
+Exec=maluos-desk
+Icon=maluos-logo
+Terminal=false
+Categories=System;Settings;
+Keywords=MaluOS;agents;vault;models;
+StartupNotify=true
+DBusActivatable=false

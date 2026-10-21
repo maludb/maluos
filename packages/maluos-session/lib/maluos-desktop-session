@@ -17,11 +17,17 @@ anything else on the session bus.
 
 D-Bus: com.maluos.Session at /com/maluos/Session, interface com.maluos.Session1:
   GetState() -> s (JSON)   Refresh()   AgentAction(name, start|stop|restart)
+  RequestDecide(id, approve|deny, expires) -> s (JSON)      answer a vault grant request (as the owner)
   signal StateChanged(s)   property Version
+
+Slice 3: agents carry their owner (`mine` when it is the session user); the
+vault's pending grant requests for the user's secrets are in the state and
+become notifications with Allow and Deny buttons; the MaluOS Desk window
+(maluos-desk) shows the same state.
 """
 import http.client, json, os, pwd, re, socket, subprocess, sys, threading, time, urllib.parse
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 BUS_NAME, OBJ, IFACE = "com.maluos.Session", "/com/maluos/Session", "com.maluos.Session1"
 GW = os.environ.get("MALUOS_GATEWAY_SOCKET", "/run/maluos/gateway.sock")
 VAULT = os.environ.get("MALUOS_VAULT_SOCKET", "/run/maluos/vault.sock")
@@ -36,6 +42,7 @@ XML = """<node>
   <method name="GetState"><arg type="s" name="json" direction="out"/></method>
   <method name="Refresh"/>
   <method name="AgentAction"><arg type="s" name="name" direction="in"/><arg type="s" name="action" direction="in"/></method>
+  <method name="RequestDecide"><arg type="i" name="id" direction="in"/><arg type="s" name="decision" direction="in"/><arg type="s" name="expires" direction="in"/><arg type="s" name="json" direction="out"/></method>
   <signal name="StateChanged"><arg type="s" name="json"/></signal>
   <property name="Version" type="s" access="read"/>
 </interface>
@@ -62,6 +69,21 @@ def get(sock, path, query=None):
     c = _UnixConn(sock)
     try:
         c.request("GET", path, headers={"Accept": "application/json"})
+        r = c.getresponse(); raw = r.read()
+    finally:
+        c.close()
+    try:
+        return r.status, (json.loads(raw) if raw else {})
+    except ValueError:
+        return r.status, {}
+
+
+def post(sock, path, body=None):
+    """POST JSON to a MaluOS daemon socket; (status, body)."""
+    data = json.dumps(body or {}).encode()
+    c = _UnixConn(sock)
+    try:
+        c.request("POST", path, body=data, headers={"Content-Type": "application/json", "Accept": "application/json"})
         r = c.getresponse(); raw = r.read()
     finally:
         c.close()
@@ -166,9 +188,13 @@ def vault_state():
     secrets = (ok(VAULT, "/v1/secrets", default={}) or {}).get("secrets") or []
     comps = (ok(VAULT, "/v1/compartments", default={}) or {}).get("compartments") or []
     dels = (ok(VAULT, "/v1/delegations", default={}) or {}).get("delegations") or []
+    reqs = (ok(VAULT, "/v1/requests", {"status": "pending"}, default={}) or {}).get("requests") or []
     v.update({"secrets": len(secrets), "compartments": [c.get("name") for c in comps],
               "delegations": [{"to": d.get("to") or d.get("to_ref"), "secret": d.get("secret") or d.get("secret_name"),
-                               "expires_at": d.get("expires_at")} for d in dels]})
+                               "expires_at": d.get("expires_at")} for d in dels],
+              "requests": [{"id": r.get("request_id"), "secret": r.get("secret"), "requester": r.get("requester"), "requester_kind": r.get("requester_kind"),
+                            "level": r.get("level"), "purpose": r.get("purpose"), "process": r.get("process"), "asked_count": r.get("asked_count"),
+                            "last_asked_at": r.get("last_asked_at"), "mine_to_decide": r.get("owner") == who.get("principal")} for r in reqs]})
     return v
 
 
@@ -183,8 +209,9 @@ def alerts_state(since=None):
     return out
 
 
-def agents_state(units):
-    """Every agent in /etc/maluos/agents, joined with its unit's state (inactive when the unit is not loaded)."""
+def agents_state(units, me=None):
+    """Every agent in /etc/maluos/agents, joined with its unit's state (inactive when the unit is not loaded)
+    and its owner (slice 3: `mine` when the session user owns it)."""
     names = []
     try:
         names = sorted(f[:-4] for f in os.listdir(AGENTS) if f.endswith(".env"))
@@ -192,15 +219,19 @@ def agents_state(units):
         pass
     out = []
     for n in names:
-        a = {"name": n, "principal": f"agent:{n}", "unit": f"maluos-agent@{n}.service", "active": "inactive", "sub": "dead", "exec": None, "sandbox": "standard"}
+        a = {"name": n, "principal": f"agent:{n}", "unit": f"maluos-agent@{n}.service", "active": "inactive", "sub": "dead", "exec": None, "sandbox": "standard",
+             "owner": None, "mine": False}
         try:
             for line in open(f"{AGENTS}/{n}.env"):
                 if line.startswith("MALUOS_PRINCIPAL="):
                     a["principal"] = line.split("=", 1)[1].strip()
                 elif line.startswith("MALUOS_AGENT_EXEC="):
                     a["exec"] = json.loads(line.split("=", 1)[1].strip())
+                elif line.startswith("MALUOS_AGENT_OWNER="):
+                    a["owner"] = line.split("=", 1)[1].strip()
         except (OSError, ValueError):
             pass
+        a["mine"] = bool(me) and a["owner"] == me
         if os.path.exists(f"/etc/systemd/system/{a['unit']}.d/sandbox.conf"):
             a["sandbox"] = "strict"
         u = units.get(a["unit"])
@@ -225,6 +256,8 @@ class Service:
         self.system = None
         self.session = None
         self.notify_proxy = None
+        self.request_notified = {}       # request id -> notification id (slice 3)
+        self.notification_requests = {}  # notification id -> request id
         self.conn = None
         self.reg_id = None
         self.pending_refresh = None
@@ -292,8 +325,10 @@ class Service:
     def collect(self):
         units = self.units()
         gw, me = gateway_state()
+        vault = vault_state()
+        mine = vault.get("principal") or (me or {}).get("principal") or (me or {}).get("ref")
         st = {"version": VERSION, "ts": int(time.time()), "host": host_state(), "gateway": gw, "me": me_state(me),
-              "vault": vault_state(), "agents": agents_state(units), "alerts": alerts_state()}
+              "vault": vault, "agents": agents_state(units, mine), "alerts": alerts_state()}
         return st
 
     def poll_loop(self):
@@ -364,13 +399,31 @@ class Service:
                 self.budget_notified[key] = level
                 self.notify(f"Model budget {'exhausted' if level == 'over' else 'nearly used'} ({period})",
                             f"{b['spent']:.2f} of {b['limit']:.2f} USD this {period}", urgency=2 if level == "over" else 1)
+        # vault grant requests I must decide (slice 3): one notification per request, with Allow and Deny
+        seen = set()
+        for r in (new["vault"].get("requests") or []):
+            if not r.get("mine_to_decide") or not r.get("id"):
+                continue
+            seen.add(r["id"])
+            key = (r["id"], r.get("asked_count"))
+            if self.request_notified.get(r["id"]) == key:
+                continue
+            self.request_notified[r["id"]] = key
+            who = r["requester"] or "?"
+            kind = "Agent" if r.get("requester_kind") == "agent" else "Principal"
+            name = who.split(":", 1)[1] if ":" in who else who
+            times = f" (asked {r['asked_count']} times)" if (r.get("asked_count") or 1) > 1 else ""
+            self.notify(f"{kind} {name} asks for {r['secret']}", (f"{r['purpose']} · " if r.get("purpose") else "") + f"{r['level']} access{times}",
+                        urgency=1, actions=[("approve", "Allow for a week"), ("deny", "Deny")], request_id=r["id"])
+        for rid in [k for k in self.request_notified if k not in seen]:
+            self.request_notified.pop(rid, None)
         # new alert rows for me in the ledger
         for a in sorted(new["alerts"], key=lambda a: a.get("id") or 0):
             if a.get("id") and (self.alert_floor is None or a["id"] > self.alert_floor):
                 self.alert_floor = a["id"]
                 self.notify(f"Alert: {a['kind']}", a.get("title") or "", urgency=1)
 
-    def notify(self, summary, body="", urgency=1):
+    def notify(self, summary, body="", urgency=1, actions=None, request_id=None):
         log(f"notify: {summary}" + (f" — {body}" if body else ""))
         if self.once or not self.session:
             return
@@ -379,17 +432,53 @@ class Service:
             if self.notify_proxy is None:
                 self.notify_proxy = self.Gio.DBusProxy.new_sync(self.session, self.Gio.DBusProxyFlags.DO_NOT_LOAD_PROPERTIES, None,
                                                                 "org.freedesktop.Notifications", "/org/freedesktop/Notifications", "org.freedesktop.Notifications", None)
+                self.session.signal_subscribe("org.freedesktop.Notifications", "org.freedesktop.Notifications", None, "/org/freedesktop/Notifications",
+                                              None, 0, self.on_notification_signal)
             hints = {"urgency": GLib.Variant("y", urgency), "desktop-entry": GLib.Variant("s", "maluos-session")}
+            if request_id:
+                hints["resident"] = GLib.Variant("b", True)
+            acts = [x for pair in (actions or []) for x in pair]
             def done(proxy, res, _):
                 try:
-                    proxy.call_finish(res)
+                    nid = proxy.call_finish(res).unpack()[0]
+                    if request_id:
+                        self.notification_requests[nid] = request_id
                 except Exception as e:
                     log(f"notification failed: {e.__class__.__name__}: {str(e)[:120]}")
             # Asynchronous: the shell can be slow to answer (software rendering, a busy session), and
             # neither the poll loop nor the main loop should wait on it. The reply lands in the main loop.
-            self.notify_proxy.call("Notify", GLib.Variant("(susssasa{sv}i)", ("MaluOS", 0, "maluos-logo", summary, body, [], hints, -1)), 0, 30000, None, done, None)
+            self.notify_proxy.call("Notify", GLib.Variant("(susssasa{sv}i)", ("MaluOS", 0, "maluos-logo", summary, body, acts, hints, -1)), 0, 30000, None, done, None)
         except Exception as e:
             log(f"notification failed: {e.__class__.__name__}: {str(e)[:120]}")
+
+    def on_notification_signal(self, _conn, _sender, _path, _iface, signal, params):
+        """ActionInvoked(id, key): Allow or Deny pressed on a request notification; NotificationClosed(id, reason)."""
+        try:
+            if signal == "ActionInvoked":
+                nid, key = params.unpack()
+                rid = self.notification_requests.get(nid)
+                if rid and key in ("approve", "deny"):
+                    log(f"request #{rid}: {key} from the notification")
+                    try:
+                        self.request_decide(rid, key, "7d" if key == "approve" else "")
+                    except Exception as e:
+                        self.notify(f"Request #{rid}: {key} failed", str(e)[:120], urgency=2)
+                    self.refresh_soon(0.5)
+            elif signal == "NotificationClosed":
+                nid, _reason = params.unpack()
+                self.notification_requests.pop(nid, None)
+        except Exception as e:
+            log(f"notification signal: {e.__class__.__name__}: {str(e)[:120]}")
+
+    def request_decide(self, rid, decision, expires=""):
+        """Answer a vault grant request as the session user (the vault checks that the user owns the secret)."""
+        if decision not in ("approve", "deny"):
+            raise ValueError("decision must be approve or deny")
+        body = {"expires_at": expires or None} if decision == "approve" else {}
+        st, obj = post(VAULT, f"/v1/requests/{int(rid)}/{decision}", body)
+        if st >= 400:
+            raise RuntimeError(obj.get("message") or obj.get("error") or f"HTTP {st}")
+        return obj
 
     # -- D-Bus
     def on_call(self, conn, sender, path, iface, method, params, invocation):
@@ -405,6 +494,11 @@ class Service:
                 self.agent_action(name, action)
                 self.refresh_soon(1.0)
                 invocation.return_value(None)
+            elif method == "RequestDecide":
+                rid, decision, expires = params.unpack()
+                obj = self.request_decide(rid, decision, expires)
+                self.refresh_soon(0.5)
+                invocation.return_value(GLib.Variant("(s)", (json.dumps(obj, default=str),)))
             else:
                 invocation.return_error_literal(self.Gio.dbus_error_quark(), self.Gio.DBusError.UNKNOWN_METHOD, method)
         except Exception as e:

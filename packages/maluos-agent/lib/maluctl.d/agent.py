@@ -11,10 +11,18 @@ environment.
   maluctl agent create NAME [--exec CMD] [--name "Display"] [--home SCOPE] [--scope SCOPE:read|write ...]
                      [--class agent] [--tiers a,b] [--backends a,b] [--cloud yes|no] [--egress public|internal|restricted]
                      [--budget usd_per_day=1] [--token] [--sandbox standard|strict] [--no-start]
+                     [--owner user:NAME | --owner none]   who the agent belongs to (default: the sudo user)
   maluctl agent list | show NAME
   maluctl agent start|stop|restart|status|logs NAME
   maluctl agent run NAME -- CMD...            run a command as the agent (its identity, its environment)
   maluctl agent remove NAME [--purge]         stop the unit, disable the principal; --purge also deletes the user and its files
+
+Ownership (Phase 12 slice 3): an agent belongs to a person. The owner is
+recorded in the registry (maluos_agent in the tenant schema) and in the
+agent's env file (MALUOS_AGENT_OWNER); they see the agent's ledger rows and
+alerts, their desk shows it as theirs, and a polkit rule lets them start,
+stop and restart its unit without an administrator's password. `--owner
+none` makes a system agent (operators only).
 
 The agent's process sees MALUOS_PRINCIPAL, MALUOS_GATEWAY_SOCKET,
 MALUOS_VAULT_SOCKET, MALUDB_MC2DBD_URL, OPENAI_BASE_URL (the TCP listener,
@@ -27,6 +35,16 @@ sys.path.insert(0, "/usr/lib/maluos")
 AGENTS = "/etc/maluos/agents"
 HOME = "/var/lib/maluos/agents"
 UNIT = "maluos-agent@{}.service"
+POLKIT = "/etc/polkit-1/rules.d/60-maluos-agent-{}.rules"
+POLKIT_RULE = """// MaluOS: the owner of agent {name} manages its unit from their session (maluctl agent; Phase 12 slice 3).
+polkit.addRule(function(action, subject) {{
+    if (action.id == "org.freedesktop.systemd1.manage-units" &&
+        action.lookup("unit") == "{unit}" &&
+        ["start", "stop", "restart", "reload-or-restart", "try-restart"].indexOf(action.lookup("verb")) >= 0 &&
+        subject.user == "{user}")
+        return polkit.Result.YES;
+}});
+"""
 NAME_RE = re.compile(r"^[a-z][a-z0-9-]{0,30}$")
 SANDBOX = {
     "standard": "",
@@ -66,6 +84,38 @@ def state():
     return mp, json.load(open(mp.DONE))
 
 
+def owner_user(ref):
+    """The Linux user behind an owner principal: user:NAME is NAME; anything else has no login here."""
+    if ref and ref.startswith("user:"):
+        name = ref[5:]
+        try:
+            pwd.getpwnam(name); return name
+        except KeyError:
+            return None
+    return None
+
+
+def default_owner(mp, st):
+    """The person running sudo, when they are an enrolled principal."""
+    su = os.environ.get("SUDO_USER")
+    if not su or su == "root":
+        return None
+    ref = f"user:{su}"
+    pre = f"SET ROLE {mp.qi(st['tenant'])}; SET search_path TO {mp.qi(st['tenant'])}, maludb_core, public; "
+    return ref if mp.psql(pre + f"SELECT 1 FROM maludb_principal WHERE principal_ref={mp.ql(ref)} AND enabled", st["database"]) == "1" else None
+
+
+def read_env(n):
+    env = {}
+    try:
+        for line in open(f"{AGENTS}/{n}.env"):
+            if "=" in line and not line.startswith("#"):
+                k, v = line.rstrip("\n").split("=", 1); env[k] = v.strip('"')
+    except OSError:
+        pass
+    return env
+
+
 def yaml_update(path, fn):
     import yaml
     d = {}
@@ -95,7 +145,7 @@ def run(a):
             print("(no agents; maluctl agent create NAME --exec CMD)"); return 0
         for n in names:
             st = subprocess.run(["systemctl", "is-active", UNIT.format(n)], capture_output=True, text=True).stdout.strip()
-            print(f"{n:20} agent:{n:20} user agent-{n:18} unit {st}")
+            print(f"{n:20} agent:{n:20} user agent-{n:18} owner {read_env(n).get('MALUOS_AGENT_OWNER') or '-':20} unit {st}")
         return 0
     if cmd in ("start", "stop", "restart", "status"):
         n = a.pop(0); return subprocess.run(["systemctl", cmd, UNIT.format(n)] + (["--no-pager"] if cmd == "status" else [])).returncode
@@ -107,6 +157,7 @@ def run(a):
         if not os.path.exists(env):
             raise RuntimeError(f"no agent {n}")
         print(open(env).read().rstrip())
+        print(f"owner:       {read_env(n).get('MALUOS_AGENT_OWNER') or '(none: a system agent)'}" + ("  (polkit rule for their session)" if os.path.exists(POLKIT.format(n)) else ""))
         print(f"unit:        {UNIT.format(n)} ({subprocess.run(['systemctl', 'is-active', UNIT.format(n)], capture_output=True, text=True).stdout.strip()})")
         print(f"token:       {'yes' if os.path.getsize(f'{AGENTS}/{n}.token') > 0 else 'no'}")
         dd = f"/etc/systemd/system/{UNIT.format(n)}.d/sandbox.conf"
@@ -147,12 +198,22 @@ def create(a):
     cls = opt(a, "--class", "agent"); tiers = opt(a, "--tiers"); backends = opt(a, "--backends"); cloud = opt(a, "--cloud")
     egress = opt(a, "--egress"); budget = opt(a, "--budget"); token = opt(a, "--token", flag=True)
     sandbox = opt(a, "--sandbox", "standard"); nostart = opt(a, "--no-start", flag=True); exe = opt(a, "--exec")
+    owner_opt = opt(a, "--owner")
     if sandbox not in SANDBOX:
         sys.exit("--sandbox standard|strict")
     mp, st = state()
     db, tenant = st["database"], st["tenant"]
     user = f"agent-{n}"
     ref = f"agent:{n}"
+    pre = f"SET ROLE {mp.qi(tenant)}; SET search_path TO {mp.qi(tenant)}, maludb_core, public; "
+    if owner_opt in (None, ""):
+        owner = default_owner(mp, st)
+    elif owner_opt == "none":
+        owner = None
+    else:
+        owner = owner_opt
+        if mp.psql(pre + f"SELECT 1 FROM maludb_principal WHERE principal_ref={mp.ql(owner)} AND enabled", db) != "1":
+            sys.exit(f"--owner {owner}: no such enabled principal")
     # 1. the Linux user and its home
     try:
         pwd.getpwnam(user)
@@ -161,7 +222,6 @@ def create(a):
     os.makedirs(f"{HOME}/{n}", exist_ok=True)
     u = pwd.getpwnam(user); os.chown(f"{HOME}/{n}", u.pw_uid, u.pw_gid); os.chmod(f"{HOME}/{n}", 0o750)
     # 2. the principal and its scopes
-    pre = f"SET ROLE {mp.qi(tenant)}; SET search_path TO {mp.qi(tenant)}, maludb_core, public; "
     mp.psql(pre + f"SELECT maludb_principal_upsert({mp.ql(ref)}, 'agent', {mp.ql(display)}, {mp.ql(home)}, NULL, true);", db)
     for sc in scopes:
         scope, _, level = sc.partition(":")
@@ -212,7 +272,23 @@ def create(a):
         if tcp.get("enabled"):
             f.write(f"OPENAI_BASE_URL=http://{tcp.get('host', '127.0.0.1')}:{tcp.get('port', 11435)}/v1\nOLLAMA_HOST=http://{tcp.get('host', '127.0.0.1')}:{tcp.get('port', 11435)}\n")
         f.write(f"MALUOS_AGENT_EXEC={json.dumps(exe or '/usr/lib/maluos/maluos-agent-idle')}\n")
+        if owner:
+            f.write(f"MALUOS_AGENT_OWNER={owner}\n")
     os.chmod(f"{AGENTS}/{n}.env", 0o644)
+    # 7. the registry row (the vault scopes the owner's ledger view by it) and the owner's polkit rule
+    try:
+        mp.psql(pre + f"""INSERT INTO maluos_agent (name, principal_ref, owner_principal_ref, exec, sandbox) VALUES ({mp.ql(n)}, {mp.ql(ref)}, {mp.ql(owner) if owner else 'NULL'}, {mp.ql(exe or '')}, {mp.ql(sandbox)})
+                          ON CONFLICT (name) DO UPDATE SET principal_ref=EXCLUDED.principal_ref, owner_principal_ref=EXCLUDED.owner_principal_ref, exec=EXCLUDED.exec, sandbox=EXCLUDED.sandbox, removed_at=NULL;""", db)
+    except Exception as e:
+        print(f"  warning: agent registry row not written (maluos-vault schema missing?): {str(e)[-200:]}", file=sys.stderr)
+    ou = owner_user(owner)
+    if ou:
+        os.makedirs(os.path.dirname(POLKIT.format(n)), exist_ok=True)
+        with open(POLKIT.format(n), "w") as f:
+            f.write(POLKIT_RULE.format(name=n, unit=UNIT.format(n), user=ou))
+        os.chmod(POLKIT.format(n), 0o644)
+    elif os.path.exists(POLKIT.format(n)):
+        os.remove(POLKIT.format(n))
     dd = f"/etc/systemd/system/{UNIT.format(n)}.d"
     if SANDBOX[sandbox]:
         os.makedirs(dd, exist_ok=True)
@@ -225,7 +301,7 @@ def create(a):
     if not nostart:
         sh("systemctl", "restart", UNIT.format(n))
     print(f"agent {n}: user {user}, principal {ref} (home scope {home}{', scopes ' + ', '.join(scopes) if scopes else ''}), "
-          f"class {cls}{', token' if tok else ''}, sandbox {sandbox}, unit {UNIT.format(n)} {'started' if not nostart else 'enabled (not started)'}")
+          f"owner {owner or 'none'}, class {cls}{', token' if tok else ''}, sandbox {sandbox}, unit {UNIT.format(n)} {'started' if not nostart else 'enabled (not started)'}")
     print(f"  exec: {exe or '/usr/lib/maluos/maluos-agent-idle (placeholder; set --exec)'}")
     print(f"  try:  maluctl agent run {n} -- maluctl gateway whoami")
     return 0
@@ -236,12 +312,16 @@ def remove(a):
     n = a.pop(0); purge = opt(a, "--purge", flag=True)
     ref, user = f"agent:{n}", f"agent-{n}"
     subprocess.run(["systemctl", "disable", "--now", "--quiet", UNIT.format(n)], check=False)
-    for f in (f"{AGENTS}/{n}.env", f"{AGENTS}/{n}.token", f"/etc/systemd/system/{UNIT.format(n)}.d/sandbox.conf"):
+    for f in (f"{AGENTS}/{n}.env", f"{AGENTS}/{n}.token", f"/etc/systemd/system/{UNIT.format(n)}.d/sandbox.conf", POLKIT.format(n)):
         if os.path.exists(f):
             os.remove(f)
     sh("systemctl", "daemon-reload")
     mp, st = state()
     pre = f"SET ROLE {mp.qi(st['tenant'])}; SET search_path TO {mp.qi(st['tenant'])}, maludb_core, public; "
+    try:
+        mp.psql(pre + f"UPDATE maluos_agent SET removed_at=now() WHERE name={mp.ql(n)};", st["database"])
+    except Exception:
+        pass
     mp.psql(pre + f"SELECT maludb_principal_upsert({mp.ql(ref)}, 'agent', NULL, NULL, NULL, false);", st["database"])
     mp.psql(pre + f"UPDATE maluos_token SET revoked_at=now() WHERE principal_ref={mp.ql(ref)} AND revoked_at IS NULL;", st["database"])
     for conf in ("/etc/maluos/vault.yaml", "/etc/maluos/gateway.yaml"):

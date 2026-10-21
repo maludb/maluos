@@ -19,6 +19,10 @@
   maluctl secret export FILE [--compartment C]  encrypted bundle (operators; passphrase prompt or --passphrase-file F)
   maluctl secret import FILE                    restore a bundle (operators)
   maluctl secret alerts [--since 7d]            alert rows from the ledger
+  maluctl secret requests [--all]               grant requests you made or must decide (pending; --all: every status)
+  maluctl secret request NAME [--level use|read] [--purpose P]   ask the owner for a grant (a refusal files one too)
+  maluctl secret approve ID [--level use|read] [--expires 7d] [--budget usd_per_day=1]
+  maluctl secret deny ID [--reason R]
   maluctl secret compartment list | create NAME [--owner P] [--scope S] | lock NAME | unlock NAME
 
 NAME is `compartment/name`, or a bare name looked up in your own compartment
@@ -227,6 +231,30 @@ def run(v, a):
         since = opt(a, "--since", "7d")
         for r in reversed(v.ledger(since=since, event_like="alert.%", limit=500)):
             print(f"{r['ts'][:19]}  {r['event'][6:]:16} {r.get('reason') or ''}")
+        return 0
+    if cmd == "requests":
+        rows = v.requests(status="all" if opt(a, "--all", flag=True) else "pending")
+        for r in rows:
+            r["id"] = r["request_id"]; r["asked"] = (r.get("last_asked_at") or "")[:16]; r["times"] = r.get("asked_count")
+            r["purpose"] = (r.get("purpose") or "-")[:40]; r["decided"] = f"{r['status']} by {r['decided_by']}" if r.get("decided_by") else r["status"]
+        fmt_table(rows, ["id", "secret", "requester", "level", "purpose", "times", "asked", "decided"]); return 0
+    if cmd == "request":
+        name = a.pop(0) if a and not a[0].startswith("--") else sys.exit("request NAME ...")
+        r = v.ask(name, level=opt(a, "--level", "use"), purpose=opt(a, "--purpose"))
+        print(f"request #{r['request_id']} for {r['level']} on {r['secret']} is {r['status']}" + (f" (asked {r['asked_count']} times)" if r.get("asked_count", 1) > 1 else "")); return 0
+    if cmd in ("approve", "deny"):
+        rid = a.pop(0) if a else sys.exit(f"{cmd} ID")
+        if cmd == "approve":
+            b = opt(a, "--budget"); budget = None
+            if b:
+                budget = {}
+                for kv in b.split(","):
+                    k, val = kv.split("=", 1); budget[k.strip()] = float(val)
+            r = v.approve(rid, level=opt(a, "--level"), expires_at=opt(a, "--expires"), budget=budget)
+            print(f"approved request #{r['request_id']}: {r['requester']} may {r['level']} {r['secret']}" + (f" until {r['expires_at'][:19]}" if r.get("expires_at") else ""))
+        else:
+            r = v.deny_request(rid, reason=opt(a, "--reason"))
+            print(f"denied request #{r['request_id']} ({r['requester']} on {r['secret']})")
         return 0
     if cmd == "compartment":
         sub = a.pop(0) if a else "list"

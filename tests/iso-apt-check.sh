@@ -32,12 +32,27 @@ else
     [ -f "$W/m/etc/apt/sources.list" ] && mv "$W/m/etc/apt/sources.list" "$W/m/etc/apt/sources.list.d/original.list"
     printf 'deb [check-date=no] file:///cdrom resolute main restricted\n' > "$W/m/etc/apt/sources.list"
 fi
+# Offline, as curtin sees the target: the installer's apt config leaves only the ISO
+# source active until the install is done, so nothing may be fetched from the network here.
+mkdir -p "$W/m/etc/apt/off"
+for f in "$W/m"/etc/apt/sources.list "$W/m"/etc/apt/sources.list.d/*; do
+    case "$(basename "$f")" in cdrom.sources|original.list) ;; *) [ -e "$f" ] && mv "$f" "$W/m/etc/apt/off/" ;; esac
+done
 rm -rf "$W/m/var/lib/apt/lists"
 if chroot "$W/m" apt-get update 2>&1 | grep -vE '^(Get|Hit|Ign):' | tail -8; test "${PIPESTATUS[0]}" = 0; then
     if chroot "$W/m" apt-cache policy | grep -q 'file:/cdrom'; then
         echo "PASS: apt in the install source accepts the ISO pool ($(chroot "$W/m" apt-cache policy | grep -c 'file:/cdrom') cdrom index entries)"
     else
         echo "FAIL: ISO pool not indexed"; exit 1
+    fi
+    # curtin installs what the chosen storage layout and boot mode need into the target
+    # (install_missing_packages); with the network sources off that means: already in the
+    # image, or in the ISO pool. The first external desktop install died on lvm2.
+    NEED="lvm2 cryptsetup mdadm btrfs-progs xfsprogs e2fsprogs efibootmgr grub-efi-amd64-signed shim-signed grub-pc"
+    if out=$(chroot "$W/m" apt-get install -s $NEED 2>&1); then
+        echo "PASS: curtin's storage and boot packages are in the image or the ISO pool ($(echo "$out" | grep -c '^Inst ') to install from the pool)"
+    else
+        echo "FAIL: a package curtin may need is not installable in the install source:"; echo "$out" | grep -E '^E:|no installation candidate' | head -5; exit 1
     fi
 else
     echo "FAIL: apt-get update failed in the install source"; exit 1

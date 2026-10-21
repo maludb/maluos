@@ -261,6 +261,26 @@ agent_is inactive && echo "  ok   session saw the unit stop" || { echo "  FAIL s
 sleep 2; sj=$(sudo -n journalctl -b --no-pager _SYSTEMD_USER_UNIT=maluos-desktop-session.service 2>/dev/null)
 echo "$sj" | grep -q "notify: Agent desk created" && echo "$sj" | grep -q "notify: Agent desk is running" && echo "$sj" | grep -q "notify: Agent desk stopped" && echo "  ok   notifications: created, running, stopped" || { echo "  FAIL notifications missing:"; echo "$sj" | grep notify | tail -5; fail=1; }
 ! echo "$sj" | grep -q "notification failed" && echo "  ok   notifications delivered to the shell" || { echo "  FAIL notification delivery:"; echo "$sj" | grep "notification failed" | tail -3; fail=1; }
+# --- slice 3: ownership, the owner's polkit rule, vault grant requests answered from the session, the Desk window
+sudo -n maluctl agent show desk | grep -q 'owner:       user:maluos' && echo "  ok   agent desk is owned by the sudo user by default" || { echo "  FAIL agent owner: $(sudo -n maluctl agent show desk | grep owner)"; fail=1; }
+sudo -n test -f /etc/polkit-1/rules.d/60-maluos-agent-desk.rules && echo "  ok   polkit rule for the owner's session" || { echo "  FAIL no polkit rule"; fail=1; }
+sudo -n -u postgres psql -Atd maludb -c "select owner_principal_ref from maluos.maluos_agent where name='desk' and removed_at is null" | grep -q 'user:maluos' && echo "  ok   registry row maluos_agent with the owner" || { echo "  FAIL registry row"; fail=1; }
+systemctl start maluos-agent@desk 2>/tmp/pk.err && sleep 2 && systemctl is-active --quiet maluos-agent@desk && systemctl stop maluos-agent@desk && echo "  ok   the owner starts and stops the agent without sudo (polkit rule)" || { echo "  FAIL owner unit control: $(cat /tmp/pk.err)"; fail=1; }
+gdbus call --session --dest com.maluos.Session --object-path /com/maluos/Session --method com.maluos.Session1.Refresh >/dev/null 2>&1; sleep 4
+state | python3 -c "import json,sys; s=json.load(sys.stdin); a=[x for x in s['agents'] if x['name']=='desk'][0]; assert a['mine'] and a['owner']=='user:maluos', a; print('  ok   session marks desk as yours (owner user:maluos)')" || { echo "  FAIL session ownership"; fail=1; }
+echo desk-secret-value | maluctl secret add deskkey --stdin >/dev/null && echo "  ok   user secret deskkey stored" || { echo "  FAIL secret add"; fail=1; }
+sudo -n maluctl agent run desk -- maluctl secret show user:maluos/deskkey 2>&1 | grep -q 'grant request #' && echo "  ok   the agent's refusal files a grant request" || { echo "  FAIL refusal did not file a request: $(sudo -n maluctl agent run desk -- maluctl secret show user:maluos/deskkey 2>&1)"; fail=1; }
+gdbus call --session --dest com.maluos.Session --object-path /com/maluos/Session --method com.maluos.Session1.Refresh >/dev/null 2>&1; sleep 4
+rid=$(state | python3 -c "import json,sys; s=json.load(sys.stdin); r=[x for x in s['vault'].get('requests') or [] if x['requester']=='agent:desk' and x['mine_to_decide']]; print(r[0]['id'] if r else '')")
+[ -n "$rid" ] && echo "  ok   session sees the pending request #$rid for the user's secret" || { echo "  FAIL session requests: $(state | python3 -c 'import json,sys; print(json.load(sys.stdin)["vault"].get("requests"))')"; fail=1; }
+sleep 2; sudo -n journalctl -b --no-pager _SYSTEMD_USER_UNIT=maluos-desktop-session.service 2>/dev/null | grep -q 'notify: Agent desk asks for user:maluos/deskkey' && echo "  ok   notification: Agent desk asks for user:maluos/deskkey" || { echo "  FAIL request notification missing"; sudo -n journalctl -b --no-pager _SYSTEMD_USER_UNIT=maluos-desktop-session.service | grep notify | tail -3; fail=1; }
+[ -n "$rid" ] && gdbus call --session --dest com.maluos.Session --object-path /com/maluos/Session --method com.maluos.Session1.RequestDecide "$rid" approve 7d | grep -q approved && echo "  ok   RequestDecide approve over the session bus" || { echo "  FAIL RequestDecide"; fail=1; }
+maluctl secret info user:maluos/deskkey | grep -q 'read  principal:agent:desk' && echo "  ok   the grant exists for agent:desk" || { echo "  FAIL grant missing: $(maluctl secret info user:maluos/deskkey | tail -3)"; fail=1; }
+[ "$(sudo -n maluctl agent run desk -- maluctl secret show user:maluos/deskkey 2>/dev/null)" = desk-secret-value ] && echo "  ok   the agent now reads the key" || { echo "  FAIL agent still refused"; fail=1; }
+maluctl secret requests --all | grep -q 'approved by user:maluos' && echo "  ok   maluctl secret requests shows the decision" || { echo "  FAIL requests listing"; fail=1; }
+[ -f /usr/share/applications/com.maluos.Desk.desktop ] && [ -x /usr/bin/maluos-desk ] && echo "  ok   MaluOS Desk installed" || { echo "  FAIL maluos-desk missing"; fail=1; }
+out=$(WAYLAND_DISPLAY=wayland-0 timeout 120 maluos-desk --self-test 2>&1); echo "$out" | grep -q 'self-test ok: service reachable' && echo "  ok   MaluOS Desk window builds from the live state (GTK 4 on the session's Wayland display)" || { echo "  FAIL maluos-desk self-test: $(echo "$out" | tail -3)"; fail=1; }
+maluctl secret delete user:maluos/deskkey >/dev/null 2>&1 || true
 sudo -n maluctl agent remove desk --purge >/dev/null 2>&1 || true
 fi
 sudo -n maluctl status | sed 's/^/  maluctl: /'

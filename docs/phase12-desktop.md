@@ -188,33 +188,172 @@ the ten minutes of server checks, so the extension read as DISABLED with
 no error. The seed now writes a dconf system database that turns the idle
 lock off for the test user before gdm starts.
 
+## Slice 3 (2026-10-20): ownership, grant requests, the Desk window
+
+```
+maluctl agent create NAME ... [--owner user:NAME | --owner none]   default: the sudo user, when enrolled
+  /etc/maluos/agents/NAME.env             MALUOS_AGENT_OWNER=user:NAME
+  maluos_agent (tenant schema)            the registry: name, principal, owner, exec, sandbox, removed_at
+  /etc/polkit-1/rules.d/60-maluos-agent-NAME.rules   the owner's session manages the unit, no admin password
+maluos-vault 0.3.0: maluos_secret_request  a refusal files a pending request for the secret's owner
+  GET /v1/requests  POST /v1/secrets/REF/request  POST /v1/requests/ID/approve|deny
+  maluctl secret requests | request NAME | approve ID [--expires 7d] | deny ID
+maluos-desktop-session 0.2.0: agents carry owner and mine; vault.requests; RequestDecide(id, approve|deny, expires)
+  notifications with Allow and Deny buttons (org.freedesktop.Notifications actions)
+maluos-desk (in maluos-desktop-session): the MaluOS Desk window, GTK 4 + libadwaita, com.maluos.Desk.desktop
+```
+
+Slice 2 showed the desk what the host knows. Slice 3 gives the person on
+the desk a say: their agents are theirs, an agent that asks for one of
+their keys gets an answer from them, and there is a window with room for
+all of it.
+
+**Ownership.** An agent belongs to a person. `maluctl agent create`
+records the owner in the registry table `maluos_agent` in the tenant
+schema (shipped with the vault's schema, since the vault is the first
+consumer) and in the agent's env file, which the session reads without a
+database connection. The default owner is the person running sudo, when
+they are an enrolled principal; `--owner none` makes a system agent that
+only operators manage. Two things follow from ownership. The vault scopes
+a person's ledger view to their own rows, rows brokered for them, and the
+rows of agents they own, so an agent's denials, uses and alerts reach its
+owner's desk. And a polkit rule written per agent lets the owner's Linux
+user start, stop and restart that one unit without an administrator's
+password: `action.lookup("unit")` and `subject.user` are the whole test.
+The rule is a file the agent's creation writes and its removal deletes;
+polkit's JavaScript rules cannot read the registry themselves.
+
+**Grant requests.** The vault had no pending state: an agent asking for a
+key it was not granted was simply refused. Now the refusal itself files a
+request. `maluos_secret_request` holds one pending row per secret and
+requester; asking again bumps `asked_count` and keeps the first purpose
+unless a new one is given. The owner (or an operator) approves, which
+makes the grant with an expiry and records its id on the request, or
+denies. A refusal in the day after a denial does not file again, so a
+denied agent does not nag; an explicit `maluctl secret request` does. The
+refusal's error body carries `request_id`, so a client (the gateway's
+credential lookup, an agent's own code) can tell the person it has asked.
+Requests are visible to their requester, to the owner who must decide,
+and to operators.
+
+**The session.** Every poll reads the pending requests; a new one for a
+secret the session user owns becomes a notification with two buttons,
+Allow for a week and Deny, through `org.freedesktop.Notifications`
+actions. The service listens for `ActionInvoked` and answers the vault
+as the user (peer credentials: the vault checks that the user owns the
+compartment, the session asserts nothing). The indicator lists the
+requests with the same choices plus Allow for a day, marks the user's
+agents as theirs and sorts them first, and gains Open MaluOS Desk.
+
+**The Desk window.** `maluos-desk` is a libadwaita application
+(`com.maluos.Desk`) with four pages on the same D-Bus state: Agents (yours
+first, with start, stop, restart and logs), Models (gateway, backends,
+your policy and budget, recent calls), Vault (requests to decide with
+Allow and Deny, your compartments, delegations, your own pending
+requests), Alerts. It renders and forwards; `--self-test` builds the
+window from the live state, prints a summary and exits, which is what the
+boot test runs on the session's Wayland display.
+
+### Decisions
+
+- **Ownership lives in the tenant schema, not in polkit or a file alone.**
+  The registry is what the vault reads for ledger scoping and what desk
+  enrolment will carry to the office; the env file is a cache for the
+  session; the polkit rule is derived from both and regenerated on every
+  create.
+- **The refusal files the request.** No agent needs new code to ask: the
+  first time it reaches for a key the owner sees a prompt. An explicit
+  request exists for agents that want to ask before they need it.
+- **Allow means a week.** The notification's quick answer is a
+  time-limited grant at the level the agent needed (`use` from the
+  gateway, `read` from `maluctl secret show`); a longer or budgeted grant
+  is a `maluctl secret approve` with its flags, or a delegation.
+- **A GTK window, not a Settings panel.** GNOME Settings panels are
+  compiled into gnome-control-center; a separate libadwaita application
+  is what every other distribution-specific tool is, and it can follow the
+  session service's state without a shell restart.
+
+### The test
+
+`tests/vault-local-test.sh` (85 checks) covers the request lifecycle on
+the dev host: a refusal files, asking again bumps, the requester cannot
+approve, the owner approves with an expiry and the requester then reads,
+a denied request is not re-filed by the next refusal but is by an
+explicit ask, request events in the ledger, and the owner's ledger view
+gaining their agent's rows once the registry row exists.
+`tests/qcow2-boot-test.sh` continues the slice 2 desktop section: the
+desk agent's default owner and registry row, the polkit rule and a start
+and stop of the unit by the user without sudo, the session marking the
+agent as theirs, a user secret the agent is refused (request filed), the
+session seeing the request and notifying, `RequestDecide` over the bus,
+the grant existing and the agent reading the key, the decision in
+`maluctl secret requests`, and `maluos-desk --self-test` on the session's
+display.
+
 ## Next slices
 
-1. **The agent-aware session, the rest.** Slice 2 delivered the
-   indicator, the notifications and the session service. Still to come:
-   a settings panel (a libadwaita window on the same D-Bus state: agents
-   with their policies and logs, the gateway's catalogue, the vault),
-   vault prompts when an agent asks for a credential grant (needs a
-   pending-request state in the vault), and agent ownership so a person's
-   agents and their alerts are theirs on the desk.
-2. **Desk enrolment.** `maluctl enroll <office>`: this desk joins a
+1. **Desk enrolment.** `maluctl enroll <office>`: this desk joins a
    Business OS estate as a desk location, the person's principal is
    delegated here, and local agents can reach the office's memory through
    the gateway's routing. Requires the office side (docs/agents.md,
-   phase9-editions.md fleet service).
-3. **Updates and software.** A MaluOS updater in place of Software
+   phase9-editions.md fleet service). Ownership (slice 3) is what the
+   office receives: a person's agents, their requests and their alerts.
+2. **Updates and software.** A MaluOS updater in place of Software
    Updater (apt and unattended-upgrades already work); GNOME Software
    with the apt plugin only; Firefox from Mozilla's repository.
-4. **Branding the rest.** Found in the first rootfs: the boot splash's
+3. **Branding the rest.** Found in the first rootfs: the boot splash's
    watermark.png is a symlink to Ubuntu's logo (plymouth-theme-spinner),
    now diverted to the MaluOS watermark. Still to look at on hardware:
    the firmware-logo (bgrt) path, GNOME's help (`yelp` is not
    installed). Settings > About reads os-release, so it says MaluOS.
-5. **A graphical live session** on the ISO, with Phase 11.
+4. **A graphical live session** on the ISO, with Phase 11.
+5. **The session, further.** A grant budget and level choice in the
+   notification, requests from the gateway's credential lookup surfaced
+   with the model call that caused them, and alerts for agents' own
+   budgets attributed to their owners in the gateway as they now are in
+   the vault.
 
 ## Status
 
-Slice 1 built and boot-tested 2026-10-19; slice 2 built 2026-10-19 (status below).
+Slice 1 built and boot-tested 2026-10-19; slice 2 built 2026-10-19 and
+released in 26.04.20261020; slice 3 built 2026-10-20 (status below).
+
+### Slice 3 status (2026-10-20)
+
+| Artefact | Result |
+|---|---|
+| Packages | maluos-vault 0.3.0, maluos-agent 0.2.0, maluos-desktop-session 0.2.0 (maluos-desk inside) |
+| Vault harness | `tests/vault-local-test.sh` PASS, 85 checks |
+| Rootfs, image, ISO | rebuilt with the three packages; ISO apt replay PASS |
+| Boot test | `tests/qcow2-boot-test.sh --uefi` under TCG: 138 ok; the one failure was the test itself reading /etc/polkit-1/rules.d as the user (root-only directory), fixed to `sudo test -f`. Every slice 3 check passed: default owner and registry row, the owner starting and stopping the unit without sudo, the session marking the agent as theirs, the refusal filing request #2, the notification "Agent desk asks for user:maluos/deskkey", RequestDecide over the bus, the grant and the agent then reading the key, `maluctl secret requests`, and `maluos-desk --self-test` building the window on the session's Wayland display |
+
+Not yet done: a BIOS run of this test (CI does it on push with the
+`desktop` input), eyes on the Desk window and the notification buttons on
+real hardware.
+
+### The first external desktop install (2026-10-20)
+
+The released desktop ISO (26.04.20261020) crashed in the installer on a
+laptop and then on Proxmox at the same point: curtin's
+`install_missing_packages` step, which installs into the target what the
+chosen storage layout needs. The guided layout uses LVM, so curtin ran
+`apt-get install lvm2` in the target, and the target had only the ISO's
+pool as a source (the installer keeps the network sources off until the
+end). The desktop image had no lvm2 (ubuntu-minimal pulls none of the
+storage tools that ubuntu-server-minimal does) and the stock Ubuntu
+Server pool does not carry it either: "Package 'lvm2' has no installation
+candidate", exit 100, crash dialog. The boot tests never saw it because
+the qcow2 skips the installer.
+
+Fix: the desktop profile lists lvm2, cryptsetup, mdadm, btrfs-progs and
+xfsprogs, so every layout subiquity offers except ZFS needs nothing from
+apt. `tests/iso-apt-check.sh` now works offline exactly as curtin sees
+the target and simulates installing curtin's storage and boot packages;
+it fails on the released desktop ISO and passes on the server ISO and the
+rebuilt desktop ISO. The rebuilt image also passed the UEFI boot test
+(139 checks, the slice 3 checks among them). Workaround on the released
+ISO: on the Storage screen untick "Set up this disk as an LVM group"
+(plain ext4 needs nothing extra).
 
 ### Slice 2 status (2026-10-19)
 
