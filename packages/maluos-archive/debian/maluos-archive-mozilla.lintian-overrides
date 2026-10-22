@@ -1,0 +1,3 @@
+# Installing an APT source for Mozilla's repository is this package's purpose.
+maluos-archive-mozilla: package-installs-apt-sources *
+maluos-archive-mozilla: package-installs-apt-preferences *

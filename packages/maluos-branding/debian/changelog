@@ -1,3 +1,10 @@
+maluos-branding (0.4.1) resolute; urgency=medium
+
+  * unattended-upgrades: Mozilla's repository (site=packages.mozilla.org) joins
+    the allowed origins, so Firefox security releases install on their own.
+
+ -- Edward Honour <ed@maludb.org>  Thu, 22 Oct 2026 02:14:36 +0000
+
 maluos-branding (0.4.0) resolute; urgency=medium
 
   * The MaluOS logo (files/desktop/src/maluos-logo-full.png) replaces the

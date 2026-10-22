@@ -8,4 +8,4 @@ gnupg
 jq
 sudo
 openssh-server
-?unattended-upgrades
+unattended-upgrades

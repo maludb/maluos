@@ -9,7 +9,7 @@ Rules-Requires-Root: no
 
 Package: maluos-firstboot
 Architecture: all
-Depends: ${misc:Depends}, python3, python3-yaml, postgresql-common, curl
+Depends: ${misc:Depends}, python3, python3-yaml, python3-apt, postgresql-common, curl
 Recommends: maludb-mc2dbd, postgresql-18-maludb-core
 Description: MaluOS first-boot provisioning and the maluctl tool
  On the first boot of a MaluOS system, maluos-firstboot.service creates
@@ -20,4 +20,5 @@ Description: MaluOS first-boot provisioning and the maluctl tool
  from /etc/maluos/firstboot.yaml, which cloud-init user-data may write.
  .
  maluctl shows status, prints or rotates the listener token, manages
- principals and re-runs provisioning idempotently.
+ principals and re-runs provisioning idempotently. `maluctl update` reports
+ and applies software updates (unattended-upgrades policy, apt).

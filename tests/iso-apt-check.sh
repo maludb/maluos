@@ -57,3 +57,12 @@ if chroot "$W/m" apt-get update 2>&1 | grep -vE '^(Get|Hit|Ign):' | tail -8; tes
 else
     echo "FAIL: apt-get update failed in the install source"; exit 1
 fi
+# The image also carries network sources (apt.maluos.com, packages.mozilla.org since
+# slice 5). Should the installer leave them active on a machine without a route out,
+# apt-get update must still succeed: unreachable hosts are warnings, not errors.
+for f in "$W/m"/etc/apt/off/*; do [ -e "$f" ] && mv "$f" "$W/m/etc/apt/sources.list.d/"; done
+if chroot "$W/m" apt-get update -o Acquire::http::Proxy=http://127.0.0.1:9 -o Acquire::https::Proxy=http://127.0.0.1:9 >/dev/null 2>&1; then
+    echo "PASS: apt-get update still succeeds with the network sources enabled but unreachable ($(ls "$W/m"/etc/apt/sources.list.d/ | tr '\n' ' '))"
+else
+    echo "FAIL: an unreachable network source makes apt-get update fail (the installer would abort offline)"; exit 1
+fi

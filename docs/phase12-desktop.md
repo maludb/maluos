@@ -327,6 +327,91 @@ only plymouth's text plugins, so the installer boots behind an "Ubuntu"
 text splash and then runs subiquity; that is Ubuntu's squashfs and stays
 so until the graphical live session (next slices).
 
+## Slice 5 (2026-10-22): updates and software
+
+Until this slice an installed MaluOS took no updates at all: the image
+disabled `maluos.sources` ("no public mirror yet", from before
+apt.maluos.com existed) and unattended-upgrades was only a Recommends of
+maluos-base, which the rootfs build never installs (mmdebstrap's apt runs
+without recommends; the same is true of every `?` line in the seeds). The
+desktop had GNOME Web because Firefox on Ubuntu means the snap.
+
+- **Updates reach installed systems.** `maluos.sources` stays enabled in
+  the image (apt.maluos.com, production-signed, verified by the shipped
+  keyring); the media copy (`maluos-iso.sources`, written by the
+  installer) stays beside it. maluos-base now *depends* on
+  unattended-upgrades, and the MaluOS policy
+  (`52maluos-unattended-upgrades`) covers Ubuntu's security pocket, the
+  MaluOS repository and Mozilla's repository, the last by
+  `Origins-Pattern "site=packages.mozilla.org"` because Mozilla's Release
+  file carries an opaque registry path as its Origin. Everything else
+  waits for the user.
+- **Firefox from Mozilla.** maluos-archive 0.3.0 adds a second binary
+  package, maluos-archive-mozilla: the deb822 source for
+  packages.mozilla.org, Mozilla's signing key vendored as
+  `keys/packages.mozilla.org.asc` and checked against the published
+  fingerprint (35BA A0B3 ... DC63 15A3) when the package builds, and a
+  pin that puts Mozilla's packages at 1000 and Ubuntu's snap-transitional
+  `firefox` (epoch 1, which would otherwise win) at -1. The desktop seed
+  takes firefox from there and drops epiphany-browser; Ubuntu's
+  `ubuntu-mimeapps.list` already prefers `firefox.desktop`, so Firefox is
+  the default browser without a MaluOS override. Building the image needs
+  Mozilla's repository reachable: `image/profiles/desktop.pkgs` lists
+  maluos-archive-mozilla, and stage-packages.sh installs any
+  `maluos-archive-*` entry first and refreshes apt before the profile.
+  The installer is unaffected: an unreachable source is a warning to
+  `apt-get update`, and `tests/iso-apt-check.sh` still passes offline.
+- **GNOME Software, deb plugin only.** gnome-software with
+  gnome-software-plugin-deb and appstream, no snap or flatpak plugin.
+  PackageKit does the offline updates and asks polkit, so an active local
+  user installs updates without sudo. One gsettings override
+  (`download-updates-notify=false`) leaves the notification to the
+  session.
+- **`maluctl update`.** A maluctl plugin in maluos-firstboot 0.1.7
+  (python3-apt): `status [--json]` lists pending updates with their source
+  (security, maluos, mozilla, ubuntu, other), which of them the automatic
+  policy will install, when the lists were last refreshed, when the last
+  automatic run was, whether a restart is due; `check` runs apt-get
+  update, `apply` runs unattended-upgrade in the foreground (`--all`:
+  apt-get full-upgrade), `history` shows the automatic runs and apt's
+  history. `status` needs no privileges, so the session can use it.
+- **The session.** maluos-desktop-session 0.3.0 reads
+  `maluctl update status --json` whenever apt's or dpkg's state changes
+  on disk (stat of five paths each poll) and every 15 minutes otherwise.
+  Updates that wait for the user become one notification per set, with
+  Install opening GNOME Software's updates page; a due restart becomes one
+  with Restart (gnome-session-quit). `UpdateAction(open|restart|refresh)`
+  is on the bus; the indicator shows an Updates line with the pending
+  list and the same actions; the Desk gains a System page. The reading
+  has its own thread: the first desktop boot test (0.3.0) ran it in the
+  poll thread, where a 90-second apt cache open under emulation stalled
+  the agent and request checks that followed; 0.3.1 never lets it block
+  the poll loop or the bus, and `Refresh()` no longer forces it.
+
+### Decisions
+
+- Mozilla's repository, not a MaluOS rebuild of Firefox: Mozilla signs
+  and ships within hours of a release, and the key is pinned at build.
+- The media's package copy stays installed as a source: offline installs
+  still get `apt install` of what the image carried, and apt picks the
+  newer of media and mirror.
+- Seeds' `?` lines are documented as not reaching images. Whether the
+  desktop should install its recommends (ibus, cups, fwupd,
+  qemu-guest-agent are all missing today) is a separate decision.
+
+### The test
+
+Every image: unattended-upgrades installed, the policy names MaluOS and
+Mozilla, both apt-daily timers enabled, maluos.sources enabled,
+`maluctl update status` works without privileges and its JSON says the
+automatic policy is on. The desktop: firefox is Mozilla's deb (version
+without "snap", maintainer Mozilla), the source, keyring and pin are in
+place, apt's candidate for firefox comes from packages.mozilla.org (a
+warning when the VM has no route to Mozilla), gnome-software with the deb
+plugin and neither the snap nor the flatpak plugin, the session's state
+carries `updates` with the automatic policy on and no restart due, and
+`UpdateAction refresh` re-reads within a minute.
+
 ## Next slices
 
 1. **Desk enrolment.** `maluctl enroll <office>`: this desk joins a
@@ -335,9 +420,9 @@ so until the graphical live session (next slices).
    the gateway's routing. Requires the office side (docs/agents.md,
    phase9-editions.md fleet service). Ownership (slice 3) is what the
    office receives: a person's agents, their requests and their alerts.
-2. **Updates and software.** A MaluOS updater in place of Software
-   Updater (apt and unattended-upgrades already work); GNOME Software
-   with the apt plugin only; Firefox from Mozilla's repository.
+2. **Updates, further.** A MaluOS release upgrade path (26.04 to the
+   next LTS) and DEP-11 metadata for the MaluOS repository so GNOME
+   Software lists MaluOS packages.
 3. **Branding the rest.** The logo is in place (slice 4). Still to look
    at on hardware: the firmware-logo (bgrt) path, where the splash shows
    the vendor's logo and ours below it; GNOME's help (`yelp` is not
@@ -354,7 +439,17 @@ so until the graphical live session (next slices).
 
 Slice 1 built and boot-tested 2026-10-19; slice 2 built 2026-10-19 and
 released in 26.04.20261020; slices 3 and 4 built 2026-10-20 and
-2026-10-21 and released in 26.04.20261021 (docs/release.md).
+2026-10-21 and released in 26.04.20261021 (docs/release.md); slice 5
+built 2026-10-22 (unreleased).
+
+### Slice 5 status (2026-10-22)
+
+| Artefact | Result |
+|---|---|
+| Packages | maluos-archive 0.3.0 (+ maluos-archive-mozilla), maluos-branding 0.4.1, maluos-meta 0.2.3, maluos-firstboot 0.1.7, maluos-desktop-session 0.3.1 |
+| Images | desktop and server rootfs, qcow2 and ISO rebuilt on 2026-10-22 and copied to the internal share: desktop ISO sha 8aef27…, desktop qcow2 4bdb1f…, server ISO a6ec62…, server qcow2 884fd4… |
+| Tests | desktop UEFI boot test 159 ok / 0 FAIL (all slice 5 checks pass, including the updates thread, the poll loop staying live and the Desk self-test); server UEFI boot test 114 ok / 0 FAIL; ISO apt check PASS for both, including apt-get update with the network sources unreachable |
+| Not yet | commit of slice 5; release 26.04.2026102x (needs scripts/release.sh with the production key) |
 
 ### Slice 4 status (2026-10-21)
 

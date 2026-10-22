@@ -1,0 +1,3 @@
+# The session service only stats /var/lib/dpkg/status (its mtime says "a package
+# changed") to decide when to re-read `maluctl update status`; it never parses it.
+maluos-desktop-session: uses-dpkg-database-directly *

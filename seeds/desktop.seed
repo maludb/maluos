@@ -1,7 +1,10 @@
 # maluos-desktop: the MaluOS workstation. GNOME 50 with Ubuntu's session
-# extensions and the Yaru look, no snaps (so GNOME Web, not Firefox),
-# and no Ubuntu-branded update or reporting tools. Pair it with
-# maluos-server (image/profiles/desktop.pkgs does) for a local memory host.
+# extensions and the Yaru look, no snaps: Firefox comes as a deb from
+# Mozilla's repository (maluos-archive-mozilla) and GNOME Software runs
+# with the deb plugin only. No Ubuntu-branded update or reporting tools;
+# updates are unattended-upgrades (maluos-base), GNOME Software and
+# `maluctl update`. Pair it with maluos-server (image/profiles/desktop.pkgs
+# does) for a local memory host.
 maluos-base
 maluos-desktop-branding
 maluos-desktop-session
@@ -37,10 +40,14 @@ fonts-liberation
 plymouth-theme-spinner
 plymouth-label
 # applications
+maluos-archive-mozilla
+firefox
+gnome-software
+gnome-software-plugin-deb
+appstream
 nautilus
 ptyxis
 gnome-text-editor
-epiphany-browser
 loupe
 papers
 gnome-calculator

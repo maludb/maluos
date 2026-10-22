@@ -18,22 +18,37 @@ anything else on the session bus.
 D-Bus: com.maluos.Session at /com/maluos/Session, interface com.maluos.Session1:
   GetState() -> s (JSON)   Refresh()   AgentAction(name, start|stop|restart)
   RequestDecide(id, approve|deny, expires) -> s (JSON)      answer a vault grant request (as the owner)
+  UpdateAction(open|restart|refresh)                        open the updates page (GNOME Software), restart, re-read
   signal StateChanged(s)   property Version
 
 Slice 3: agents carry their owner (`mine` when it is the session user); the
 vault's pending grant requests for the user's secrets are in the state and
 become notifications with Allow and Deny buttons; the MaluOS Desk window
 (maluos-desk) shows the same state.
+
+Slice 5: software updates. `maluctl update status --json` (python3-apt, no
+privileges) is read in its own thread whenever apt's or dpkg's state changes
+on disk and every 15 minutes: what is pending and from where (security,
+MaluOS, Mozilla, Ubuntu), what installs on its own, whether a restart is
+needed. Opening the apt cache can take seconds (minutes under emulation),
+so that thread never blocks the poll loop or the bus. Updates that wait
+for the user become one notification with Install (GNOME Software's
+updates page); a pending restart becomes one with Restart.
 """
 import http.client, json, os, pwd, re, socket, subprocess, sys, threading, time, urllib.parse
 
-VERSION = "0.2.0"
+VERSION = "0.3.1"
 BUS_NAME, OBJ, IFACE = "com.maluos.Session", "/com/maluos/Session", "com.maluos.Session1"
 GW = os.environ.get("MALUOS_GATEWAY_SOCKET", "/run/maluos/gateway.sock")
 VAULT = os.environ.get("MALUOS_VAULT_SOCKET", "/run/maluos/vault.sock")
 AGENTS = "/etc/maluos/agents"
 PROVISIONED = "/var/lib/maluos/firstboot/done"
 POLL = int(os.environ.get("MALUOS_SESSION_POLL", "20"))
+UPDATES_EVERY = int(os.environ.get("MALUOS_SESSION_UPDATES_POLL", "900"))
+UPDATES_RETRY = 120              # after a failed reading
+UPDATES_TIMEOUT = int(os.environ.get("MALUOS_SESSION_UPDATES_TIMEOUT", "600"))
+UPDATE_MARKS = ("/var/lib/dpkg/status", "/var/lib/apt/lists", "/var/lib/apt/periodic/update-success-stamp",
+                "/var/lib/apt/periodic/unattended-upgrades-stamp", "/var/run/reboot-required")
 NAME_RE = re.compile(r"^[a-z][a-z0-9-]{0,30}$")
 STEADY = ("active", "inactive", "failed")
 
@@ -43,6 +58,7 @@ XML = """<node>
   <method name="Refresh"/>
   <method name="AgentAction"><arg type="s" name="name" direction="in"/><arg type="s" name="action" direction="in"/></method>
   <method name="RequestDecide"><arg type="i" name="id" direction="in"/><arg type="s" name="decision" direction="in"/><arg type="s" name="expires" direction="in"/><arg type="s" name="json" direction="out"/></method>
+  <method name="UpdateAction"><arg type="s" name="action" direction="in"/></method>
   <signal name="StateChanged"><arg type="s" name="json"/></signal>
   <property name="Version" type="s" access="read"/>
 </interface>
@@ -241,13 +257,54 @@ def agents_state(units, me=None):
     return out
 
 
+def _marks():
+    out = []
+    for p in UPDATE_MARKS:
+        try:
+            out.append(int(os.stat(p).st_mtime))
+        except OSError:
+            out.append(None)
+    return out
+
+
+def updates_state():
+    """Software updates as `maluctl update status --json` reports them (python3-apt, no privileges).
+    The marks (mtimes of apt's and dpkg's state) are taken before the read, so a change during it
+    triggers another."""
+    marks = _marks()
+    now = int(time.time())
+    try:
+        r = subprocess.run(["maluctl", "update", "status", "--json", "--compact"], capture_output=True, text=True, timeout=UPDATES_TIMEOUT)
+        d = json.loads(r.stdout)
+    except (OSError, ValueError, subprocess.SubprocessError) as e:
+        return {"available": False, "error": f"{e.__class__.__name__}: {str(e)[:120]}", "read_at": now, "_marks": marks}
+    pending = [{"name": p.get("name"), "installed": p.get("installed"), "candidate": p.get("candidate"), "source": p.get("source"),
+                "security": bool(p.get("security")), "automatic": bool(p.get("automatic"))} for p in d.get("pending") or []]
+    return {"available": True, "read_at": now, "_marks": marks,
+            "pending": pending[:60], "pending_count": d.get("pending_count", len(pending)),
+            "security_count": d.get("security_count", 0), "automatic_count": d.get("automatic_count", 0),
+            "manual_count": d.get("pending_count", len(pending)) - d.get("automatic_count", 0),
+            "pending_error": d.get("pending_error"), "by_source": d.get("by_source") or {},
+            "lists_refreshed": d.get("lists_refreshed"), "lists_refreshed_at": d.get("lists_refreshed_at"),
+            "last_automatic_run": d.get("last_automatic_run"), "last_automatic_run_at": d.get("last_automatic_run_at"),
+            "automatic": d.get("automatic") or {}, "reboot_required": bool(d.get("reboot_required")),
+            "reboot_packages": d.get("reboot_packages") or []}
+
+
 # ---------------------------------------------------------------- the service
 class Service:
     def __init__(self, once=False):
         from gi.repository import Gio, GLib
         self.Gio, self.GLib = Gio, GLib
         self.once = once
-        self.state = {"version": VERSION, "ts": 0, "host": host_state(), "gateway": {"available": False}, "me": {}, "vault": {}, "agents": [], "alerts": []}
+        self.state = {"version": VERSION, "ts": 0, "host": host_state(), "gateway": {"available": False}, "me": {}, "vault": {}, "agents": [], "alerts": [],
+                      "updates": {"available": False}}
+        self.updates = None              # the last reading (updates thread writes, under updates_lock)
+        self.updates_lock = threading.Lock()
+        self.updates_wake = threading.Event()
+        self.updates_force = False
+        self.updates_reading = False
+        self.updates_notified = ()       # the set of manual updates last notified
         self.prev = None
         self.alert_floor = None          # ledger id of the newest alert seen; older ones are not notified
         self.budget_notified = {}
@@ -257,7 +314,7 @@ class Service:
         self.session = None
         self.notify_proxy = None
         self.request_notified = {}       # request id -> notification id (slice 3)
-        self.notification_requests = {}  # notification id -> request id
+        self.notification_ctx = {}       # notification id -> ("request", id) | ("updates",) | ("restart",)
         self.conn = None
         self.reg_id = None
         self.pending_refresh = None
@@ -327,9 +384,38 @@ class Service:
         gw, me = gateway_state()
         vault = vault_state()
         mine = vault.get("principal") or (me or {}).get("principal") or (me or {}).get("ref")
+        with self.updates_lock:
+            u = {k: v for k, v in (self.updates or {"available": False}).items() if not k.startswith("_")}
+            u["reading"] = self.updates_reading
         st = {"version": VERSION, "ts": int(time.time()), "host": host_state(), "gateway": gw, "me": me_state(me),
-              "vault": vault, "agents": agents_state(units, mine), "alerts": alerts_state()}
+              "vault": vault, "agents": agents_state(units, mine), "alerts": alerts_state(), "updates": u}
         return st
+
+    def updates_loop(self):
+        """Its own thread: re-read `maluctl update status` when apt's or dpkg's state changed on disk,
+        when asked (UpdateAction refresh), every UPDATES_EVERY seconds, or UPDATES_RETRY after a failure.
+        The reading can take long; the poll loop and the bus never wait for it."""
+        while True:
+            try:
+                with self.updates_lock:
+                    prev = self.updates; force = self.updates_force; self.updates_force = False
+                now = int(time.time())
+                due = force or prev is None or _marks() != prev.get("_marks") \
+                    or now - prev.get("read_at", 0) >= (UPDATES_EVERY if prev.get("available") else UPDATES_RETRY)
+                if due:
+                    with self.updates_lock:
+                        self.updates_reading = True
+                    d = updates_state()
+                    with self.updates_lock:
+                        self.updates = d; self.updates_reading = False
+                    if not d.get("available"):
+                        log(f"updates: {d.get('error')}")
+                    self.refresh_soon(0.5)
+            except Exception as e:
+                log(f"updates: {e.__class__.__name__}: {str(e)[:160]}")
+                with self.updates_lock:
+                    self.updates_reading = False
+            self.updates_wake.wait(POLL); self.updates_wake.clear()
 
     def poll_loop(self):
         while True:
@@ -422,8 +508,26 @@ class Service:
             if a.get("id") and (self.alert_floor is None or a["id"] > self.alert_floor):
                 self.alert_floor = a["id"]
                 self.notify(f"Alert: {a['kind']}", a.get("title") or "", urgency=1)
+        # software updates (slice 5): the ones that wait for the user, once per set; a pending restart, once
+        ou, nu = old.get("updates") or {}, new.get("updates") or {}
+        if nu.get("available"):
+            manual = [p["name"] for p in nu.get("pending") or [] if not p.get("automatic")]
+            key = tuple(sorted(manual))
+            if manual and key != self.updates_notified:
+                self.updates_notified = key
+                n, sec, auto = nu.get("pending_count", 0), nu.get("security_count", 0), nu.get("automatic_count", 0)
+                body = f"{len(manual)} wait for you" + (f" · {auto} install on their own" if auto else "") + (f" · {sec} security" if sec else "")
+                self.notify(f"{n} software update{'s' if n != 1 else ''} available", body, urgency=1, actions=[("install", "Install")], ctx=("updates",))
+            elif not manual:
+                self.updates_notified = ()
+            if nu.get("reboot_required") and not ou.get("reboot_required"):
+                pk = nu.get("reboot_packages") or []
+                self.notify("Restart to finish updates", ", ".join(pk[:6]) + (" …" if len(pk) > 6 else "") if pk else "an installed update needs a restart",
+                            urgency=1, actions=[("restart", "Restart now")], ctx=("restart",))
 
-    def notify(self, summary, body="", urgency=1, actions=None, request_id=None):
+    def notify(self, summary, body="", urgency=1, actions=None, request_id=None, ctx=None):
+        if request_id and ctx is None:
+            ctx = ("request", request_id)
         log(f"notify: {summary}" + (f" — {body}" if body else ""))
         if self.once or not self.session:
             return
@@ -435,14 +539,14 @@ class Service:
                 self.session.signal_subscribe("org.freedesktop.Notifications", "org.freedesktop.Notifications", None, "/org/freedesktop/Notifications",
                                               None, 0, self.on_notification_signal)
             hints = {"urgency": GLib.Variant("y", urgency), "desktop-entry": GLib.Variant("s", "maluos-session")}
-            if request_id:
+            if ctx:
                 hints["resident"] = GLib.Variant("b", True)
             acts = [x for pair in (actions or []) for x in pair]
             def done(proxy, res, _):
                 try:
                     nid = proxy.call_finish(res).unpack()[0]
-                    if request_id:
-                        self.notification_requests[nid] = request_id
+                    if ctx:
+                        self.notification_ctx[nid] = ctx
                 except Exception as e:
                     log(f"notification failed: {e.__class__.__name__}: {str(e)[:120]}")
             # Asynchronous: the shell can be slow to answer (software rendering, a busy session), and
@@ -452,21 +556,27 @@ class Service:
             log(f"notification failed: {e.__class__.__name__}: {str(e)[:120]}")
 
     def on_notification_signal(self, _conn, _sender, _path, _iface, signal, params):
-        """ActionInvoked(id, key): Allow or Deny pressed on a request notification; NotificationClosed(id, reason)."""
+        """ActionInvoked(id, key): Allow or Deny on a request notification, Install or Restart on an updates one;
+        NotificationClosed(id, reason)."""
         try:
             if signal == "ActionInvoked":
                 nid, key = params.unpack()
-                rid = self.notification_requests.get(nid)
-                if rid and key in ("approve", "deny"):
+                ctx = self.notification_ctx.get(nid) or ()
+                if ctx[:1] == ("request",) and key in ("approve", "deny"):
+                    rid = ctx[1]
                     log(f"request #{rid}: {key} from the notification")
                     try:
                         self.request_decide(rid, key, "7d" if key == "approve" else "")
                     except Exception as e:
                         self.notify(f"Request #{rid}: {key} failed", str(e)[:120], urgency=2)
                     self.refresh_soon(0.5)
+                elif key == "install":
+                    log("updates: Install from the notification"); self.update_action("open")
+                elif key == "restart":
+                    log("updates: Restart from the notification"); self.update_action("restart")
             elif signal == "NotificationClosed":
                 nid, _reason = params.unpack()
-                self.notification_requests.pop(nid, None)
+                self.notification_ctx.pop(nid, None)
         except Exception as e:
             log(f"notification signal: {e.__class__.__name__}: {str(e)[:120]}")
 
@@ -479,6 +589,25 @@ class Service:
         if st >= 400:
             raise RuntimeError(obj.get("message") or obj.get("error") or f"HTTP {st}")
         return obj
+
+    def update_action(self, action):
+        """open: the updates page (GNOME Software when present, else `maluctl update` in a terminal);
+        restart: the session's own restart dialog; refresh: drop the cached reading and re-read."""
+        import shutil
+        if action == "open":
+            if shutil.which("gnome-software"):
+                subprocess.Popen(["gnome-software", "--mode=updates"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            else:
+                subprocess.Popen(["xdg-terminal-exec", "sh", "-c", "maluctl update status; echo; echo 'sudo maluctl update apply --all installs everything pending'; exec \"${SHELL:-bash}\""],
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        elif action == "restart":
+            subprocess.Popen(["gnome-session-quit", "--reboot"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        elif action == "refresh":
+            with self.updates_lock:
+                self.updates_force = True
+            self.updates_wake.set()
+        else:
+            raise ValueError(f"unknown update action {action!r} (open, restart, refresh)")
 
     # -- D-Bus
     def on_call(self, conn, sender, path, iface, method, params, invocation):
@@ -499,6 +628,9 @@ class Service:
                 obj = self.request_decide(rid, decision, expires)
                 self.refresh_soon(0.5)
                 invocation.return_value(GLib.Variant("(s)", (json.dumps(obj, default=str),)))
+            elif method == "UpdateAction":
+                self.update_action(params.unpack()[0])
+                invocation.return_value(None)
             else:
                 invocation.return_error_literal(self.Gio.dbus_error_quark(), self.Gio.DBusError.UNKNOWN_METHOD, method)
         except Exception as e:
@@ -529,6 +661,7 @@ class Service:
         except Exception as e:
             log(f"no systemd watch: {str(e)[:120]}")
         threading.Thread(target=self.poll_loop, daemon=True).start()
+        threading.Thread(target=self.updates_loop, daemon=True).start()
         loop.run()
 
 
@@ -539,6 +672,7 @@ def main(argv):
     gi.require_version("Gio", "2.0"); gi.require_version("GLib", "2.0")
     if "--once" in argv:
         s = Service(once=True)
+        s.updates = updates_state()
         print(json.dumps(s.collect(), indent=2, default=str))
         return 0
     Service().run()

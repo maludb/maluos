@@ -5,7 +5,9 @@ The same state the top-panel indicator shows, with room to read it: the
 agents on this host (yours first) with start, stop, restart and logs; the
 inference gateway, its backends and queue, your policy, budget and recent
 calls; the vault (your secrets, compartments, delegations) and the grant
-requests waiting for your answer; the latest alerts. Everything comes from
+requests waiting for your answer; the latest alerts; the system page with
+software updates (what is pending and from where, what installs on its own,
+whether a restart is due) and this desk's identity. Everything comes from
 maluos-desktop-session over the session bus (com.maluos.Session); this
 window renders and forwards.
 
@@ -24,6 +26,7 @@ XML = """<node><interface name="com.maluos.Session1">
   <method name="Refresh"/>
   <method name="AgentAction"><arg type="s" name="name" direction="in"/><arg type="s" name="action" direction="in"/></method>
   <method name="RequestDecide"><arg type="i" name="id" direction="in"/><arg type="s" name="decision" direction="in"/><arg type="s" name="expires" direction="in"/><arg type="s" name="json" direction="out"/></method>
+  <method name="UpdateAction"><arg type="s" name="action" direction="in"/></method>
   <signal name="StateChanged"><arg type="s" name="json"/></signal>
 </interface></node>"""
 
@@ -82,7 +85,8 @@ class Desk(Adw.ApplicationWindow):
         box.append(self.stack)
         self.pages = {}
         for name, title, icon in (("agents", "Agents", "system-run-symbolic"), ("models", "Models", "network-server-symbolic"),
-                                  ("vault", "Vault", "dialog-password-symbolic"), ("alerts", "Alerts", "dialog-warning-symbolic")):
+                                  ("vault", "Vault", "dialog-password-symbolic"), ("alerts", "Alerts", "dialog-warning-symbolic"),
+                                  ("system", "System", "software-update-available-symbolic")):
             page = Adw.PreferencesPage()
             self.pages[name] = page
             self.stack.add_titled_with_icon(page, name, title, icon)
@@ -110,7 +114,7 @@ class Desk(Adw.ApplicationWindow):
             return
         h = s.get("host") or {}
         self.set_title(f"MaluOS Desk · {h.get('hostname', '')}")
-        self.render_agents(s); self.render_models(s); self.render_vault(s); self.render_alerts(s)
+        self.render_agents(s); self.render_models(s); self.render_vault(s); self.render_alerts(s); self.render_system(s)
 
     def render_agents(self, s):
         agents = sorted(s.get("agents") or [], key=lambda a: (not a.get("mine"), a["name"]))
@@ -200,6 +204,45 @@ class Desk(Adw.ApplicationWindow):
         for a in alerts[:30]:
             grp.add(row(f"{(a.get('ts') or '')[11:16]}  {a.get('kind')}", a.get("title") or "", "dialog-warning-symbolic"))
 
+    def render_system(self, s):
+        h = s.get("host") or {}; u = s.get("updates") or {}
+        grp = self.group("system", "This desk", f"{h.get('pretty_name', 'MaluOS')} · {h.get('hostname', '')}")
+        mem = h.get("memory")
+        grp.add(row("Memory host", f"tenant {mem.get('tenant')} on this desk" if mem else "not provisioned on this desk", "drive-harddisk-symbolic"))
+        if not u.get("available"):
+            self.group("system", "Software updates", f"Not readable: {u.get('error') or 'maluctl update is not installed'}"); return
+        manual = u.get("manual_count", (u.get("pending_count") or 0) - (u.get("automatic_count") or 0))
+        if u.get("reboot_required"):
+            pk = u.get("reboot_packages") or []
+            desc = "A restart finishes the installed updates" + (f" ({', '.join(pk[:6])})" if pk else "") + "."
+        elif u.get("pending_error"):
+            desc = f"Pending updates unknown right now: {u['pending_error']}."
+        elif not u.get("pending_count"):
+            desc = f"Up to date as of the last refresh ({u.get('lists_refreshed') or '?'})."
+        else:
+            desc = f"{u['pending_count']} pending · {u.get('security_count', 0)} security · {u.get('automatic_count', 0)} install on their own · {manual} wait for you."
+        grp = self.group("system", "Software updates", desc)
+        r = row("Updates", "GNOME Software installs them; `maluctl update` does the same from a terminal", "software-update-available-symbolic")
+        if u.get("pending_count"):
+            r.add_suffix(button("Install…", lambda: self.update("open"), "suggested-action"))
+        if u.get("reboot_required"):
+            r.add_suffix(button("Restart now", lambda: self.update("restart"), "destructive-action"))
+        r.add_suffix(button("Check again", lambda: self.update("refresh")))
+        grp.add(r)
+        a = u.get("automatic") or {}
+        grp.add(row("Automatic updates", ("on" if a.get("enabled") else "off") + f" · last run {u.get('last_automatic_run') or 'never'}"
+                    + (f" · next {a['next_run']}" if a.get("next_run") and a["next_run"] != "n/a" else "")
+                    + ("\n" + ", ".join(a.get("origins") or []) if a.get("origins") else ""), "alarm-symbolic"))
+        pending = u.get("pending") or []
+        if pending:
+            grp = self.group("system", "Pending", "Where each update comes from, and whether it installs on its own.")
+            for p in pending[:40]:
+                grp.add(row(p.get("name"), f"{p.get('installed') or '-'} → {p.get('candidate')} · {p.get('source')}"
+                            + (" · security" if p.get("security") and p.get("source") != "security" else "") + ("" if p.get("automatic") else " · waits for you"),
+                            "security-high-symbolic" if p.get("security") else "package-x-generic-symbolic"))
+            if len(pending) > 40:
+                grp.add(row(f"… and {len(pending) - 40} more", "maluctl update status lists them all"))
+
     # -- actions
     def toast(self, text):
         self.toasts.add_toast(Adw.Toast(title=text[:120]))
@@ -224,6 +267,16 @@ class Desk(Adw.ApplicationWindow):
             except Exception as e:
                 self.toast(f"Request #{rid}: {decision} failed: {str(e)[:100]}")
         self.proxy.call("RequestDecide", GLib.Variant("(iss)", (int(rid), decision, expires)), 0, 30000, None, done, None)
+
+    def update(self, action):
+        if not self.proxy:
+            return
+        def done(proxy, res, _):
+            try:
+                proxy.call_finish(res)
+            except Exception as e:
+                self.toast(f"Updates: {action} failed: {str(e)[:100]}")
+        self.proxy.call("UpdateAction", GLib.Variant("(s)", (action,)), 0, 30000, None, done, None)
 
     def set_state(self, text):
         try:

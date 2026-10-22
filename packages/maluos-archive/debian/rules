@@ -3,6 +3,7 @@
 # (tests build a variant pointing at a local server).
 MALUOS_APT_URL ?= https://apt.maludb.org/maluos
 MALUOS_SUITE   ?= resolute
+MOZILLA_FPR     = 35BAA0B33E9EB396F59CA838C0BA5CE6DC6315A3
 
 %:
 	dh $@
@@ -13,6 +14,13 @@ override_dh_auto_build:
 	      -e 's|@MALUOS_SUITE@|$(MALUOS_SUITE)|g' \
 	      $$f > $${f%.in}; \
 	done
+	# Mozilla's repository key: dearmour, and refuse to build if it is not the key Mozilla publishes.
+	mkdir -p build
+	gpg --batch --no-default-keyring --keyring ./build/mozilla.kbx --import keys/packages.mozilla.org.asc
+	gpg --batch --no-default-keyring --keyring ./build/mozilla.kbx --with-colons --fingerprint | grep -q '^fpr:::::::::$(MOZILLA_FPR):$$'
+	gpg --batch --no-default-keyring --keyring ./build/mozilla.kbx --export $(MOZILLA_FPR) > build/packages.mozilla.org.gpg
+	test -s build/packages.mozilla.org.gpg
 
 override_dh_auto_clean:
 	rm -f sources/*.sources
+	rm -rf build

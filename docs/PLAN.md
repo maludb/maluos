@@ -46,7 +46,7 @@ repository is the distribution layer.
 - journald/audit events ingested into memory as episodes.
 - Secrets via systemd-creds: done in Phase 6 slice 1 (maluos-vault).
 - Optional local inference packages wired to maludb_modeld: done in Phase 6 slice 2 (maluos-gateway drains the queue; Ollama installer).
-- Desktop variant with an agent-aware session: Phase 12 (slices 1 to 4 released; desk enrolment is the next slice).
+- Desktop variant with an agent-aware session: Phase 12 (slices 1 to 4 released; slice 5, updates and software, built and boot-tested 2026-10-22, uncommitted; desk enrolment next).
 
 ## Open items
 

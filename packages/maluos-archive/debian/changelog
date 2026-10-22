@@ -1,3 +1,11 @@
+maluos-archive (0.3.0) resolute; urgency=medium
+
+  * New binary package maluos-archive-mozilla: packages.mozilla.org source,
+    its signing key (fingerprint checked at build) and a pin that prefers
+    Mozilla's Firefox over Ubuntu's snap-transitional package.
+
+ -- Edward Honour <ed@maludb.org>  Thu, 22 Oct 2026 02:13:56 +0000
+
 maluos-archive (0.2.0) resolute; urgency=medium
 
   * Repository moves to https://apt.maluos.com.

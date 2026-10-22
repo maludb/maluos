@@ -2,8 +2,9 @@
 # The target comes from the MaluOS squashfs (packages preinstalled), so no
 # network is needed here.
 late-commands:
-  # MaluOS repository from the install media -> installed system, for later
-  # package installs/updates while no public mirror exists.
+  # MaluOS repository from the install media -> installed system: the exact
+  # package set the image was built from, beside apt.maluos.com (maluos.sources)
+  # for updates; useful offline and when the media is newer than the mirror.
   - mkdir -p /target/var/lib/maluos/apt
   - cp -rL /cdrom/maluos/apt/. /target/var/lib/maluos/apt/
   - |

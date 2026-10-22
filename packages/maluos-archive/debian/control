@@ -2,7 +2,7 @@ Source: maluos-archive
 Section: misc
 Priority: important
 Maintainer: Edward Honour <ed@maludb.org>
-Build-Depends: debhelper-compat (= 13)
+Build-Depends: debhelper-compat (= 13), gnupg
 Standards-Version: 4.6.2
 Homepage: https://github.com/maludb/maluos
 Rules-Requires-Root: no
@@ -18,3 +18,18 @@ Description: APT source configuration for the MaluOS repository
  .
  The PGDG entry is verified with the key shipped by Ubuntu's own
  postgresql-client-common package, so no third-party key is vendored.
+
+Package: maluos-archive-mozilla
+Architecture: all
+Multi-Arch: foreign
+Priority: optional
+Depends: ${misc:Depends}
+Description: APT source configuration for Mozilla's repository (Firefox)
+ Installs the deb822 APT source entry for packages.mozilla.org, Mozilla's
+ own repository of Firefox debs, together with its signing key and an APT
+ pin that prefers Mozilla's packages over Ubuntu's snap-transitional
+ firefox package. The MaluOS desktop takes Firefox from here: no snaps.
+ .
+ The vendored key is checked against Mozilla's published fingerprint
+ (35BA A0B3 3E9E B396 F59C A838 C0BA 5CE6 DC63 15A3) when the package
+ is built.

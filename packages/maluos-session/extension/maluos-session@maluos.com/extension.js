@@ -19,6 +19,7 @@ const IFACE_XML = `<node>
   <method name="Refresh"/>
   <method name="AgentAction"><arg type="s" name="name" direction="in"/><arg type="s" name="action" direction="in"/></method>
   <method name="RequestDecide"><arg type="i" name="id" direction="in"/><arg type="s" name="decision" direction="in"/><arg type="s" name="expires" direction="in"/><arg type="s" name="json" direction="out"/></method>
+  <method name="UpdateAction"><arg type="s" name="action" direction="in"/></method>
   <signal name="StateChanged"><arg type="s" name="json"/></signal>
   <property name="Version" type="s" access="read"/>
 </interface>
@@ -137,7 +138,7 @@ class Indicator extends PanelMenu.Button {
         const asked = (s.vault?.requests || []).some(r => r.mine_to_decide);
         const down = (s.gateway?.backends || []).some(b => b.enabled && !b.healthy) || asked;
         const over = Object.values(s.me?.budget || {}).some(b => b.spent !== null && b.spent >= b.limit);
-        const warn = Object.values(s.me?.budget || {}).some(b => b.spent !== null && b.spent >= b.warn_at * b.limit);
+        const warn = Object.values(s.me?.budget || {}).some(b => b.spent !== null && b.spent >= b.warn_at * b.limit) || s.updates?.reboot_required;
         if (failed || over)
             this._icon.add_style_class_name('maluos-bad');
         else if (down || warn)
@@ -167,6 +168,7 @@ class Indicator extends PanelMenu.Button {
             m.addMenuItem(new InfoItem(`Memory host: ${h.memory.tenant || 'local'} on this desk`, true));
         else
             m.addMenuItem(new InfoItem('Memory host: not provisioned on this desk', true));
+        this._updatesItem(m, s.updates || {});
 
         m.addMenuItem(new PopupMenu.PopupSeparatorMenuItem('Agents'));
         const agents = [...(s.agents || [])].sort((a, b) => Number(b.mine) - Number(a.mine) || a.name.localeCompare(b.name));
@@ -249,6 +251,43 @@ class Indicator extends PanelMenu.Button {
         const refresh = new PopupMenu.PopupMenuItem('Refresh');
         refresh.connect('activate', () => this._proxy?.RefreshRemote(() => {}));
         m.addMenuItem(refresh);
+    }
+
+    // software updates (slice 5): one line, a submenu with the pending list and the actions
+    _updatesItem(m, u) {
+        if (!u.available)
+            return;
+        const manual = u.manual_count ?? ((u.pending_count || 0) - (u.automatic_count || 0));
+        let text;
+        if (u.reboot_required)
+            text = 'Updates: restart needed to finish';
+        else if (u.pending_error)
+            text = 'Updates: unknown (apt busy)';
+        else if (!u.pending_count)
+            text = `Updates: up to date · lists ${u.lists_refreshed || '?'}`;
+        else
+            text = `Updates: ${u.pending_count} pending${manual ? ` · ${manual} wait for you` : ''}${u.automatic_count ? ` · ${u.automatic_count} automatic` : ''}`;
+        const item = new PopupMenu.PopupSubMenuMenuItem(text);
+        if (u.reboot_required)
+            item.label.add_style_class_name('maluos-dot-warn');
+        const pending = u.pending || [];
+        for (const p of pending.slice(0, 12))
+            item.menu.addMenuItem(new InfoItem(`${p.name} → ${p.candidate}  ${p.source}${p.security && p.source !== 'security' ? ' (security)' : ''}${p.automatic ? '' : ' · waits for you'}`, true));
+        if (pending.length > 12)
+            item.menu.addMenuItem(new InfoItem(`… and ${pending.length - 12} more`, true));
+        const a = u.automatic || {};
+        item.menu.addMenuItem(new InfoItem(`automatic: ${a.enabled ? 'on' : 'off'} · last run ${u.last_automatic_run || 'never'} · lists refreshed ${u.lists_refreshed || '?'}`, true));
+        for (const [label, action, when] of [['Install updates…', 'open', !!u.pending_count], ['Restart now', 'restart', !!u.reboot_required], ['Check again', 'refresh', true]]) {
+            if (!when)
+                continue;
+            const it = new PopupMenu.PopupMenuItem(label);
+            it.connect('activate', () => this._proxy?.UpdateActionRemote(action, (_r, error) => {
+                if (error)
+                    Main.notify(`Updates: ${action} failed`, error.message);
+            }));
+            item.menu.addMenuItem(it);
+        }
+        m.addMenuItem(item);
     }
 
     _requestItem(r) {

@@ -4,3 +4,4 @@ bin/maluctl            usr/bin
 etc/firstboot.yaml     etc/maluos
 motd/06-maluos-status  etc/update-motd.d
 systemd/maluos-firstboot.service usr/lib/systemd/system
+lib/maluctl.d/update.py usr/lib/maluos/maluctl.d

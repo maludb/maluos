@@ -78,6 +78,14 @@ sudo -n -u postgres psql -Atc "select version()" | cut -c1-40 | sed 's/^/  pg: /
 sudo -n -u postgres psql -Atc "select 1 from pg_available_extensions where name='maludb_core'" | grep -q 1 && echo "  ok   maludb_core extension available" || { echo "  FAIL maludb_core extension"; fail=1; }
 df -h / | tail -1 | awk '{print "  root: " $2 " total, " $4 " free (growpart)"}'
 sudo -n apt-get update -q >/dev/null 2>&1 && echo "  ok   apt-get update clean" || echo "  warn apt-get update had errors"
+# --- updates (Phase 12 slice 5, every variant): unattended-upgrades with the MaluOS policy, the public repository enabled, maluctl update
+installed unattended-upgrades && echo "  ok   unattended-upgrades installed" || { echo "  FAIL unattended-upgrades missing"; fail=1; }
+grep -q '"MaluOS:resolute"' /etc/apt/apt.conf.d/52maluos-unattended-upgrades && grep -q 'site=packages.mozilla.org' /etc/apt/apt.conf.d/52maluos-unattended-upgrades && echo "  ok   unattended-upgrades policy: security, MaluOS, Mozilla" || { echo "  FAIL unattended-upgrades policy"; fail=1; }
+systemctl is-enabled --quiet apt-daily-upgrade.timer && systemctl is-enabled --quiet apt-daily.timer && echo "  ok   apt-daily timers enabled" || { echo "  FAIL apt-daily timers: $(systemctl is-enabled apt-daily.timer apt-daily-upgrade.timer | tr '\n' ' ')"; fail=1; }
+! grep -q '^Enabled: no' /etc/apt/sources.list.d/maluos.sources && grep -q 'apt.maluos.com' /etc/apt/sources.list.d/maluos.sources && echo "  ok   maluos.sources enabled (apt.maluos.com)" || { echo "  FAIL maluos.sources: $(grep -E '^(URIs|Enabled)' /etc/apt/sources.list.d/maluos.sources | tr '\n' ' ')"; fail=1; }
+maluctl update status > /tmp/upd.txt 2>&1 && grep -q '^pending:' /tmp/upd.txt && grep -q '^restart:' /tmp/upd.txt && echo "  ok   maluctl update status (no privileges): $(grep '^pending:' /tmp/upd.txt | cut -c16-70)" || { echo "  FAIL maluctl update status: $(tail -2 /tmp/upd.txt)"; fail=1; }
+maluctl update status --json --compact | python3 -c "import json,sys; d=json.load(sys.stdin); assert d['automatic']['enabled'], d['automatic']; assert any(o.startswith('MaluOS:') for o in d['automatic']['origins']) and any('packages.mozilla.org' in o for o in d['automatic']['origins']), d['automatic']['origins']; assert d['reboot_required'] is False, d; print('  ok   maluctl update status --json: automatic on, origins include MaluOS and Mozilla, no restart due')" || { echo "  FAIL maluctl update status --json"; fail=1; }
+sudo -n maluctl update history >/dev/null 2>&1 && echo "  ok   maluctl update history (root)" || { echo "  FAIL maluctl update history"; fail=1; }
 cloud-init status | sed 's/^/  /'
 # --- first-boot provisioning (Phase 4)
 # A oneshot reports Result=success while it is still activating; wait for it to finish
@@ -209,8 +217,14 @@ sudo -n test -s /var/lib/maluos/secrets/business-os/admin-password && echo "  ok
 else echo "  (no maluos-business-os in this image)"; fi
 # --- the desktop (Phase 12): GNOME on gdm, the MaluOS identity on the login screen, no snaps
 if installed maluos-desktop; then
-for p in maluos-desktop maluos-desktop-branding gdm3 gnome-shell ubuntu-session gnome-control-center nautilus ptyxis epiphany-browser; do installed $p && echo "  ok   $p" || { echo "  FAIL $p"; fail=1; }; done
-for p in snapd firefox update-manager update-notifier ubuntu-release-upgrader-gtk ubuntu-report whoopsie apport; do ! installed $p && echo "  ok   no $p" || { echo "  FAIL $p is installed"; fail=1; }; done
+for p in maluos-desktop maluos-desktop-branding gdm3 gnome-shell ubuntu-session gnome-control-center nautilus ptyxis firefox gnome-software gnome-software-plugin-deb appstream maluos-archive-mozilla; do installed $p && echo "  ok   $p" || { echo "  FAIL $p"; fail=1; }; done
+for p in snapd gnome-software-plugin-snap gnome-software-plugin-flatpak update-manager update-notifier ubuntu-release-upgrader-gtk ubuntu-report whoopsie apport; do ! installed $p && echo "  ok   no $p" || { echo "  FAIL $p is installed"; fail=1; }; done
+# --- slice 5: Firefox from Mozilla's repository, GNOME Software with the deb plugin only
+fv=$(dpkg-query -W -f='${Version}' firefox 2>/dev/null); echo "$fv" | grep -qv snap && dpkg-query -W -f='${Maintainer}' firefox | grep -qi mozilla && echo "  ok   firefox $fv is Mozilla's deb, not the snap shim" || { echo "  FAIL firefox version $fv / $(dpkg-query -W -f='${Maintainer}' firefox)"; fail=1; }
+[ -f /etc/apt/sources.list.d/mozilla.sources ] && [ -s /usr/share/keyrings/packages.mozilla.org.gpg ] && [ -f /etc/apt/preferences.d/maluos-mozilla ] && echo "  ok   mozilla.sources, its keyring and the pin are installed" || { echo "  FAIL Mozilla apt configuration"; fail=1; }
+pol=$(apt-cache policy firefox 2>/dev/null); echo "$pol" | grep -q 'packages.mozilla.org' && echo "$pol" | grep -A1 'Candidate' | grep -qv snap && echo "  ok   apt prefers packages.mozilla.org for firefox (pin 1000; Ubuntu's shim pinned out)" || echo "  warn apt policy for firefox: $(echo "$pol" | grep -E 'Candidate|Installed' | tr '\n' ' ') (no network to Mozilla?)"
+grep -q 'download-updates-notify=false' /usr/share/glib-2.0/schemas/30_maluos-session.gschema.override && echo "  ok   GNOME Software leaves the updates notification to the session" || { echo "  FAIL gnome-software override"; fail=1; }
+[ -f /usr/share/applications/firefox.desktop ] && grep -q 'x-scheme-handler/http=.*firefox.desktop' /usr/share/applications/ubuntu-mimeapps.list && echo "  ok   Firefox is the session's default browser (ubuntu-mimeapps.list)" || { echo "  FAIL default browser"; fail=1; }
 [ "$(systemctl get-default)" = graphical.target ] && echo "  ok   default target graphical" || { echo "  FAIL default target is $(systemctl get-default)"; fail=1; }
 systemctl is-active --quiet gdm && echo "  ok   gdm active" || { echo "  FAIL gdm: $(systemctl is-active gdm)"; sudo -n journalctl -u gdm --no-pager | tail -8; fail=1; }
 for i in $(seq 1 60); do pgrep -x gnome-shell >/dev/null && break; sleep 5; done   # the greeter under software rendering
@@ -248,6 +262,20 @@ assert s['me']['enrolled'] and s['me']['principal']=='user:maluos', s['me']
 assert s['host']['memory'] and s['host']['memory']['tenant'], s['host']
 assert s['host']['variant']=='Desktop', s['host']
 print('  ok   session state: gateway ok (%d backends), vault and gateway see user:maluos, memory tenant %s' % (len(s['gateway']['backends']), s['host']['memory']['tenant']))" || { echo "  FAIL session state: $(state | head -c 400)"; fail=1; }
+# slice 5: the session's view of updates (read in its own thread; the apt cache takes minutes to open under
+# emulation, so wait for the first reading), and UpdateAction refresh
+upd_avail() { state | python3 -c "import json,sys; u=json.load(sys.stdin).get('updates') or {}; sys.exit(0 if u.get('available') else 1)"; }
+for i in $(seq 1 60); do upd_avail && break; sleep 10; done
+state | python3 -c "
+import json,sys; s=json.load(sys.stdin); u=s.get('updates') or {}
+assert u.get('available'), u
+assert u['automatic'].get('enabled') and u['reboot_required'] is False, u
+print('  ok   session state carries updates: %d pending (%d security, %d automatic), lists refreshed %s' % (u['pending_count'], u['security_count'], u['automatic_count'], u.get('lists_refreshed')))" || { echo "  FAIL session updates state: $(state | python3 -c 'import json,sys; print(json.load(sys.stdin).get("updates"))' | head -c 300)"; fail=1; }
+read0=$(state | python3 -c "import json,sys; print((json.load(sys.stdin).get('updates') or {}).get('read_at') or 0)")
+gdbus call --session --dest com.maluos.Session --object-path /com/maluos/Session --method com.maluos.Session1.UpdateAction refresh >/dev/null 2>&1
+for i in $(seq 1 60); do state | python3 -c "import json,sys; u=json.load(sys.stdin)['updates']; sys.exit(0 if u.get('available') and u['read_at'] > $read0 else 1)" && break; sleep 10; done
+state | python3 -c "import json,sys; u=json.load(sys.stdin)['updates']; assert u.get('available') and u['read_at'] > $read0, u" && echo "  ok   UpdateAction refresh re-reads maluctl update status (in the updates thread)" || { echo "  FAIL UpdateAction refresh"; fail=1; }
+state | python3 -c "import json,sys; s=json.load(sys.stdin); assert s['gateway']['ok'] and s['vault']['enrolled'], 'stale'" && echo "  ok   the poll loop kept publishing meanwhile" || { echo "  FAIL session state stale during the updates read"; fail=1; }
 sudo -n maluctl agent create desk --exec /usr/lib/maluos/maluos-agent-idle --scope org:read --no-start >/dev/null 2>&1 && echo "  ok   agent desk created, not started" || { echo "  FAIL agent create desk"; fail=1; }
 gdbus call --session --dest com.maluos.Session --object-path /com/maluos/Session --method com.maluos.Session1.Refresh >/dev/null 2>&1; sleep 4
 agent_is() { state | python3 -c "import json,sys; s=json.load(sys.stdin); a=[x for x in s['agents'] if x['name']=='desk']; sys.exit(0 if a and a[0]['active']=='$1' else 1)"; }
@@ -279,7 +307,7 @@ maluctl secret info user:maluos/deskkey | grep -q 'read  principal:agent:desk' &
 [ "$(sudo -n maluctl agent run desk -- maluctl secret show user:maluos/deskkey 2>/dev/null)" = desk-secret-value ] && echo "  ok   the agent now reads the key" || { echo "  FAIL agent still refused"; fail=1; }
 maluctl secret requests --all | grep -q 'approved by user:maluos' && echo "  ok   maluctl secret requests shows the decision" || { echo "  FAIL requests listing"; fail=1; }
 [ -f /usr/share/applications/com.maluos.Desk.desktop ] && [ -x /usr/bin/maluos-desk ] && echo "  ok   MaluOS Desk installed" || { echo "  FAIL maluos-desk missing"; fail=1; }
-out=$(WAYLAND_DISPLAY=wayland-0 timeout 120 maluos-desk --self-test 2>&1); echo "$out" | grep -q 'self-test ok: service reachable' && echo "  ok   MaluOS Desk window builds from the live state (GTK 4 on the session's Wayland display)" || { echo "  FAIL maluos-desk self-test: $(echo "$out" | tail -3)"; fail=1; }
+out=$(WAYLAND_DISPLAY=wayland-0 timeout 300 maluos-desk --self-test 2>&1); echo "$out" | grep -q 'self-test ok: service reachable' && echo "  ok   MaluOS Desk window builds from the live state (GTK 4 on the session's Wayland display)" || { echo "  FAIL maluos-desk self-test: $(echo "$out" | tail -3)"; fail=1; }
 maluctl secret delete user:maluos/deskkey >/dev/null 2>&1 || true
 sudo -n maluctl agent remove desk --purge >/dev/null 2>&1 || true
 fi

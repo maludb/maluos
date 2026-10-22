@@ -35,6 +35,14 @@ apt-get update -q
 $APT install --no-install-recommends postgresql-client-common
 $APT install maluos-keyring maluos-archive
 apt-get update -q
+# Third-party repositories a profile needs at build time (maluos-archive-mozilla
+# for Firefox): install their source packages first, then refresh apt.
+extra=$(grep -oE '^maluos-archive-[a-z0-9-]+' /tmp/stage/profile.pkgs || true)
+if [ -n "$extra" ]; then
+    # shellcheck disable=SC2086
+    $APT install $extra
+    apt-get update -q
+fi
 # shellcheck disable=SC2046
 $APT install $(grep -vE '^\s*(#|$)' /tmp/stage/profile.pkgs)
 
@@ -46,7 +54,9 @@ done
 
 # --- clean for imaging ---------------------------------------------------
 rm -f /etc/apt/sources.list.d/maluos-build.sources /etc/apt/keyrings/maluos-build-keyring.gpg
-sed -i '/^Enabled:/d; $a Enabled: no' /etc/apt/sources.list.d/maluos.sources   # no public mirror yet
+# maluos.sources (apt.maluos.com, production-signed) stays enabled: installed
+# systems take MaluOS updates from there, unattended-upgrades included.
+sed -i '/^Enabled:/d' /etc/apt/sources.list.d/maluos.sources
 apt-get clean
 rm -rf /var/lib/apt/lists/*
 echo maluos > /etc/hostname

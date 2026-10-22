@@ -1,3 +1,25 @@
+maluos-session (0.3.1) resolute; urgency=medium
+
+  * The updates reading runs in its own thread: opening the apt cache can
+    take minutes under emulation and must not stall the poll loop, the bus
+    or the notifications. Refresh() no longer forces an apt re-read;
+    UpdateAction refresh does. Failed readings retry after two minutes.
+
+ -- Edward Honour <ed@maludb.org>  Thu, 22 Oct 2026 12:43:31 +0000
+
+maluos-session (0.3.0) resolute; urgency=medium
+
+  * Software updates (Phase 12 slice 5): the state carries maluctl update
+    status (pending by source, automatic policy, restart due), re-read when
+    apt or dpkg state changes and every 15 minutes; one notification for
+    updates that wait for the user (Install opens GNOME Software's updates
+    page) and one for a due restart; UpdateAction(open|restart|refresh) on
+    the bus; an Updates line in the indicator; a System page in the Desk.
+  * gsettings override: GNOME Software does not notify about downloaded
+    updates itself (the session does).
+
+ -- Edward Honour <ed@maludb.org>  Thu, 22 Oct 2026 02:18:18 +0000
+
 maluos-session (0.2.0) resolute; urgency=medium
 
   * Phase 12 slice 3. Agents carry their owner (MALUOS_AGENT_OWNER) and are

@@ -3,3 +3,9 @@
 # /usr/share/gnome-shell/modes/ubuntu.json and are added to this list by the shell.
 [org.gnome.shell:ubuntu]
 enabled-extensions=['maluos-session@maluos.com']
+
+# GNOME Software keeps downloading updates in the background (offline updates
+# through PackageKit) but the MaluOS session does the one "updates available"
+# notification, with the Install button opening GNOME Software's updates page.
+[org.gnome.software]
+download-updates-notify=false

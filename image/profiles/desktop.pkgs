@@ -3,6 +3,10 @@
 # 18, MaluDB, the vault, the gateway, agents) so agents on the workstation have
 # local memory; the API server and the Business OS kernel stay on the office.
 ubuntu-minimal
+# Third-party repository the desktop needs while it is being built: Firefox
+# comes from packages.mozilla.org. stage-packages.sh installs maluos-archive-*
+# entries first and refreshes apt before the rest.
+maluos-archive-mozilla
 maluos-desktop
 maluos-server
 linux-generic

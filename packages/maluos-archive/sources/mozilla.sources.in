@@ -1,0 +1,9 @@
+# Mozilla's APT repository: Firefox as a deb, straight from Mozilla.
+# Installed by maluos-archive-mozilla (no substitutions; the .in suffix only
+# keeps it beside the others). The signing key is vendored in the
+# same package and checked against Mozilla's published fingerprint at build.
+Types: deb
+URIs: https://packages.mozilla.org/apt
+Suites: mozilla
+Components: main
+Signed-By: /usr/share/keyrings/packages.mozilla.org.gpg
