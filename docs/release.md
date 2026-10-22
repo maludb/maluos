@@ -25,6 +25,16 @@ ISO is too large for a GitHub release asset). The `release` workflow then
 rebuilds the cloud image from the tag in CI, boot-tests it, and attaches
 that independently built copy to the same release.
 
+Two rules the script enforces since 2026-10-22. The version is the UTC
+date, so there is one release per day: if the day's tag exists the script
+stops, and `--resume` is only for finishing an interrupted upload of the
+same files. And the copying and hashing of the 13 GB of images go through
+`scripts/gentle.py`, which releases each chunk from the page cache and
+caps the rate at 100 MB/s, with the cache dropped every 15 s during the
+uploads: the dev VM is a 14 GB guest that its hypervisor killed four times
+when plain `cp` and `sha256sum` over the images filled the guest's cache
+(docs/phase12-desktop.md, slice 6 status). Run the script in tmux.
+
 ## Signing keys
 
 Two keys, two roles:

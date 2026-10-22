@@ -13,16 +13,25 @@
 # when present (build both with -p desktop).
 # Optional: MALUOS_DOWNLOAD_RSYNC=user@host:/srv/download/maluos for the ISO.
 set -euo pipefail
+ROOT_DIR=$(cd "$(dirname "$0")/.." && pwd)
+drop_caches_loop() { while :; do sleep 15; sync; sudo -n sh -c 'echo 1 > /proc/sys/vm/drop_caches' 2>/dev/null || true; done; }
 ROOT=$(cd "$(dirname "$0")/.." && pwd); cd "$ROOT"
 . repo/config.env
-DRY=0; UPLOAD=1
+DRY=0; UPLOAD=1; RESUME=0
 ONLY=""
-for a in "$@"; do case "$a" in --dry-run) DRY=1;; --no-upload) UPLOAD=0;; --profiles=*) ONLY=${a#--profiles=};; esac; done
+for a in "$@"; do case "$a" in --dry-run) DRY=1;; --no-upload) UPLOAD=0;; --resume) RESUME=1;; --profiles=*) ONLY=${a#--profiles=};; esac; done
 [ -z "$(git status --porcelain)" ] || { echo "working tree not clean" >&2; exit 1; }
 [ "$(git branch --show-current)" = main ] || { echo "release from main" >&2; exit 1; }
 BASE=$(grep -oE 'VERSION_ID="[0-9.]+"' packages/maluos-branding/files/share/os-release.server | grep -oE '[0-9.]+')
 VERSION="$BASE.$(date -u +%Y%m%d)"
 TAG="v$VERSION"
+# One release per UTC day: the version is the date. Re-running on the same day re-stages whatever
+# is in build/ under the released name and would overwrite the published files; only an interrupted
+# upload of the same files should be resumed, and that takes --resume.
+if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null && [ $RESUME = 0 ]; then
+    if [ $DRY = 1 ]; then echo "note: $TAG is already released; a real run today needs --resume (same files) or the next UTC day"
+    else echo "$TAG is already released. New images wait for the next UTC day (now $(date -u +%H:%M) UTC); to resume an interrupted upload of the same files pass --resume" >&2; exit 1; fi
+fi
 ISO=build/maluos-26.04.1-server-amd64.iso; QCOW=build/image/maluos-server-26.04-amd64.qcow2
 [ -f "$ISO" ] && [ -f "$QCOW" ] || { echo "build the ISO and the cloud image first" >&2; exit 1; }
 PROFILES=server
@@ -33,13 +42,13 @@ gpg --batch --list-secret-keys "$MALUOS_PUBLIC_SIGNING_UID" >/dev/null 2>&1 || {
 echo "== release $VERSION ($TAG): $PROFILES"
 files=(); qcows=()
 for p in $PROFILES; do
-    echo "== staging $p ISO and image into $OUT (several GB, takes a while)"
-    cp -f "build/maluos-26.04.1-$p-amd64.iso" "$OUT/maluos-$VERSION-$p-amd64.iso"
-    cp -f "build/image/maluos-$p-26.04-amd64.qcow2" "$OUT/maluos-$VERSION-$p-amd64.qcow2"
+    echo "== staging $p ISO and image into $OUT (several GB at 100 MB/s, takes a while)"
+    "$ROOT_DIR/scripts/gentle.py" cp "build/maluos-26.04.1-$p-amd64.iso" "$OUT/maluos-$VERSION-$p-amd64.iso"
+    "$ROOT_DIR/scripts/gentle.py" cp "build/image/maluos-$p-26.04-amd64.qcow2" "$OUT/maluos-$VERSION-$p-amd64.qcow2"
     files+=("maluos-$VERSION-$p-amd64.iso" "maluos-$VERSION-$p-amd64.qcow2"); qcows+=("$OUT/maluos-$VERSION-$p-amd64.qcow2")
 done
-echo "== checksums (reads every file once)"
-( cd "$OUT" && sha256sum "${files[@]}" > SHA256SUMS )
+echo "== checksums (reads every file once, 100 MB/s)"
+( cd "$OUT" && "$ROOT_DIR/scripts/gentle.py" sum "${files[@]}" > SHA256SUMS )
 [ $DRY = 1 ] || echo "== signing SHA256SUMS with the production key: the passphrase prompt follows"
 if [ $DRY = 0 ]; then
     ( cd "$OUT" && gpg --yes --clearsign -u "$MALUOS_PUBLIC_SIGNING_UID" -o SHA256SUMS.gpg SHA256SUMS )   # production key: asks for the passphrase
@@ -63,6 +72,9 @@ else
     echo "== tagged $TAG"
 fi
 if [ $UPLOAD = 1 ]; then
+    # The uploads read the staged 13 GB again. Keep the page cache from growing to the VM's
+    # full RAM meanwhile (the hypervisor has killed the dev VM at that point; scripts/gentle.py).
+    drop_caches_loop & DROP_PID=$!; trap 'kill $DROP_PID 2>/dev/null' EXIT
     assets=("${qcows[@]}" "$OUT/SHA256SUMS" "$OUT/SHA256SUMS.gpg")
     if gh release view "$TAG" >/dev/null 2>&1; then
         gh release upload "$TAG" --clobber "${assets[@]}"
