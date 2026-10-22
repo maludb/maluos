@@ -312,6 +312,9 @@ function delete_location(PDO $pdo, int $id): bool
         );
     }
 
+    // db/187: a desk's token would survive the row (ON DELETE SET NULL) and still resolve on the MCP servers.
+    $pdo->prepare("UPDATE mcp_access_tokens SET revoked_at = now() WHERE scope = 'desk' AND location_id = :id AND revoked_at IS NULL")
+        ->execute(['id' => $id]);
     $st = $pdo->prepare('DELETE FROM locations WHERE id = :id');
     $st->execute(['id' => $id]);
     return $st->rowCount() > 0;

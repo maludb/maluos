@@ -23,7 +23,7 @@ and read the token for the office's MCP servers with
 import json, os, pwd, socket, subprocess, sys, time, urllib.error, urllib.request
 sys.path.insert(0, "/usr/lib/maluos")
 
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 SURFACE = 1
 CONF = os.environ.get("MALUOS_OFFICE_CONF", "/etc/maluos/office.yaml")
 ENVF = os.environ.get("MALUOS_OFFICE_ENV", "/etc/maluos/office.env")
@@ -62,13 +62,21 @@ def http(method, url, body=None, token=None, timeout=20):
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             raw = r.read()
-            return r.status, (json.loads(raw) if raw else {})
+            return r.status, _flat(json.loads(raw) if raw else {})
     except urllib.error.HTTPError as e:
         raw = e.read()
         try:
-            return e.code, json.loads(raw)
+            return e.code, _flat(json.loads(raw))
         except Exception:
             return e.code, {"error": "http_error", "message": raw.decode(errors="replace")[:200]}
+
+
+def _flat(obj):
+    """The kernel answers errors as {"error": {"code", "message"}}; the mock and this code use the flat form."""
+    if isinstance(obj, dict) and isinstance(obj.get("error"), dict):
+        e = obj["error"]
+        obj = {**obj, "error": e.get("code") or "error", "message": e.get("message") or ""}
+    return obj if isinstance(obj, dict) else {}
 
 
 def facts():

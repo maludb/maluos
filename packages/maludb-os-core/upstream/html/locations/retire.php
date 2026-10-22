@@ -37,6 +37,12 @@ try {
 if ($after === []) {
     render_location_page($pdo, $id, ['The location could not be retired.']);
 }
+if ($location['kind'] === 'desk') {
+    // db/187: a retired desk's token must stop reading as its owner at once (the next heartbeat gets 410).
+    require_once dirname(__DIR__, 2) . '/app/features/estate/desks.php';
+    desk_revoke_tokens($pdo, $id);
+    $pdo->prepare("UPDATE locations SET presence = 'offline' WHERE id = :id")->execute(['id' => $id]);
+}
 
 log_activity($pdo, 'location.retire', 'location', $id, [
     'before' => ['status' => $location['status'], 'kind' => $location['kind'], 'name' => $location['name']],

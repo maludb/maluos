@@ -214,6 +214,22 @@ curl -fsS --max-time 10 http://127.0.0.1:8815/health 2>/dev/null | grep -q '"ok"
 sudo -n -u postgres psql -Atd maludb_os -c "select count(*) from members where business_role='super_admin'" | grep -qE '^[1-9]' && echo "  ok   super-admin exists in maludb_os" || { echo "  FAIL super-admin"; fail=1; }
 sudo -n -u postgres psql -Atd maludb_os -c "select count(*) from pg_tables where schemaname='public'" | sed 's/^/  kernel tables: /'
 sudo -n test -s /var/lib/maluos/secrets/business-os/admin-password && echo "  ok   admin password stored" || echo "  warn no stored admin password"
+# desk enrolment, the office half (kernel db/187; docs/desk-enrolment.md): the endpoints through Apache's allow-list on the
+# person face, a code minted for the super-admin, the whole exchange a MaluOS desk makes, and the presence job in the crontab
+code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -H "Host: app.$bosdom" -H 'Content-Type: application/json' -X POST http://127.0.0.1/api/v1/desks/enroll -d '{"surface":1,"code":"ZZZZ-ZZZZ"}')
+[ "$code" = 403 ] && echo "  ok   /api/v1/desks/enroll served through Apache; a wrong code is 403" || { echo "  FAIL desks/enroll via Apache: HTTP $code"; fail=1; }
+bosadmin=$(sudo -n -u postgres psql -Atd maludb_os -c "select email from members where business_role='super_admin' and status='active' order by id limit 1")
+deskcode=$(cd /var/www && sudo -n -u www-data php bin/mint_desk_code.php --email "$bosadmin" --name "Boot test desk" 2>/dev/null | grep -oE '[A-Z2-9]{4}-[A-Z2-9]{4}' | head -1)
+[ -n "$deskcode" ] && echo "  ok   bin/mint_desk_code.php minted a code for $bosadmin" || { echo "  FAIL mint_desk_code: $(cd /var/www && sudo -n -u www-data php bin/mint_desk_code.php --email "$bosadmin" 2>&1 | tail -2)"; fail=1; }
+dcall() { curl -s --max-time 30 -H "Host: app.$bosdom" -H 'Content-Type: application/json' -H "Authorization: Bearer $2" -X "$1" "http://127.0.0.1$3" ${4:+-d "$4"}; }
+enr=$(dcall POST "" /api/v1/desks/enroll "{\"surface\":1,\"code\":\"$deskcode\",\"principal\":\"user:maluos\",\"hostname\":\"boot-test\",\"os_platform\":\"linux\",\"os_release\":\"MaluOS test\",\"app_version\":\"maluos-desk 0.1.1\",\"mcp_surface_version\":\"1\",\"cpu_cores\":4,\"memory_mb\":2048,\"storage_gb\":8,\"machine_id\":\"0123456789abcdef0123456789abcdef\"}")
+desktok=$(echo "$enr" | python3 -c "import json,sys; d=json.load(sys.stdin); assert d['desk']['name']=='Boot test desk' and d['desk']['status']=='active' and d['endpoints']['records'].endswith('/mcp/records') and d['endpoints']['models'] is None; print(d['token'])" 2>/dev/null)
+[ -n "$desktok" ] && echo "  ok   a desk enrolled with the code: token issued, records endpoint published, no model endpoint yet" || { echo "  FAIL desk enrol: $(echo "$enr" | head -c 300)"; fail=1; }
+dcall POST "$desktok" /api/v1/desks/heartbeat '{"surface":1,"presence":"online","facts":{"cpu_cores":4}}' | grep -q '"presence":"online"' && sudo -n -u postgres psql -Atd maludb_os -c "select presence from locations where kind='desk' and name='Boot test desk'" | grep -q online && echo "  ok   heartbeat: the desk is online in the estate" || { echo "  FAIL desk heartbeat"; fail=1; }
+dcall GET "$desktok" /api/v1/desks/me | grep -q '"name":"Boot test desk"' && echo "  ok   desks/me with the desk token" || { echo "  FAIL desks/me"; fail=1; }
+[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -H "Host: app.$bosdom" -H "Authorization: Bearer $desktok" http://127.0.0.1/api/v1/me)" = 401 ] && echo "  ok   the desk token is refused on /api/v1/me (one scope per surface)" || { echo "  FAIL desk token accepted on /api/v1/me"; fail=1; }
+dcall POST "$desktok" /api/v1/desks/leave '{"surface":1}' | grep -q '"status":"retired"' && [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -H "Host: app.$bosdom" -H "Authorization: Bearer $desktok" http://127.0.0.1/api/v1/desks/me)" = 410 ] && echo "  ok   desks/leave retired the desk; its token answers 410" || { echo "  FAIL desks/leave"; fail=1; }
+sudo -n crontab -u www-data -l 2>/dev/null | grep -q desk_presence && echo "  ok   the desk presence job is in www-data's crontab" || { echo "  FAIL desk_presence cron missing"; fail=1; }
 else echo "  (no maluos-business-os in this image)"; fi
 # --- the desktop (Phase 12): GNOME on gdm, the MaluOS identity on the login screen, no snaps
 if installed maluos-desktop; then

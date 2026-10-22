@@ -30,9 +30,10 @@ function update_notifications(PDO $pdo, int $memberId, bool $reply, bool $event,
 }
 
 // ---- MCP access tokens ----------------------------------------------------
+/** The person's own AI-access tokens; a desk's token (scope desk, db/187) is the desk's and shows under Desks. */
 function list_mcp_tokens(PDO $pdo, int $memberId): array
 {
-    $st = $pdo->prepare('SELECT id, label, last_used_at, created_at FROM mcp_access_tokens WHERE member_id = :m AND revoked_at IS NULL ORDER BY created_at DESC');
+    $st = $pdo->prepare("SELECT id, label, last_used_at, created_at FROM mcp_access_tokens WHERE member_id = :m AND revoked_at IS NULL AND scope <> 'desk' ORDER BY created_at DESC");
     $st->execute(['m' => $memberId]);
     return $st->fetchAll();
 }
@@ -107,6 +108,9 @@ function settings_section_html(PDO $pdo, int $memberId, string $section, array $
                 'recordsUrl' => app_url('/mcp/records'),
                 'activityUrl' => app_url('/mcp/activity'),
             ] + $extra);
+        case 'desks':
+            require_once dirname(__DIR__) . '/estate/desks.php';
+            return view('settings/partials/desks.php', ['desks' => find_my_desks($pdo, $memberId)] + $extra);
         case 'profile':
         default:
             return view('settings/partials/profile.php', ['m' => $m, 'timezones' => timezone_identifiers_list()] + $extra);

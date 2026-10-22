@@ -7,8 +7,9 @@ of kind `desk` with an owner, an enrolment token, presence and a last-seen
 time (kernel `db/043`, `db/069`). This document is the contract between the
 two and the MaluOS side of it. The kernel side is specified for the owner's
 approval in the kernel repository, `docs/build-specs/desk-enrolment.md`;
-until it ships, the desk side is proven against a mock office that
-implements this contract (`python3 -m maluos_desk.mock_office`).
+it was approved and built the same day; the desk side is also proven
+against a mock office that implements this contract
+(`python3 -m maluos_desk.mock_office`).
 
 ## What enrolment does
 
@@ -181,10 +182,12 @@ retired this desk. `OfficeAction(open|heartbeat)` on the bus.
   ladder, the sensitivity gate, the budgets and the local ledger all apply
   unchanged. Peer gateways (Phase 9, FR-21) are a different thing: a
   fleet's hosts sharing GPUs.
-- **The kernel side is specified, not built, here.** The kernel's own plan
-  put desk enrolment at stage D2 and gates feature work on the owner's
-  approval of schema and endpoints; the spec there names the one migration
-  (`mcp_access_tokens.scope` gains `desk`; `desk_enrollment_codes`), the
-  four endpoints, the allow-list lines and the presence job. The mock
-  office is the contract's reference implementation and the boot test's
-  office.
+- **The kernel half was built after the owner approved it (2026-10-22).**
+  In maludb-os-core: db/187 (`mcp_access_tokens.scope` gains `desk`, bound
+  to the desk's location; `desk_enrollment_codes`; `locations.machine_id`),
+  the four endpoints, the code from Settings → Desks or
+  `bin/mint_desk_code.php`, the presence sweep, the allow-list lines; proof
+  `bin/test_desk_enrolment.php`. A real office answers `endpoints.models`,
+  `memory` and `actions` as null until their own kernel slice, so against
+  it `enroll` makes no gateway rung yet; the mock office answers all of
+  them and stays the boot test's office.

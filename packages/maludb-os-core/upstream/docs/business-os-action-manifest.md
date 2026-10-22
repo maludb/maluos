@@ -216,7 +216,7 @@ Actions (base `/locations/`):
 | `location_retire` | `retire.php` | **location** (revokes the desk's token) | — | ✔ | | `location.retire` | desk owner, super |
 | `location_delete` | `delete.php` | **location** (only one nothing points at) | — | ✔ | | `location.delete` | super |
 
-Desk enrollment happens in the desktop app's sign-in flow (screen only, Phase 6). A building or office is never retired while it still has active children, applications or resident members; the endpoint refuses and names them.
+Desk enrollment is screen-only and built (2026-10-22, db/187, `docs/build-specs/desk-enrolment.md`): a person mints a one-time code at Settings → Desks (or an operator with `bin/mint_desk_code.php`), and the MaluOS desktop exchanges it for a desk token at `POST /api/v1/desks/enroll`; the desk heartbeats its presence, reads records and activity as its owner, and leaves with `POST /api/v1/desks/leave`. A building or office is never retired while it still has active children, applications or resident members; the endpoint refuses and names them.
 
 Retire and delete are different remedies. **Retire** ends a location's working life and keeps it: the row, its specs and everything that happened there stay readable. **Delete** is for a location that should never have existed, and the super-admin alone may do it — refused, by name, the moment anything still points at it (locations inside it, residents, departments homed there, applications, agents, duties, runs, prompt-ledger entries, tasks, documents, employment profiles, stock locations). The activity trail survives either way: `activity_log` holds no foreign key to `locations`, and `location.delete` records what the location was.
 

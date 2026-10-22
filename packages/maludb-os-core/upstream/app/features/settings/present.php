@@ -185,11 +185,11 @@ function present_new_prompt_version_defaults(?array $current): array
 /**
  * The signed-in member's own Settings screen (find_member_by_id() + the two token lists).
  * A members row is the widest row in the database — password hash, TOTP secret, recovery
- * material — so this names the nine things the five sections show and nothing else. No token
+ * material — so this names the things the six sections show and nothing else. No token
  * value is here or anywhere in a read: a raw token exists only in the answer to the POST that
- * created it (tokens/create.php, 2fa/enroll.php, 2fa/enable.php).
+ * created it (tokens/create.php, 2fa/enroll.php, 2fa/enable.php, desks/code.php).
  */
-function present_my_settings(array $m, array $tokens, string $recordsUrl, string $activityUrl): array
+function present_my_settings(array $m, array $tokens, string $recordsUrl, string $activityUrl, array $desks = []): array
 {
     return [
         'profile' => [
@@ -212,5 +212,7 @@ function present_my_settings(array $m, array $tokens, string $recordsUrl, string
             'created_at' => json_ts($t['created_at'] ?? null),
         ], $tokens),
         'mcp' => ['records_url' => $recordsUrl, 'activity_url' => $activityUrl],
+        // db/187: the person's enrolled MaluOS desks. No code value is here: a code exists only in the answer to desks/code.php.
+        'desks' => array_map('present_desk', $desks),
     ];
 }

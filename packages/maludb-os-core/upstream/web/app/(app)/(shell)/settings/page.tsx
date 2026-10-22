@@ -6,7 +6,7 @@ import { mySettings } from "@/lib/schemas/settings";
 
 export const metadata: Metadata = { title: "Settings" };
 
-const SECTIONS = ["profile", "notifications", "security", "tokens", "calendar"];
+const SECTIONS = ["profile", "notifications", "security", "tokens", "desks", "calendar"];
 
 /** Screen `settings` — the member's own settings; a section is a URL (?section=). Data: GET /settings/ (login). */
 export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ section?: string }> }) {

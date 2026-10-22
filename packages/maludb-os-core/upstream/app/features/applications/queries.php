@@ -29,7 +29,7 @@ const APPLICATION_PAGE_SIZE = 25;
 const APPLICATION_SORT_ALLOWED = ['name', 'category', 'criticality', 'health_status'];
 const APPLICATION_CATEGORIES = ['platform', 'accounting', 'crm', 'calendar', 'email', 'documents',
     'storage', 'database', 'communication', 'automation', 'development', 'security', 'inventory', 'manufacturing',
-    'investor_relations', 'other'];
+    'investor_relations', 'capital_markets', 'other'];
 const ENDPOINT_KINDS = ['mcp', 'http_api', 'database', 'filesystem', 'smtp', 'imap', 'ssh', 'ui', 'webhook'];
 const ENDPOINT_AUTH_KINDS = ['none', 'bearer', 'oauth', 'basic', 'api_key', 'os_credential', 'mtls'];
 const ACCESS_CAPABILITIES = ['read', 'write', 'admin'];

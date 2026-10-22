@@ -16,3 +16,6 @@
 # Approval expiry — every 10 minutes: a request nobody decided in time expires, and the run that
 # waited on it is released (the screens sweep too; this covers the hours nobody looks)
 */10 * * * * php /var/www/bin/cron/approvals_expire.php   >> /var/log/maludb-os-cron.log 2>&1
+
+# Desk presence — every 5 minutes: a desk that missed three heartbeats is marked offline (db/187)
+*/5 * * * *  php /var/www/bin/cron/desk_presence.php     >> /var/log/maludb-os-cron.log 2>&1

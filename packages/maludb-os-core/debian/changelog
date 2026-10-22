@@ -1,3 +1,14 @@
+maludb-os-core (2026.10.22maluos1) resolute; urgency=medium
+
+  * Kernel re-vendored at 33c6343 (2026-10-22): desk enrolment, the kernel
+    half (db/187: scope-desk tokens, enrolment codes, the four endpoints
+    under /api/v1/desks/, Settings -> Desks, the presence job in the
+    crontab, the Apache allow-list lines, all of which the component
+    renders from the upstream deploy files); plus upstream since 43bb494
+    (MaluMail slices, the SEC Crowdfunding catalog row db/186).
+
+ -- Edward Honour <ed@maludb.org>  Thu, 22 Oct 2026 18:20:00 +0000
+
 maludb-os-core (2026.10.17maluos3) resolute; urgency=medium
 
   * Component: keep the first super-admin password in the vault's system

@@ -16,6 +16,7 @@ import { settingsSecret, type SecretAnswer } from "./secretActions";
 const NAV: [Data["section"], string, string][] = [
   ["profile", "feather-user", "Profile"], ["notifications", "feather-bell", "Notifications"],
   ["security", "feather-shield", "Security (2FA)"], ["tokens", "feather-key", "AI access (MCP)"],
+  ["desks", "feather-monitor", "Desks"],
 ];
 
 /** A save that PHP answers with a sentence ("Profile saved") shows it, as the section's notice did. */
@@ -69,6 +70,7 @@ export default function MySettings({ data, timeZone, isSuperAdmin = false }: { d
               {data.section === "notifications" && <Notifications data={data} />}
               {data.section === "security" && <Security data={data} />}
               {data.section === "tokens" && <Tokens data={data} timeZone={timeZone} />}
+              {data.section === "desks" && <Desks data={data} timeZone={timeZone} />}
             </div>
           </div>
         </div>
@@ -274,3 +276,61 @@ function Tokens({ data, timeZone }: { data: Data; timeZone: string }) {
   );
 }
 
+/**
+ * Settings → Desks (db/187, docs/build-specs/desk-enrolment.md): the person's enrolled MaluOS desktops, with
+ * presence, and "Enrol a desk", which mints a ONE-TIME code shown here and nowhere else (settingsSecret, like a
+ * new token). The desk runs `sudo maluctl office enroll <url> --code <code>` within fifteen minutes. Retiring a
+ * desk is the estate's own action (locations/retire.php: the desk's owner may).
+ */
+function Desks({ data, timeZone }: { data: Data; timeZone: string }) {
+  const [answer, setAnswer] = useState<SecretAnswer | null>(null);
+  const [name, setName] = useState("");
+  const [pending, startTransition] = useTransition();
+  const presence = (p: string) => p === "online" ? <span className="badge bg-success">online</span>
+    : p === "offline" ? <span className="badge bg-secondary">offline</span> : <span className="badge bg-light text-dark">unknown</span>;
+  return (
+    <Section title="Desks">
+      <p className="text-muted small">
+        A desk is a MaluOS desktop enrolled as yours: it shows in Work Locations with its presence, reads records and activity as you, and
+        its agents reach this office through your desk token. Make a code here, then on the desktop run the command it shows.
+      </p>
+      {answer?.status === "error" && <div className="alert alert-danger py-2">{answer.message}</div>}
+      {answer?.status === "ok" && answer.code && (
+        <div className="alert alert-success">
+          <strong>Enrolment code (shown once; valid 15 minutes):</strong> <code className="user-select-all">{answer.code}</code><br />
+          <small>On the desktop: <code className="user-select-all">sudo maluctl office enroll {answer.enrollUrl || data.mcp.records_url.replace(/\/mcp\/records$/, "/")} --code {answer.code}</code></small>
+        </div>
+      )}
+      <form className="mb-3" onSubmit={(e) => { e.preventDefault(); startTransition(async () => { setAnswer(await settingsSecret("deskCode", { name })); setName(""); }); }}>
+        <div className="input-group">
+          <input type="text" name="name" className="form-control" placeholder="Desk name (optional, e.g. Ed's laptop)"
+                 value={name} onChange={(e) => setName(e.target.value)} />
+          <button type="submit" className="btn btn-primary" disabled={pending}><i className="feather-plus me-1"></i>Enrol a desk</button>
+        </div>
+      </form>
+      <div className="table-responsive">
+        <table className="table table-hover mb-0">
+          <thead className="thead-light"><tr><th>Desk</th><th>Presence</th><th>Last seen</th><th>Machine</th><th className="text-end"></th></tr></thead>
+          <tbody>
+            {data.desks.length === 0 ? (
+              <tr><td colSpan={5} className="text-muted text-center py-3">No desks yet.</td></tr>
+            ) : data.desks.map((d) => (
+              <tr id={`desk-${d.id}`} key={d.id}>
+                <td><Link href={`/locations/${d.id}`}>{d.name}</Link></td>
+                <td>{presence(d.presence)}</td>
+                <td>{d.last_seen_at ? formatDate(d.last_seen_at, timeZone) : <small className="text-muted">never</small>}</td>
+                <td><small className="text-muted">{[d.hostname, d.os, d.app_version].filter(Boolean).join(" · ") || "—"}</small></td>
+                <td className="text-end">
+                  <ActionForm path="/locations/retire.php" confirm="Retire this desk? Its token stops working and it leaves Work Locations.">
+                    <input type="hidden" name="location" value={d.id} />
+                    <SubmitButton className="btn btn-sm btn-outline-danger">Retire</SubmitButton>
+                  </ActionForm>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Section>
+  );
+}

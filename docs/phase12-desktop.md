@@ -482,10 +482,13 @@ the rung and the files.
   in. The service reads the token from the vault once per enrolment and
   passes it to `maluctl office heartbeat` in the environment, so the vault
   ledger does not grow by a row every five minutes.
-- **The kernel half is specified, not built.** The kernel's checkpoint
-  gate is the owner's; the spec there is small (one migration, four PHP files,
-  one allow-list line, the presence job) and the mock office is the
-  contract's executable form until it lands.
+- **The kernel half followed the owner's approval, the same day.** db/187,
+  four PHP endpoints, the Desks section of Settings with the one-time
+  code, `bin/mint_desk_code.php`, the presence sweep, the allow-list
+  lines, a 39-check proof. The office publishes no model, memory or
+  actions endpoints to desks yet (null in its answer), so a real
+  enrolment makes no gateway rung until that kernel slice; the mock
+  office answers all three and stays the boot test's office.
 
 ### The test
 
@@ -507,13 +510,12 @@ notification, and `leave`.
 
 ## Next slices
 
-1. **Desk enrolment, the office half.** The kernel spec
-   (`docs/build-specs/desk-enrolment.md` in maludb-os-core) once approved:
-   one migration, the four endpoints, the allow-list line, the presence job, the
-   code in Settings; then the model endpoint for desks (`surface = desk`
-   on the prompt ledger) and the memory and actions MCP servers published
-   to desks, which turn `endpoints.models`, `memory` and `actions` from
-   null into real ones with no change on the desk.
+1. **Desks at a real office.** The kernel half is built and vendored
+   (maludb-os-core `docs/build-specs/desk-enrolment.md`; the server image
+   boot test enrols a desk against it). Next is the kernel's next slice: the model
+   endpoint for desks (`surface = desk` on the prompt ledger) and the memory
+   and actions MCP servers published to desks, which turn `endpoints.models`,
+   `memory` and `actions` from null into real ones with no change on the desk.
 2. **Updates, further.** A MaluOS release upgrade path (26.04 to the
    next LTS) and DEP-11 metadata for the MaluOS repository so GNOME
    Software lists MaluOS packages.
@@ -541,11 +543,11 @@ built 2026-10-22 and released in 26.04.20261022; slice 6 built
 
 | Artefact | Result |
 |---|---|
-| Packages | maluos-desk 0.1.0 (new), maluos-desktop-session 0.4.0, maluos-agent 0.2.1, maluos-meta 0.2.4 |
+| Packages | maluos-desk 0.1.1 (new), maluos-desktop-session 0.4.0, maluos-agent 0.2.1, maluos-meta 0.2.4, maludb-os-core 2026.10.22maluos1 (vendored at kernel commit 33c6343) |
 | Local test | PASS, 29 checks (tests/desk-local-test.sh against the mock office and the real vault) |
-| Images | desktop rootfs, qcow2 and ISO rebuilt 2026-10-22 and copied to the internal share (ISO sha 357f35…, qcow2 4676c4…); server images unchanged (26.04.20261022) |
-| Tests | desktop UEFI boot test 186 ok / 0 FAIL (all 27 slice 6 checks pass against the mock office: enrolment, the vault token, the office rung with the vault's use row, the delegated agent, the agent's MCP call, the session's presence and notifications, the Desk, retirement, leave); ISO apt check PASS |
-| Kernel half | spec written in maludb-os-core (docs/build-specs/desk-enrolment.md), uncommitted there, awaiting the owner |
+| Images | desktop rootfs, qcow2 and ISO rebuilt 2026-10-22 and copied to the internal share (ISO sha 357f35…, qcow2 4676c4…; built with maluos-desk 0.1.0); server rootfs, qcow2 and ISO rebuilt 2026-10-22 with the re-vendored kernel (ISO sha 91345a…, qcow2 91da5c…) |
+| Tests | desktop UEFI boot test 186 ok / 0 FAIL (all 27 slice 6 checks pass against the mock office: enrolment, the vault token, the office rung with the vault's use row, the delegated agent, the agent's MCP call, the session's presence and notifications, the Desk, retirement, leave); server UEFI boot test 122 ok / 0 FAIL, including the office half against the real kernel (enrol through Apache with a wrong code refused, a code minted with `bin/mint_desk_code.php`, heartbeat, `me`, leave answering 410, the presence job in www-data's crontab); ISO apt check PASS for both |
+| Kernel half | approved, built and committed in maludb-os-core 2026-10-22 (33c6343: db/187, the endpoints, Settings → Desks, the sweep; proof 39 checks); re-vendored here as maludb-os-core 2026.10.22maluos1 and in the server images above |
 
 ### Slice 5 status (2026-10-22)
 

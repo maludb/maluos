@@ -161,7 +161,7 @@ proven above.)*
 Goal: "Ed's Desk" exists — a desktop install that is a location with resident agents, using the office brain plus local files.
 
 1. **Shell decision + skeleton.** Tauri (recommended) or Electron per the open question; chat-first UI with embedded web views of the hosted screens.
-2. **Desk enrollment.** Install → sign in → register as a desk location with the server registry; token in the OS keychain; presence heartbeat.
+2. **Desk enrollment.** Install → sign in → register as a desk location with the server registry; token in the OS keychain; presence heartbeat. *(Kernel half built 2026-10-22, `docs/build-specs/desk-enrolment.md`: a one-time code from Settings → Desks, `POST /api/v1/desks/enroll|heartbeat|me|leave` with a scope-`desk` token, the presence sweep; the desk half is MaluOS's `maluctl office`, which keeps the token in the person's vault rather than a keychain. The model endpoint for desks and the memory/actions MCP servers published to desks are still owed.)*
 3. **Local resource tools.** Folder opt-in panel, file read/summarize, spreadsheet/PDF opening, drop-folder → Documents import with explicit confirmation.
 4. **Desk runtime.** The same agent-runner + harness registry from phase 5 running on the desk, telemetry shipped to the tenant's prompt ledger; the desk office manager as its orchestrator.
 5. **Cross-location tasking.** Brokered requests through the server task queue in both directions, consent grants (standing or one-off), offline queueing with visible status.

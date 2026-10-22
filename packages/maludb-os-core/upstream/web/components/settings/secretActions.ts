@@ -5,8 +5,8 @@ import { redirect } from "next/navigation";
 import { ApiError, apiPost } from "@/lib/api";
 
 /**
- * The four Settings writes that hand back a ONE-TIME SECRET (owner's decision 3, 2026-09-19):
- * a new API token, the TOTP secret + QR, the recovery codes. PHP puts the
+ * The Settings writes that hand back a ONE-TIME SECRET (owner's decision 3, 2026-09-19):
+ * a new API token, the TOTP secret + QR, the recovery codes, a desk enrolment code. PHP puts the
  * secret in its own field of the JSON answer — never in `did`, which is logged. This action
  * returns it to the component that asked, which keeps it in component state only: it is never
  * written to a URL, a cookie, storage or a log, and it is gone when the page is left.
@@ -14,16 +14,19 @@ import { ApiError, apiPost } from "@/lib/api";
  */
 export type SecretAnswer =
   | { status: "error"; message: string; expired?: boolean }
-  | { status: "ok"; token?: string; enrolling?: boolean; qrDataUri?: string; manualKey?: string; recoveryCodes?: string[] };
+  | { status: "ok"; token?: string; enrolling?: boolean; qrDataUri?: string; manualKey?: string; recoveryCodes?: string[];
+      code?: string; codeExpiresAt?: string; enrollUrl?: string };
 
 const PATHS = {
   createToken: "/settings/tokens/create.php",
   enroll2fa: "/settings/2fa/enroll.php",
   enable2fa: "/settings/2fa/enable.php",
+  deskCode: "/settings/desks/code.php",       // db/187: a one-time desk enrolment code
 } as const;
 
 export async function settingsSecret(kind: keyof typeof PATHS, fields: Record<string, string>): Promise<SecretAnswer> {
-  let answer: { token?: string; enrolling?: boolean; qr_data_uri?: string; manual_key?: string; recovery_codes?: string[] };
+  let answer: { token?: string; enrolling?: boolean; qr_data_uri?: string; manual_key?: string; recovery_codes?: string[];
+                code?: string; expires_at?: string; enroll_url?: string };
   try {
     answer = await apiPost(PATHS[kind], fields);
   } catch (err) {
@@ -36,5 +39,6 @@ export async function settingsSecret(kind: keyof typeof PATHS, fields: Record<st
   return {
     status: "ok", token: answer.token, enrolling: answer.enrolling,
     qrDataUri: answer.qr_data_uri, manualKey: answer.manual_key, recoveryCodes: answer.recovery_codes,
+    code: answer.code, codeExpiresAt: answer.expires_at, enrollUrl: answer.enroll_url,
   };
 }

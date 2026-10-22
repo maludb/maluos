@@ -97,7 +97,10 @@ export const mySettings = z.object({
   security: z.object({ enabled: z.boolean() }),
   tokens: z.array(z.object({ id: z.number().int(), label: z.string(), last_used_at: z.string().nullable(), created_at: z.string().nullable() })),
   mcp: z.object({ records_url: z.string(), activity_url: z.string() }),
-  section: z.enum(["profile", "notifications", "security", "tokens"]),
+  /** db/187: the person's enrolled MaluOS desks (Settings → Desks); a code value is never in a read. */
+  desks: z.array(z.object({ id: z.number().int(), name: z.string(), presence: z.string(), last_seen_at: z.string().nullable(),
+    enrolled_at: z.string().nullable(), hostname: z.string().nullable(), os: z.string().nullable(), app_version: z.string().nullable() })).default([]),
+  section: z.enum(["profile", "notifications", "security", "tokens", "desks"]),
   timezones: z.array(z.string()),
   default_application: defaultApplication.default({ application_id: null, scope_id: null, options: [] }),
 });
