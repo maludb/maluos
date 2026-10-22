@@ -8,6 +8,8 @@
 maluos-base
 maluos-desktop-branding
 maluos-desktop-session
+# the desk's enrolment with a Business OS office (maluctl office)
+maluos-desk
 # session and shell
 gdm3
 gnome-shell

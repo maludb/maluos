@@ -1,0 +1,28 @@
+Source: maluos-desk
+Section: admin
+Priority: optional
+Maintainer: Edward Honour <ed@maludb.org>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.6.2
+Homepage: https://github.com/maludb/maluos
+Rules-Requires-Root: no
+
+Package: maluos-desk
+Architecture: all
+Depends: ${misc:Depends}, python3 (>= 3.12), python3-yaml, maluos-firstboot (>= 0.1.7), maluos-vault (>= 0.3.0)
+Recommends: maluos-gateway (>= 0.3.3), maluos-agent (>= 0.2.1)
+Description: MaluOS desk enrolment with a Business OS office: maluctl office
+ A MaluOS desktop joins a Business OS office as a desk, a location in the
+ office's estate that belongs to the person at the keyboard. `sudo maluctl
+ office enroll URL --code CODE` exchanges a one-time code the office gave
+ the person for a desk token, keeps the token in the person's vault
+ compartment (office-desk-token), records the office and its endpoints in
+ /etc/maluos/office.yaml and /etc/maluos/office.env (for agents), and makes
+ the office's model endpoint a rung of this desk's inference gateway
+ (--model office) that is applied with the token on the caller's behalf.
+ .
+ `maluctl office heartbeat` tells the office the desk is online (the
+ desktop session sends one every few minutes while the person is signed
+ in); `status` shows the enrolment and the office's view of it; `leave`
+ retires the desk and removes everything enrolment added. A mock office
+ (python3 -m maluos_desk.mock_office) implements the contract for tests.

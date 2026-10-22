@@ -27,7 +27,10 @@ none` makes a system agent (operators only).
 The agent's process sees MALUOS_PRINCIPAL, MALUOS_GATEWAY_SOCKET,
 MALUOS_VAULT_SOCKET, MALUDB_MC2DBD_URL, OPENAI_BASE_URL (the TCP listener,
 when enabled) and, with --token, the gateway token as the credential file
-$CREDENTIALS_DIRECTORY/gateway-token.
+$CREDENTIALS_DIRECTORY/gateway-token. On a desk enrolled with an office
+(maluctl office) it also sees MALUOS_OFFICE_* from /etc/maluos/office.env:
+the office's URL and MCP endpoints, and the vault name of the desk token
+the owner may delegate or grant to it.
 """
 import json, os, pwd, re, subprocess, sys
 sys.path.insert(0, "/usr/lib/maluos")
@@ -177,9 +180,13 @@ def run(a):
             sys.exit("run NAME -- CMD...")
         need_root()
         env = dict(os.environ)
-        for line in open(f"{AGENTS}/{n}.env"):
-            if "=" in line and not line.startswith("#"):
-                k, v = line.rstrip("\n").split("=", 1); env[k] = v.strip('"')
+        for f in ("/etc/maluos/office.env", f"{AGENTS}/{n}.env"):     # the unit's EnvironmentFile order: the agent's own last
+            try:
+                for line in open(f):
+                    if "=" in line and not line.startswith("#"):
+                        k, v = line.rstrip("\n").split("=", 1); env[k] = v.strip('"')
+            except OSError:
+                pass
         env["HOME"] = f"{HOME}/{n}"
         os.execvpe("runuser", ["runuser", "-u", f"agent-{n}", "--", *a], env)
     if cmd == "create":

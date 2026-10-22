@@ -9,8 +9,8 @@ Rules-Requires-Root: no
 
 Package: maluos-desktop-session
 Architecture: all
-Depends: ${misc:Depends}, python3 (>= 3.12), python3-gi, gir1.2-glib-2.0, gir1.2-gtk-4.0, gir1.2-adw-1, gnome-shell (>= 50), gnome-shell (<< 51), maluos-desktop-branding (>= 0.3.2)
-Recommends: maluos-gateway (>= 0.3.2), maluos-vault (>= 0.3.0), maluos-agent (>= 0.2.0), maluos-firstboot (>= 0.1.7), gnome-software, xdg-terminal-exec
+Depends: ${misc:Depends}, python3 (>= 3.12), python3-yaml, python3-gi, gir1.2-glib-2.0, gir1.2-gtk-4.0, gir1.2-adw-1, gnome-shell (>= 50), gnome-shell (<< 51), maluos-desktop-branding (>= 0.3.2)
+Recommends: maluos-gateway (>= 0.3.2), maluos-vault (>= 0.3.0), maluos-agent (>= 0.2.1), maluos-firstboot (>= 0.1.7), maluos-desk (>= 0.1.0), gnome-software, xdg-terminal-exec
 Description: MaluOS agent-aware session: indicator, notifications, session service
  A per-user service (com.maluos.Session on the session bus, D-Bus
  activated) that reads what the OS already knows about this desk: the
@@ -34,3 +34,9 @@ Description: MaluOS agent-aware session: indicator, notifications, session servi
  (pending updates by source, the automatic policy, a due restart); updates
  that wait for the user become one notification whose Install button opens
  GNOME Software's updates page, and the Desk's System page shows them.
+ .
+ The office: on a desk enrolled with a Business OS office (maluos-desk,
+ maluctl office) the service heartbeats the office while the person is
+ signed in and says offline when the session ends, so the office's estate
+ shows the desk's presence; the indicator and the Desk show the office,
+ what it publishes to desks, and whether it still accepts this desk.

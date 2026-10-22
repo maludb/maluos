@@ -20,6 +20,7 @@ const IFACE_XML = `<node>
   <method name="AgentAction"><arg type="s" name="name" direction="in"/><arg type="s" name="action" direction="in"/></method>
   <method name="RequestDecide"><arg type="i" name="id" direction="in"/><arg type="s" name="decision" direction="in"/><arg type="s" name="expires" direction="in"/><arg type="s" name="json" direction="out"/></method>
   <method name="UpdateAction"><arg type="s" name="action" direction="in"/></method>
+  <method name="OfficeAction"><arg type="s" name="action" direction="in"/></method>
   <signal name="StateChanged"><arg type="s" name="json"/></signal>
   <property name="Version" type="s" access="read"/>
 </interface>
@@ -138,7 +139,7 @@ class Indicator extends PanelMenu.Button {
         const asked = (s.vault?.requests || []).some(r => r.mine_to_decide);
         const down = (s.gateway?.backends || []).some(b => b.enabled && !b.healthy) || asked;
         const over = Object.values(s.me?.budget || {}).some(b => b.spent !== null && b.spent >= b.limit);
-        const warn = Object.values(s.me?.budget || {}).some(b => b.spent !== null && b.spent >= b.warn_at * b.limit) || s.updates?.reboot_required;
+        const warn = Object.values(s.me?.budget || {}).some(b => b.spent !== null && b.spent >= b.warn_at * b.limit) || s.updates?.reboot_required || s.office?.revoked || s.office?.presence === 'unreachable';
         if (failed || over)
             this._icon.add_style_class_name('maluos-bad');
         else if (down || warn)
@@ -169,6 +170,7 @@ class Indicator extends PanelMenu.Button {
         else
             m.addMenuItem(new InfoItem('Memory host: not provisioned on this desk', true));
         this._updatesItem(m, s.updates || {});
+        this._officeItem(m, s.office || {});
 
         m.addMenuItem(new PopupMenu.PopupSeparatorMenuItem('Agents'));
         const agents = [...(s.agents || [])].sort((a, b) => Number(b.mine) - Number(a.mine) || a.name.localeCompare(b.name));
@@ -284,6 +286,34 @@ class Indicator extends PanelMenu.Button {
             it.connect('activate', () => this._proxy?.UpdateActionRemote(action, (_r, error) => {
                 if (error)
                     Main.notify(`Updates: ${action} failed`, error.message);
+            }));
+            item.menu.addMenuItem(it);
+        }
+        m.addMenuItem(item);
+    }
+
+    _officeItem(m, o) {
+        if (!o.enrolled) {
+            m.addMenuItem(new InfoItem('Office: not enrolled (sudo maluctl office enroll URL --code CODE)', true));
+            return;
+        }
+        const name = o.office?.name || o.url;
+        const pres = {retired: 'retired by the office', online: 'online', unreachable: 'unreachable', unknown: 'checking in…'}[o.presence] || o.presence;
+        const item = new PopupMenu.PopupSubMenuMenuItem(`Office: ${name} · ${pres}`);
+        if (o.revoked || o.presence === 'unreachable')
+            item.label.add_style_class_name('maluos-dot-warn');
+        item.menu.addMenuItem(new InfoItem(`desk ${o.desk?.name || '?'} (#${o.desk?.id ?? '?'}) · ${o.url}`, true));
+        item.menu.addMenuItem(new InfoItem(`you: ${o.owner?.display_name || o.owner?.principal || '?'}${o.owner?.email ? ' <' + o.owner.email + '>' : ''}`, true));
+        const eps = Object.entries(o.endpoints || {}).filter(([k, v]) => k !== 'models' && v).map(([k]) => k);
+        item.menu.addMenuItem(new InfoItem(`published: ${eps.join(', ') || 'nothing'}${o.endpoints?.models ? ' · models ' + o.endpoints.models.join(', ') : ''}${o.gateway ? ' · --model ' + o.gateway : ''}`, true));
+        item.menu.addMenuItem(new InfoItem(o.last_heartbeat_at ? `last check-in ${o.last_heartbeat_at}` : 'no check-in yet', true));
+        if (o.last_error)
+            item.menu.addMenuItem(new InfoItem(o.last_error, true));
+        for (const [label, action] of [['Open office…', 'open'], ['Check in now', 'heartbeat']]) {
+            const it = new PopupMenu.PopupMenuItem(label);
+            it.connect('activate', () => this._proxy?.OfficeActionRemote(action, (_r, error) => {
+                if (error)
+                    Main.notify(`Office: ${action} failed`, error.message);
             }));
             item.menu.addMenuItem(it);
         }

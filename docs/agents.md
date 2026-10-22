@@ -61,6 +61,16 @@ rows and alerts; when an agent is refused one of the owner's secrets, the
 refusal files a grant request the owner answers from the desk or with
 `maluctl secret approve`.
 
+On a desk enrolled with a Business OS office (Phase 12 slice 6,
+docs/desk-enrolment.md) every unit also loads /etc/maluos/office.env: the
+office's URL and MCP endpoints (`MALUOS_OFFICE_*`) and the vault name of
+the desk token. The owner lets an agent use the office's models through
+the gateway with `maluctl secret delegate --to agent:NAME --secret
+office-desk-token` (`--model office`), and read the token for the office's
+MCP servers with `maluctl secret grant office-desk-token --to agent:NAME
+--level read`; without either, an agent sees the office's addresses and
+nothing more.
+
 Not yet: polkit rules for agents that need to touch the system beyond the
 sockets, bubblewrap or nspawn sandboxes for agents that run untrusted code,
 and agent-specific resource limits. The unit template is the place for all

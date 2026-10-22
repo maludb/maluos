@@ -27,6 +27,7 @@ XML = """<node><interface name="com.maluos.Session1">
   <method name="AgentAction"><arg type="s" name="name" direction="in"/><arg type="s" name="action" direction="in"/></method>
   <method name="RequestDecide"><arg type="i" name="id" direction="in"/><arg type="s" name="decision" direction="in"/><arg type="s" name="expires" direction="in"/><arg type="s" name="json" direction="out"/></method>
   <method name="UpdateAction"><arg type="s" name="action" direction="in"/></method>
+  <method name="OfficeAction"><arg type="s" name="action" direction="in"/></method>
   <signal name="StateChanged"><arg type="s" name="json"/></signal>
 </interface></node>"""
 
@@ -209,6 +210,7 @@ class Desk(Adw.ApplicationWindow):
         grp = self.group("system", "This desk", f"{h.get('pretty_name', 'MaluOS')} · {h.get('hostname', '')}")
         mem = h.get("memory")
         grp.add(row("Memory host", f"tenant {mem.get('tenant')} on this desk" if mem else "not provisioned on this desk", "drive-harddisk-symbolic"))
+        self.render_office(s)
         if not u.get("available"):
             self.group("system", "Software updates", f"Not readable: {u.get('error') or 'maluctl update is not installed'}"); return
         manual = u.get("manual_count", (u.get("pending_count") or 0) - (u.get("automatic_count") or 0))
@@ -242,6 +244,28 @@ class Desk(Adw.ApplicationWindow):
                             "security-high-symbolic" if p.get("security") else "package-x-generic-symbolic"))
             if len(pending) > 40:
                 grp.add(row(f"… and {len(pending) - 40} more", "maluctl update status lists them all"))
+
+    def render_office(self, s):
+        o = s.get("office") or {}
+        if not o.get("enrolled"):
+            self.group("system", "Office", "This desk is not enrolled with a Business OS office. From a terminal: sudo maluctl office enroll URL --code CODE (the office shows the code once).")
+            return
+        name = (o.get("office") or {}).get("name") or o.get("url")
+        pres = {"retired": "retired by the office", "online": "online", "unreachable": "unreachable", "unknown": "checking in…"}.get(o.get("presence"), o.get("presence"))
+        d, w = o.get("desk") or {}, o.get("owner") or {}
+        grp = self.group("system", "Office", f"{name} · desk {d.get('name') or '?'} (#{d.get('id') or '?'}) · {pres}"
+                         + (f" · last check-in {o['last_heartbeat_at']}" if o.get("last_heartbeat_at") else "") + (f"\n{o['last_error']}" if o.get("last_error") else ""))
+        r = row("This desk", f"{w.get('display_name') or w.get('principal') or 'you'}" + (f" <{w['email']}>" if w.get("email") else "") + f" · {o.get('url')}",
+                "network-workgroup-symbolic" if o.get("ok") else "network-offline-symbolic")
+        r.add_suffix(button("Open office…", lambda: self.office("open")))
+        r.add_suffix(button("Check in now", lambda: self.office("heartbeat")))
+        grp.add(r)
+        eps = [k for k, v in (o.get("endpoints") or {}).items() if k != "models" and v]
+        models = (o.get("endpoints") or {}).get("models")
+        grp.add(row("Published to desks", (", ".join(eps) or "nothing") + (f" · models {', '.join(models)}" if models else " · no models") + (f" · --model {o['gateway']} on this desk's gateway" if o.get("gateway") else ""), "network-server-symbolic"))
+        grp.add(row("Agents", "the office's endpoints are in /etc/maluos/office.env; delegate the token: maluctl secret delegate --to agent:NAME --secret office-desk-token", "system-run-symbolic"))
+        if o.get("revoked"):
+            grp.add(row("Retired", "the office no longer accepts this desk's token; sudo maluctl office leave removes the enrolment", "dialog-warning-symbolic"))
 
     # -- actions
     def toast(self, text):
@@ -278,6 +302,18 @@ class Desk(Adw.ApplicationWindow):
                 self.toast(f"Updates: {action} failed: {str(e)[:100]}")
         self.proxy.call("UpdateAction", GLib.Variant("(s)", (action,)), 0, 30000, None, done, None)
 
+    def office(self, action):
+        if not self.proxy:
+            return
+        def done(proxy, res, _):
+            try:
+                proxy.call_finish(res)
+                if action == "heartbeat":
+                    self.toast("Checking in with the office…")
+            except Exception as e:
+                self.toast(f"Office: {action} failed: {str(e)[:100]}")
+        self.proxy.call("OfficeAction", GLib.Variant("(s)", (action,)), 0, 30000, None, done, None)
+
     def set_state(self, text):
         try:
             self.state = json.loads(text) if text else None
@@ -312,8 +348,10 @@ class App(Adw.Application):
         if self.self_test:
             def report():
                 s = self.win.state or {}
+                o = s.get("office") or {}
                 print(f"self-test ok: service {'reachable' if s else 'unreachable'}, {len(s.get('agents') or [])} agents, "
-                      f"{len((s.get('vault') or {}).get('requests') or [])} requests, pages {', '.join(self.win.pages)}")
+                      f"{len((s.get('vault') or {}).get('requests') or [])} requests, pages {', '.join(self.win.pages)}, "
+                      + (f"office {(o.get('office') or {}).get('name') or o.get('url')} ({o.get('presence')})" if o.get("enrolled") else "no office"))
                 self.quit(); return False
             GLib.timeout_add(1500, report)
 

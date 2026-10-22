@@ -1,3 +1,15 @@
+maluos-session (0.4.0) resolute; urgency=medium
+
+  * Desk enrolment (Phase 12 slice 6): the state carries `office` (from
+    /etc/maluos/office.yaml and the last heartbeat); an office thread runs
+    `maluctl office heartbeat` every heartbeat_s while the person is signed
+    in, with the desk token read from the vault once, and says offline on
+    SIGTERM; notifications when the desk joins, when the office retires it,
+    when the office is unreachable and back; OfficeAction(open|heartbeat);
+    the indicator's Office submenu; the Desk's Office group on System.
+
+ -- Edward Honour <ed@maludb.org>  Thu, 22 Oct 2026 16:30:00 +0000
+
 maluos-session (0.3.1) resolute; urgency=medium
 
   * The updates reading runs in its own thread: opening the apt cache can

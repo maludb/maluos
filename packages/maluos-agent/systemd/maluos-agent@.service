@@ -9,6 +9,8 @@ Type=simple
 User=agent-%i
 Group=agent-%i
 EnvironmentFile=/etc/maluos/agents/%i.env
+# The office this desk is enrolled with, when it is (maluctl office; MALUOS_OFFICE_*).
+EnvironmentFile=-/etc/maluos/office.env
 Environment=HOME=/var/lib/maluos/agents/%i
 WorkingDirectory=/var/lib/maluos/agents/%i
 ExecStart=/bin/sh -c 'exec ${MALUOS_AGENT_EXEC}'

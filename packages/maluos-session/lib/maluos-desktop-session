@@ -37,7 +37,7 @@ updates page); a pending restart becomes one with Restart.
 """
 import http.client, json, os, pwd, re, socket, subprocess, sys, threading, time, urllib.parse
 
-VERSION = "0.3.1"
+VERSION = "0.4.0"
 BUS_NAME, OBJ, IFACE = "com.maluos.Session", "/com/maluos/Session", "com.maluos.Session1"
 GW = os.environ.get("MALUOS_GATEWAY_SOCKET", "/run/maluos/gateway.sock")
 VAULT = os.environ.get("MALUOS_VAULT_SOCKET", "/run/maluos/vault.sock")
@@ -47,6 +47,9 @@ POLL = int(os.environ.get("MALUOS_SESSION_POLL", "20"))
 UPDATES_EVERY = int(os.environ.get("MALUOS_SESSION_UPDATES_POLL", "900"))
 UPDATES_RETRY = 120              # after a failed reading
 UPDATES_TIMEOUT = int(os.environ.get("MALUOS_SESSION_UPDATES_TIMEOUT", "600"))
+OFFICE_CONF = os.environ.get("MALUOS_OFFICE_CONF", "/etc/maluos/office.yaml")
+OFFICE_SECRET = "office-desk-token"
+OFFICE_RETRY = 60                # after a failed heartbeat
 UPDATE_MARKS = ("/var/lib/dpkg/status", "/var/lib/apt/lists", "/var/lib/apt/periodic/update-success-stamp",
                 "/var/lib/apt/periodic/unattended-upgrades-stamp", "/var/run/reboot-required")
 NAME_RE = re.compile(r"^[a-z][a-z0-9-]{0,30}$")
@@ -59,6 +62,7 @@ XML = """<node>
   <method name="AgentAction"><arg type="s" name="name" direction="in"/><arg type="s" name="action" direction="in"/></method>
   <method name="RequestDecide"><arg type="i" name="id" direction="in"/><arg type="s" name="decision" direction="in"/><arg type="s" name="expires" direction="in"/><arg type="s" name="json" direction="out"/></method>
   <method name="UpdateAction"><arg type="s" name="action" direction="in"/></method>
+  <method name="OfficeAction"><arg type="s" name="action" direction="in"/></method>
   <signal name="StateChanged"><arg type="s" name="json"/></signal>
   <property name="Version" type="s" access="read"/>
 </interface>
@@ -267,6 +271,35 @@ def _marks():
     return out
 
 
+def office_conf():
+    """/etc/maluos/office.yaml, written by `maluctl office enroll` (no secret in it), or None."""
+    try:
+        import yaml
+        with open(OFFICE_CONF) as fh:
+            return yaml.safe_load(fh) or None
+    except (OSError, ImportError, ValueError):
+        return None
+
+
+def office_state(conf, hb):
+    """What the desk knows about its office: the enrolment, and the last heartbeat's outcome."""
+    if not conf:
+        return {"enrolled": False}
+    hb = dict(hb or {})
+    hb.pop("_at", None)
+    eps = conf.get("endpoints") or {}
+    models = eps.get("models") if isinstance(eps.get("models"), dict) else None
+    d = hb.get("desk") or conf.get("desk") or {}
+    g = conf.get("gateway") or {}
+    presence = "retired" if hb.get("revoked") else "online" if hb.get("ok") else "unreachable" if hb.get("error") else "unknown"
+    return {"enrolled": True, "url": conf.get("url"), "office": conf.get("office") or {}, "surface": conf.get("surface"),
+            "desk": {"id": d.get("id"), "name": d.get("name"), "status": d.get("status")}, "owner": conf.get("owner") or {},
+            "heartbeat_s": conf.get("heartbeat_s"), "enrolled_at": conf.get("enrolled_at"),
+            "endpoints": {**{k: bool(eps.get(k)) for k in ("records", "activity", "memory", "actions")}, "models": list(models.get("models") or []) if models else None},
+            "gateway": g.get("alias") or g.get("backend"), "presence": presence, "ok": bool(hb.get("ok")),
+            "last_heartbeat_at": hb.get("ts") if hb.get("ok") else None, "last_error": hb.get("error"), "revoked": bool(hb.get("revoked"))}
+
+
 def updates_state():
     """Software updates as `maluctl update status --json` reports them (python3-apt, no privileges).
     The marks (mtimes of apt's and dpkg's state) are taken before the read, so a change during it
@@ -298,7 +331,12 @@ class Service:
         self.Gio, self.GLib = Gio, GLib
         self.once = once
         self.state = {"version": VERSION, "ts": 0, "host": host_state(), "gateway": {"available": False}, "me": {}, "vault": {}, "agents": [], "alerts": [],
-                      "updates": {"available": False}}
+                      "updates": {"available": False}, "office": {"enrolled": False}}
+        self.office_hb = None            # the last heartbeat's outcome (office thread writes, under office_lock)
+        self.office_lock = threading.Lock()
+        self.office_wake = threading.Event()
+        self.office_force = False
+        self.office_token = None         # the desk token, read from the vault once per enrolment (not persisted)
         self.updates = None              # the last reading (updates thread writes, under updates_lock)
         self.updates_lock = threading.Lock()
         self.updates_wake = threading.Event()
@@ -387,8 +425,10 @@ class Service:
         with self.updates_lock:
             u = {k: v for k, v in (self.updates or {"available": False}).items() if not k.startswith("_")}
             u["reading"] = self.updates_reading
+        with self.office_lock:
+            hb = self.office_hb
         st = {"version": VERSION, "ts": int(time.time()), "host": host_state(), "gateway": gw, "me": me_state(me),
-              "vault": vault, "agents": agents_state(units, mine), "alerts": alerts_state(), "updates": u}
+              "vault": vault, "agents": agents_state(units, mine), "alerts": alerts_state(), "updates": u, "office": office_state(office_conf(), hb)}
         return st
 
     def updates_loop(self):
@@ -416,6 +456,84 @@ class Service:
                 with self.updates_lock:
                     self.updates_reading = False
             self.updates_wake.wait(POLL); self.updates_wake.clear()
+
+    # -- the office (slice 6): presence heartbeats while the person is signed in
+    def office_heartbeat(self, presence="online"):
+        """`maluctl office heartbeat --json` as this user, with the cached token when there is one."""
+        env = dict(os.environ)
+        if self.office_token:
+            env["MALUOS_OFFICE_TOKEN"] = self.office_token
+        try:
+            r = subprocess.run(["maluctl", "office", "heartbeat", "--json", "--presence", presence], capture_output=True, text=True, timeout=60, env=env)
+            d = json.loads(r.stdout.strip().splitlines()[-1])
+        except Exception as e:
+            d = {"ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "ok": False, "presence": presence, "revoked": False,
+                 "error": f"maluctl office heartbeat: {e.__class__.__name__}: {str(e)[:120]}"}
+        d["_at"] = time.time()
+        return d
+
+    def office_loop(self):
+        """Its own thread: while /etc/maluos/office.yaml exists, heartbeat every heartbeat_s (OFFICE_RETRY after a
+        failure; thrice the interval once the office retired the desk), or when asked (OfficeAction heartbeat)."""
+        while True:
+            try:
+                conf = office_conf()
+                with self.office_lock:
+                    force = self.office_force; self.office_force = False; prev = self.office_hb
+                if not conf:
+                    if prev is not None or self.office_token:
+                        with self.office_lock:
+                            self.office_hb = None
+                        self.office_token = None
+                        self.refresh_soon(0.5)
+                else:
+                    every = int(conf.get("heartbeat_s") or 300)
+                    since = time.time() - (prev or {}).get("_at", 0)
+                    due = force or prev is None or since >= (every * 3 if prev.get("revoked") else every if prev.get("ok") else OFFICE_RETRY)
+                    if due:
+                        if not self.office_token:
+                            try:
+                                st, body = get(VAULT, f"/v1/secrets/{OFFICE_SECRET}/value", {"mode": "read", "purpose": "office heartbeat"})
+                                if st != 200 or not body.get("value"):
+                                    raise RuntimeError(f"{st} {body.get('error') or ''}: {body.get('message') or ''}".strip())
+                                self.office_token = body["value"]
+                            except Exception as e:
+                                log(f"office: token not readable from the vault ({str(e)[:100]}); the heartbeat command will try itself")
+                        d = self.office_heartbeat("online")
+                        if d.get("revoked"):
+                            self.office_token = None
+                        if not d.get("ok"):
+                            log(f"office: heartbeat failed: {d.get('error')}")
+                        with self.office_lock:
+                            self.office_hb = d
+                        self.refresh_soon(0.5)
+            except Exception as e:
+                log(f"office: {e.__class__.__name__}: {str(e)[:160]}")
+            self.office_wake.wait(POLL); self.office_wake.clear()
+
+    def office_goodbye(self):
+        """The session ends: tell the office the desk is offline (best effort, a few seconds)."""
+        if not office_conf():
+            return
+        try:
+            d = self.office_heartbeat("offline")
+            log("office: said offline" if d.get("ok") else f"office: offline heartbeat failed: {d.get('error')}")
+        except Exception as e:
+            log(f"office: goodbye: {str(e)[:100]}")
+
+    def office_action(self, action):
+        """open: the office in the browser; heartbeat: check in now."""
+        if action == "open":
+            conf = office_conf()
+            if not conf:
+                raise ValueError("not enrolled with an office")
+            subprocess.Popen(["xdg-open", conf.get("url")], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        elif action == "heartbeat":
+            with self.office_lock:
+                self.office_force = True
+            self.office_wake.set()
+        else:
+            raise ValueError(f"unknown office action {action!r} (open, heartbeat)")
 
     def poll_loop(self):
         while True:
@@ -525,6 +643,21 @@ class Service:
                 self.notify("Restart to finish updates", ", ".join(pk[:6]) + (" …" if len(pk) > 6 else "") if pk else "an installed update needs a restart",
                             urgency=1, actions=[("restart", "Restart now")], ctx=("restart",))
 
+        # the office (slice 6): joined, retired by the office, lost and found
+        oo, no = old.get("office") or {}, new.get("office") or {}
+        if no.get("enrolled") and not oo.get("enrolled"):
+            self.notify(f"This desk joined {no['office'].get('name') or no.get('url')}", f"desk {no['desk'].get('name') or '?'} for {no['owner'].get('display_name') or no['owner'].get('principal') or 'you'}"
+                        + (f" · models: --model {no['gateway']}" if no.get("gateway") else ""))
+        elif oo.get("enrolled") and not no.get("enrolled"):
+            self.notify("This desk left its office", f"{oo['office'].get('name') or oo.get('url')}: the enrolment was removed")
+        elif no.get("enrolled"):
+            if no.get("revoked") and not oo.get("revoked"):
+                self.notify("The office retired this desk", f"{no['office'].get('name') or no.get('url')} no longer accepts this desk's token; sudo maluctl office leave removes the enrolment", urgency=2)
+            elif oo.get("presence") == "online" and no.get("presence") == "unreachable":
+                self.notify("Office unreachable", f"{no['office'].get('name') or no.get('url')}: {no.get('last_error') or 'the heartbeat failed'}", urgency=1)
+            elif oo.get("presence") == "unreachable" and no.get("presence") == "online":
+                self.notify("Office reachable again", f"{no['office'].get('name') or no.get('url')} sees this desk online")
+
     def notify(self, summary, body="", urgency=1, actions=None, request_id=None, ctx=None):
         if request_id and ctx is None:
             ctx = ("request", request_id)
@@ -631,6 +764,9 @@ class Service:
             elif method == "UpdateAction":
                 self.update_action(params.unpack()[0])
                 invocation.return_value(None)
+            elif method == "OfficeAction":
+                self.office_action(params.unpack()[0])
+                invocation.return_value(None)
             else:
                 invocation.return_error_literal(self.Gio.dbus_error_quark(), self.Gio.DBusError.UNKNOWN_METHOD, method)
         except Exception as e:
@@ -662,6 +798,13 @@ class Service:
             log(f"no systemd watch: {str(e)[:120]}")
         threading.Thread(target=self.poll_loop, daemon=True).start()
         threading.Thread(target=self.updates_loop, daemon=True).start()
+        threading.Thread(target=self.office_loop, daemon=True).start()
+
+        def on_term():
+            self.office_goodbye(); loop.quit(); return False
+        import signal
+        for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+            GLib.unix_signal_add(GLib.PRIORITY_HIGH, sig, on_term)
         loop.run()
 
 

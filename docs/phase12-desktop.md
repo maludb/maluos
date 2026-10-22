@@ -412,14 +412,108 @@ plugin and neither the snap nor the flatpak plugin, the session's state
 carries `updates` with the automatic policy on and no restart due, and
 `UpdateAction refresh` re-reads within a minute.
 
+## Slice 6 (2026-10-22): desk enrolment
+
+```
+sudo maluctl office enroll https://app.example.com --code 7F3K-2Q9M [--name "Ed's desk"]
+  vault user:<login>/office-desk-token        the desk token, the person's, use by the gateway, read by grant
+  /etc/maluos/office.yaml, office.env         the office, the desk, the owner, the endpoints; MALUOS_OFFICE_* for agents
+  gateway backend/tier/alias office           the office's model endpoint as a rung: --model office, applied with the token
+maluctl office status [--live] | heartbeat | sudo maluctl office leave
+maluos-desktop-session 0.4.0: office in the state; heartbeats every heartbeat_s; offline on SIGTERM; OfficeAction(open|heartbeat)
+python3 -m maluos_desk.mock_office            the contract's reference office for tests (docs/desk-enrolment.md)
+```
+
+The desk joins the office. The Business OS kernel's estate already has the
+desk as a location kind, with an owner, an enrolment token, presence and a
+last-seen time, and its own plan put the enrolment API at stage D2, behind
+the owner's approval of schema and endpoints. This slice fixes the
+contract between the two (docs/desk-enrolment.md, surface 1: enroll with a
+one-time code, heartbeat, me, leave), builds the whole desk side in a new
+package, `maluos-desk`, and proves it against a mock office that
+implements the contract; the kernel half is a spec in the kernel
+repository (`docs/build-specs/desk-enrolment.md` there: one additive
+migration, four endpoints, the allow-list line, the presence job) for the
+owner to approve.
+
+**What enrolment is.** A person gets a one-time code from the office and
+runs `sudo maluctl office enroll URL --code CODE`. The desk posts the code
+and its facts; the office makes the desk location under the person's name
+and answers with a desk token and its endpoints. The token goes into the
+person's own vault compartment, as their Anthropic key would, so grants,
+delegations, the ledger and requests all apply; nothing is written to a
+file. The office's model endpoint becomes a rung of the desk's gateway
+(`openai_compat` with the token as its secret): `--model office` sends a
+call to the office's ledger proxy as the person, an agent gets there only
+through the person's delegation, and the office's rules hold on a desk
+(no provider key here, every call in the office's prompt ledger). The
+office's MCP endpoints are in `/etc/maluos/office.env` for every agent
+unit; an agent that should read the office's records or memory needs a
+`read` grant on the token, a decision the owner makes per agent.
+
+**Presence.** The session service heartbeats the office while the person
+is signed in and says offline when it stops (SIGTERM at logout). The
+office's Work Locations shows the desk online or offline; the indicator
+shows "Office: Subello · online" with Open office and Check in now; the
+Desk's System page has an Office group. When the office retires the desk,
+the next heartbeat gets 410: the session tells the person, `maluctl office
+status` says RETIRED, and `sudo maluctl office leave` removes the token,
+the rung and the files.
+
+### Decisions
+
+- **A code, not a password.** The office mints a short-lived single-use
+  code for a person; neither side ever sees the other's password. It is
+  how Ubuntu Pro attaches a machine.
+- **The token is the person's, in their vault.** `use` by the gateway on
+  their behalf, `read` by the owner or by an explicit grant; the ledger
+  names every use. A desk gives the office nothing the person did not.
+- **The office is a cloud rung, not a peer gateway.** The kernel's desk
+  plan already names a platform-hosted model endpoint; treating it as an
+  `openai_compat` backend keeps the ladder, the sensitivity gate, budgets
+  and the local ledger unchanged. Peer gateways (Phase 9 FR-21) are a
+  fleet sharing GPUs, a different thing. One consequence: the gateway
+  counts the office as leaving the host, so an agent reaches the office
+  rung only when an operator has raised its egress ceiling (`maluctl
+  gateway policy set --principal agent:NAME --egress internal`) on top of
+  the owner's delegation; a person's own calls pass at the default.
+- **Presence is the session, not a timer.** A headless host is not a desk;
+  the heartbeat is the person's, with their token, while they are signed
+  in. The service reads the token from the vault once per enrolment and
+  passes it to `maluctl office heartbeat` in the environment, so the vault
+  ledger does not grow by a row every five minutes.
+- **The kernel half is specified, not built.** The kernel's checkpoint
+  gate is the owner's; the spec there is small (db/185, four PHP files,
+  one allow-list line, the presence job) and the mock office is the
+  contract's executable form until it lands.
+
+### The test
+
+`tests/desk-local-test.sh` (29 checks, no VM): the real vault daemon on a
+throwaway database and the mock office on a local port; enrol as root for
+the current user with a wrong code, a spent code, a bad URL, an unknown
+owner; the token in the owner's compartment and working at the office's
+records MCP; heartbeats by vault read and by environment token; status,
+`--live`, `--json`; retirement (410) and `leave`; re-enrolment;
+`--keep-secret`; no token value anywhere on disk. The image boot test
+(desktop) runs the mock office as a transient unit and adds 27 checks:
+enrolment with the one-time code, the files, the vault token, the healthy
+`office` rung, a chat through it with the vault's `secret.use` row and the
+office's own record of the call, another user refused, a delegated agent's
+call, the agent's environment, an agent granted `read` calling the
+office's records MCP, the session's office state and join notification,
+the Desk's Office group, retirement seen by the session with its
+notification, and `leave`.
+
 ## Next slices
 
-1. **Desk enrolment.** `maluctl enroll <office>`: this desk joins a
-   Business OS estate as a desk location, the person's principal is
-   delegated here, and local agents can reach the office's memory through
-   the gateway's routing. Requires the office side (docs/agents.md,
-   phase9-editions.md fleet service). Ownership (slice 3) is what the
-   office receives: a person's agents, their requests and their alerts.
+1. **Desk enrolment, the office half.** The kernel spec
+   (`docs/build-specs/desk-enrolment.md` in maludb-os-core) once approved:
+   db/185, the four endpoints, the allow-list line, the presence job, the
+   code in Settings; then the model endpoint for desks (`surface = desk`
+   on the prompt ledger) and the memory and actions MCP servers published
+   to desks, which turn `endpoints.models`, `memory` and `actions` from
+   null into real ones with no change on the desk.
 2. **Updates, further.** A MaluOS release upgrade path (26.04 to the
    next LTS) and DEP-11 metadata for the MaluOS repository so GNOME
    Software lists MaluOS packages.
@@ -440,7 +534,18 @@ carries `updates` with the automatic policy on and no restart due, and
 Slice 1 built and boot-tested 2026-10-19; slice 2 built 2026-10-19 and
 released in 26.04.20261020; slices 3 and 4 built 2026-10-20 and
 2026-10-21 and released in 26.04.20261021 (docs/release.md); slice 5
-built 2026-10-22 and released in 26.04.20261022.
+built 2026-10-22 and released in 26.04.20261022; slice 6 built
+2026-10-22 (unreleased).
+
+### Slice 6 status (2026-10-22)
+
+| Artefact | Result |
+|---|---|
+| Packages | maluos-desk 0.1.0 (new), maluos-desktop-session 0.4.0, maluos-agent 0.2.1, maluos-meta 0.2.4 |
+| Local test | PASS, 29 checks (tests/desk-local-test.sh against the mock office and the real vault) |
+| Images | desktop rootfs, qcow2 and ISO rebuilt 2026-10-22 and copied to the internal share (ISO sha 357f35…, qcow2 4676c4…); server images unchanged (26.04.20261022) |
+| Tests | desktop UEFI boot test 186 ok / 0 FAIL (all 27 slice 6 checks pass against the mock office: enrolment, the vault token, the office rung with the vault's use row, the delegated agent, the agent's MCP call, the session's presence and notifications, the Desk, retirement, leave); ISO apt check PASS |
+| Kernel half | spec written in maludb-os-core (docs/build-specs/desk-enrolment.md), uncommitted there, awaiting the owner |
 
 ### Slice 5 status (2026-10-22)
 
