@@ -483,7 +483,7 @@ the rung and the files.
   passes it to `maluctl office heartbeat` in the environment, so the vault
   ledger does not grow by a row every five minutes.
 - **The kernel half is specified, not built.** The kernel's checkpoint
-  gate is the owner's; the spec there is small (db/185, four PHP files,
+  gate is the owner's; the spec there is small (one migration, four PHP files,
   one allow-list line, the presence job) and the mock office is the
   contract's executable form until it lands.
 
@@ -509,7 +509,7 @@ notification, and `leave`.
 
 1. **Desk enrolment, the office half.** The kernel spec
    (`docs/build-specs/desk-enrolment.md` in maludb-os-core) once approved:
-   db/185, the four endpoints, the allow-list line, the presence job, the
+   one migration, the four endpoints, the allow-list line, the presence job, the
    code in Settings; then the model endpoint for desks (`surface = desk`
    on the prompt ledger) and the memory and actions MCP servers published
    to desks, which turn `endpoints.models`, `memory` and `actions` from
