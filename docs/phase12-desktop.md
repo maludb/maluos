@@ -440,7 +440,7 @@ carries `updates` with the automatic policy on and no restart due, and
 Slice 1 built and boot-tested 2026-10-19; slice 2 built 2026-10-19 and
 released in 26.04.20261020; slices 3 and 4 built 2026-10-20 and
 2026-10-21 and released in 26.04.20261021 (docs/release.md); slice 5
-built 2026-10-22 (unreleased).
+built 2026-10-22 and released in 26.04.20261022.
 
 ### Slice 5 status (2026-10-22)
 
@@ -449,7 +449,7 @@ built 2026-10-22 (unreleased).
 | Packages | maluos-archive 0.3.0 (+ maluos-archive-mozilla), maluos-branding 0.4.1, maluos-meta 0.2.3, maluos-firstboot 0.1.7, maluos-desktop-session 0.3.1 |
 | Images | desktop and server rootfs, qcow2 and ISO rebuilt on 2026-10-22 and copied to the internal share: desktop ISO sha 8aef27…, desktop qcow2 4bdb1f…, server ISO a6ec62…, server qcow2 884fd4… |
 | Tests | desktop UEFI boot test 159 ok / 0 FAIL (all slice 5 checks pass, including the updates thread, the poll loop staying live and the Desk self-test); server UEFI boot test 114 ok / 0 FAIL; ISO apt check PASS for both, including apt-get update with the network sources unreachable |
-| Not yet | commit of slice 5; release 26.04.2026102x (needs scripts/release.sh with the production key) |
+| Released | committed f6b6654; release 26.04.20261022 (tag d9f34ae) with both image sets on download.maluos.com and GitHub; apt.maluos.com republished with the slice 5 packages the same day |
 
 ### Slice 4 status (2026-10-21)
 
