@@ -510,6 +510,145 @@ notification, and `leave`.
 
 ## Next slices
 
+### Slice 7 (planned 2026-10-23): power defaults, Tools Installer, MaluApps, Credential Manager
+
+Requested by the owner on 2026-10-23, after release 26.04.20261023. Four
+items, one slice: the first is a settings change, the other three are
+pages of the Desk's code, each pinned in the dock as its own entry, and
+the second brings one new package.
+
+**1. Power defaults that keep agents alive.** GNOME's defaults blank the
+screen after 5 minutes and suspend the machine after 20 minutes on
+battery (and on the login screen, even on mains): a suspended desk
+terminates every agent, gateway call and office heartbeat on it. The
+desktop ships with Automatic Screen Blank off and Automatic Suspend off,
+on battery and plugged in, in the user session and on the greeter:
+
+```
+# packages/maluos-branding/files/desktop/20_maluos-desktop.gschema.override (maluos-desktop-branding)
+[org.gnome.desktop.session:ubuntu]
+idle-delay = uint32 0                       # Settings → Power → Automatic Screen Blank: Never
+[org.gnome.settings-daemon.plugins.power:ubuntu]
+sleep-inactive-ac-type = 'nothing'          # Automatic Suspend, plugged in: off
+sleep-inactive-battery-type = 'nothing'     # Automatic Suspend, on battery: off
+[org.gnome.settings-daemon.plugins.power:GNOME-Greeter]
+sleep-inactive-ac-type = 'nothing'          # GDM suspends an idle login screen after 20 min by default
+sleep-inactive-battery-type = 'nothing'
+```
+
+These are defaults, not locks: a person can turn blanking or suspend back
+on in Settings and the choice sticks. The screen lock still works on
+demand (Super+L) and on lid close; the lid switch itself (logind,
+`HandleLidSwitch=suspend`) is left as it is, so closing a laptop still
+suspends it. Decision for the owner: whether a desk with agents should
+also ignore the lid (`/etc/systemd/logind.conf.d/maluos-desktop.conf`,
+`HandleLidSwitch=ignore`); the default here is no, because a closed
+laptop in a bag that never sleeps is a hazard. Boot test: `gsettings get`
+in the ubuntu session answers `uint32 0`, `'nothing'`, `'nothing'`; the
+greeter's dconf profile resolves the same two keys to `'nothing'`.
+
+**2. "Tools Installer", pinned in the dock.** GNOME's dock pins
+applications, not folders, so "Tools Installer" is an application: one
+pinned entry (`com.maluos.ToolsInstaller.desktop`, in
+`org.gnome.shell favorite-apps` after Firefox, Files and Software, next
+to the Desk, MaluApps and the Credential Manager) that opens a window listing the tools with their state (not
+installed / installing, with the log / installed, version, Open). The
+window is the Desk's code (GTK 4, libadwaita, `packages/maluos-session/desk`)
+with a second page, and the list is data: a new package `maluos-tools`
+ships `/usr/share/maluos-tools/<id>/tool.json` (name, description,
+icon, scope, `check`, `install`, `open`) and the scripts beside it.
+
+| Tool | Scope | How it installs |
+|---|---|---|
+| Google Chrome | system | Google's apt repository (`dl.google.com/linux/chrome/deb`, its signing key under `/etc/apt/keyrings`) and `apt-get install google-chrome-stable`; it then updates with the system |
+| VS Code | system | Microsoft's apt repository (`packages.microsoft.com/repos/code`) and `apt-get install code` |
+| Claude Code | user | Anthropic's native installer for the invoking user (`~/.local/bin/claude`); no root |
+| Codex | user | Node.js first if missing (Ubuntu's `nodejs`/`npm` from the system scope), then `npm install -g @openai/codex` under `~/.npm-global` for the user |
+| Ollama | system | the release tarball from github.com/ollama/ollama, pinned to a version and checksum in `tool.json`, into `/usr/local`, with the `ollama.service` unit and an `ollama` system user; then registered as a local backend in the MaluOS gateway (`maluctl gateway backend add ollama http://127.0.0.1:11434`) so agents can use it |
+
+System-scope scripts run as root through polkit (`pkexec`, action
+`com.maluos.tools.install`, administrator authentication once per
+window) and are idempotent; user-scope scripts run as the person. Every
+script has `--check` (exit 0 and a version when installed) and logs to
+`~/.local/state/maluos-tools/<id>.log`, which the window shows live. The
+list is "added to later": a new tool is one directory in the package,
+and `maluctl tools list|install|check <id>` drives the same scripts from
+a terminal and from the boot test. The installers need the network; the
+window says so when it is not there. Vendor repositories and installers
+are the vendors' terms, so each entry shows a one-line notice and the
+vendor's URL before the first install.
+
+**3. "MaluApps", pinned in the dock, from an API.** The second pinned
+entry (`com.maluos.MaluApps.desktop`) is the same window with a list
+that is not shipped in a package but fetched: the applications a desk
+can have (MaluMail, Help Desk, CRM, Knowledgebase, and whatever the list
+says tomorrow). Source, in order:
+
+- When the desk is enrolled (slice 6), the office's catalogue: the
+  enrolment contract grows `endpoints.apps` (`GET /api/v1/desks/apps`,
+  bearer desk token), answered by the Business OS kernel from its
+  applications table, so an office decides what its desks see. This is a
+  kernel slice (docs/build-specs in maludb-os-core), specified first and
+  approved as the enrolment half was.
+- Otherwise, and as the base every office inherits, the public MaluOS
+  catalogue: `https://download.maluos.com/apps/catalog.json`, published
+  from this repository (`docs/site/apps/catalog.json`) with the download
+  page, signed with the archive key (`catalog.json.gpg`, verified with
+  the keyring the desktop already trusts).
+
+One schema for both: `{"apps": [{"id", "name", "description", "icon",
+"kind": "web" | "deb" | "script", "url" | "package" | "install",
+"version", "requires": ["office"]?}]}`. A `web` app installs as a
+launcher (a `.desktop` file with the app's icon opening the office's URL
+in Firefox as its own window); a `deb` app is a package from
+apt.maluos.com (`maluos-app-helpdesk` and friends, as Phase 7 adds
+them); a `script` app is a Tools-style installer fetched with the
+catalogue. The catalogue is cached at `/var/cache/maluos-apps/` with its
+ETag, refreshed when the window opens and by the session on each office
+heartbeat, and the cached list is shown offline. Decision for the owner:
+where the office catalogue lives in the kernel (the applications table
+and `desks/apps` as proposed, or a static per-office list in Settings →
+Desks). Boot test: the mock office (`maluos_desk.mock_office`) serves
+`/api/v1/desks/apps` with the four apps; the test enrols, fetches,
+installs the `web` one and checks the launcher; the public catalogue is
+read from the ISO's copy when the network is not there.
+
+**4. "Credential Manager", pinned in the dock.** The Desk's Vault page
+(slice 3) shows the vault and answers grant requests, but every change
+to a secret is still `maluctl secret` in a terminal. The Credential
+Manager (`com.maluos.CredentialManager.desktop`, the third new pinned
+entry, same Desk code) is the vault's full user side, and it offers
+nothing the CLI does not: each control calls the vault API the matching
+`maluctl secret` verb calls, so the audit trail and the policy are the
+same from both.
+
+| Page | What you do there | CLI it mirrors |
+|---|---|---|
+| Secrets | list your compartment's secrets with kind, created and last-used dates and usage; add one (name, kind, value entered or pasted, never echoed; the value field is cleared on close); show a value after re-authentication, with a copy-to-clipboard that clears after 30 s; rotate; delete with a confirmation naming the delegations that would break | `secret list`, `add`, `show`, `info`, `usage`, `rotate`, `delete` |
+| Delegations | who may use each key (agents, people), with expiry and budget shown as what remains; delegate a key to an agent with expiry and budget pickers; undelegate; grant and revoke read access for the few cases that need it (the office desk token) | `secret delegations`, `delegate`, `undelegate`, `grant`, `revoke` |
+| Requests | the grant requests the Vault page already shows, with the budget and level choice item 5 of the next slices asks for, and your own requests to others | `secret requests`, `request`, `approve`, `deny` |
+| Compartments | your compartments and the agents' you own, and the agent's secrets as its owner sees them | `secret compartment`, `whoami` |
+| Backup | export the vault to a passphrase-protected file and import one, with the same prompts as the CLI | `secret export`, `import` |
+
+Values are shown and entered only in this window, never in a
+notification or the indicator, and the window locks itself after the
+GNOME idle time or on demand, asking for the session password again
+through polkit (`com.maluos.vault.reveal`, per reveal) before a value is
+displayed. Alerts stay on the Desk's Alerts page. Boot test: the manager
+adds, delegates and deletes a secret through its own D-Bus actions and
+the vault's `maluctl secret list` and `delegations` agree after each
+step.
+
+**Packages:** maluos-desktop-branding (power override, favorites),
+maluos-desktop-session (the three new pages and launchers, catalogue
+refresh on heartbeat, the reveal polkit action), maluos-tools (new),
+maluos-desk (the `apps` endpoint in the contract), maluos-vault (nothing
+new unless a page needs a listing the API lacks), maluos-meta
+(maluos-desktop depends on maluos-tools). The slice's test adds the
+checks above to `tests/qcow2-boot-test.sh`.
+
+### After that
+
 1. **Desks at a real office.** The kernel half is built and vendored
    (maludb-os-core `docs/build-specs/desk-enrolment.md`; the server image
    boot test enrols a desk against it). Next is the kernel's next slice: the model

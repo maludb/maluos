@@ -35,7 +35,7 @@ repository is the distribution layer.
 | 9 | Editions, the Ubuntu Pro model: Community free, Professional per machine (esm, models, compliance, audit, backup, support), Enterprise per fleet (fleet, sso, scheduler); entitlements by token, services additive | requirements drafted 2026-10-18 (phase9-editions.md) |
 | 10 | Public release of the free edition on maluos.com: maluos.com domains baked in (done), production key, R2 hosting, download page, source page, release | in progress 2026-10-19 (docs/release.md, docs/branding.md) |
 | 11 | A MaluOS installer (text UI: disks, user, network, unpack the squashfs, seed first boot) replacing subiquity, the last Ubuntu-branded surface | proposed |
-| 12 | The desktop variant: maluos-desktop (GNOME 50, no snaps, MaluOS identity), desktop rootfs, cloud image and ISO from the same scripts with `-p desktop`, profile-aware boot test (docs/phase12-desktop.md); the agent-aware session: session service, indicator, notifications; ownership, vault grant requests, the Desk window; updates and software; desk enrolment (docs/desk-enrolment.md) | slices 1 and 2 released in 26.04.20261020; slices 3 and 4 (ownership, requests, Desk, the logo) released in 26.04.20261021; slice 5 (updates, Firefox, GNOME Software) in 26.04.20261022; slice 6 (desk enrolment, maluos-desk) built 2026-10-22 |
+| 12 | The desktop variant: maluos-desktop (GNOME 50, no snaps, MaluOS identity), desktop rootfs, cloud image and ISO from the same scripts with `-p desktop`, profile-aware boot test (docs/phase12-desktop.md); the agent-aware session: session service, indicator, notifications; ownership, vault grant requests, the Desk window; updates and software; desk enrolment (docs/desk-enrolment.md) | slices 1 and 2 released in 26.04.20261020; slices 3 and 4 (ownership, requests, Desk, the logo) released in 26.04.20261021; slice 5 (updates, Firefox, GNOME Software) in 26.04.20261022; slice 6 (desk enrolment, maluos-desk) released in 26.04.20261023; slice 7 planned 2026-10-23: power defaults that keep agents alive, the Tools Installer (Chrome, VS Code, Claude Code, Codex, Ollama), MaluApps from the office/public catalogue, the Credential Manager (docs/phase12-desktop.md, "Slice 7") |
 | 13+ | Further agent-native features (journal to memory, quality judge) | |
 
 ### Phase 6+ candidates
@@ -46,7 +46,7 @@ repository is the distribution layer.
 - journald/audit events ingested into memory as episodes.
 - Secrets via systemd-creds: done in Phase 6 slice 1 (maluos-vault).
 - Optional local inference packages wired to maludb_modeld: done in Phase 6 slice 2 (maluos-gateway drains the queue; Ollama installer).
-- Desktop variant with an agent-aware session: Phase 12 (slices 1 to 5 released, slice 5 in 26.04.20261022; slice 6, desk enrolment, built and boot-tested 2026-10-22 against a mock office, uncommitted, with the kernel half specified for approval).
+- Desktop variant with an agent-aware session: Phase 12 (slices 1 to 5 released, slice 5 in 26.04.20261022; slice 6, desk enrolment, released in 26.04.20261023 with the kernel half; slice 7 planned: power defaults, Tools Installer, MaluApps, Credential Manager).
 
 ## Open items
 
