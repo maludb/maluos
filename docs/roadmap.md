@@ -75,7 +75,7 @@ owner. Each slice ends with its test on the three-machine proof.
 
 | # | Slice | Status | Effort | Depends on | Notes |
 |---|---|---|---|---|---|
-| D1 | 1 Nodes and the operator's view: node identity, enrolment of servers, the Estate page on the Desk | planned | L | nothing | |
+| D1 | 1 Nodes and the operator's view: node identity, enrolment of servers, the Estate page on the Desk | specified (docs/phase13-slice1-nodes.md) | L | nothing | new package maluos-estate; the kernel half (db/188, the estate endpoints) needs the owner's approval first |
 | D2 | 2 The agent directory and delegation: Agent HR registration, the A2A task endpoint on every node with the authorisation envelope, the desk's personal agent, operator actions on remote nodes | planned | L | D1, C2 | slice 8's maluos_agent_tasks is the protocol; this adds the envelope and the directory |
 | D3 | 3 Shared inference: the gateway as a backend for other nodes, admission control, desk contribution opt-in | planned | L | D1 | |
 | D4 | 4 Federated memory: personal, departmental and enterprise memory over the existing scopes; the memory endpoint real | planned | L | D1 | the Agents app's Memory page waits for this |

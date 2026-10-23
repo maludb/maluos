@@ -111,6 +111,10 @@ Each slice is a product on its own; each later one reuses the earlier.
 
 ### Slice 1: nodes and the operator's view
 
+Specified in docs/phase13-slice1-nodes.md (2026-10-23): the estate
+endpoints, the report, the health rules, the kernel half, the packages
+and the test.
+
 - `maluctl estate join URL --code CODE` on servers and desks (the desk
   path keeps its `office` alias); node kinds `desk`, `server`,
   `inference`; a machine key per node in the vault; presence and facts by
