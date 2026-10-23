@@ -136,6 +136,10 @@ and the test.
 
 ### Slice 2: the agent directory and delegation
 
+Specified in docs/phase13-slice2-delegation.md (2026-10-23): the
+envelope, the directory, the inbox, the personal agent, remote
+actions, the kernel half and the test.
+
 - Every agent made with `maluctl agent create` registers in the kernel's
   Agent HR with its capabilities (declared in the agent's manifest),
   location, owner, scopes, models it may use, availability and resource
