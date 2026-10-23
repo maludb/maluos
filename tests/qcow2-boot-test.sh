@@ -96,7 +96,9 @@ sudo -n maluctl update auto reboot on --at 04:30 >/dev/null 2>&1 && apt-config d
 sudo -n maluctl update auto on >/dev/null 2>&1 && sudo -n maluctl update auto set mozilla on >/dev/null 2>&1 && sudo -n maluctl update auto reboot off >/dev/null 2>&1
 [ ! -f /etc/apt/apt.conf.d/53maluos-auto ] && [ ! -f /etc/apt/apt.conf.d/54maluos-origins ] && ! sudo -n test -f /var/lib/maluos/update-auto.json && [ "$(sha256sum /etc/apt/apt.conf.d/52maluos-unattended-upgrades | cut -c1-64)" = "$pol_sha" ] && echo "  ok   every switch at its default removes the drop-ins; the shipped policy is byte for byte what it was" || { echo "  FAIL drop-ins or policy after restoring defaults: $(ls /etc/apt/apt.conf.d/5[34]* 2>&1)"; fail=1; }
 maluctl update status --json --compact | python3 -c "import json,sys; d=json.load(sys.stdin); assert d['automatic']['enabled'] and any('mozilla' in x for x in d['automatic']['origins']) and not d['auto']['managed'], d['auto']; print('  ok   status back to the shipped policy')" || { echo "  FAIL status after restoring defaults"; fail=1; }
-[ -f /usr/share/polkit-1/actions/com.maluos.maluctl.policy ] && pkaction 2>/dev/null | grep -q '^com.maluos.admin$' && echo "  ok   polkit action com.maluos.admin registered (pkexec maluctl)" || { echo "  FAIL polkit action"; fail=1; }
+# the policy ships in every variant; polkit itself (pkaction) only comes with the desktop, so registration is checked there
+if command -v pkaction >/dev/null; then pkaction 2>/dev/null | grep -q '^com.maluos.admin$' && echo "  ok   polkit action com.maluos.admin registered (pkexec maluctl)" || { echo "  FAIL polkit action com.maluos.admin not registered"; fail=1; }
+else [ -f /usr/share/polkit-1/actions/com.maluos.maluctl.policy ] && echo "  ok   polkit action file shipped (no polkit on this variant)" || { echo "  FAIL polkit action file missing"; fail=1; }; fi
 cloud-init status | sed 's/^/  /'
 # --- first-boot provisioning (Phase 4)
 # A oneshot reports Result=success while it is still activating; wait for it to finish
