@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Agents
+Comment=Talk to and control the agents on this desk and at the office
+Exec=maluos-agents
+Icon=maluos-logo
+Terminal=false
+Categories=System;Utility;
+Keywords=MaluOS;agents;tasks;
+StartupNotify=true
+DBusActivatable=false

@@ -1,0 +1,399 @@
+#!/usr/bin/python3
+"""maluos-agents: the Agents app (Phase 12 slice 8).
+
+One window for every agent the person can use: the agents on this desk
+(theirs first) and, on an enrolled desk, the office's. For the selected
+agent: Talk (tasks sent and answers received over the agent's task
+interface, maluos_agent_tasks: a local socket or the office's task URL),
+Control (start, stop, restart, the unit's logs, a one-off command), Policy,
+Memory and Activity. The UI is web technology (HTML/JS under
+/usr/share/maluos-agents/ui) in a WebKitGTK window; this program is the
+native side: the window, the session bus (com.maluos.Session), the task
+sockets, the vault, the office, notifications and the icons.
+
+  maluos-agents                   open the window
+  maluos-agents --agent ID        open it on an agent (local:NAME or office:ID, as the icons do)
+  maluos-agents --sync            write the agent icons (launchers, the Agents folder in the grid, ~/Desktop/Agents) and exit
+  maluos-agents --self-test       build the window from the live state, print a summary, exit
+"""
+import json, os, subprocess, sys, threading, time, urllib.parse
+
+sys.path.insert(0, "/usr/lib/maluos")
+
+UI = os.environ.get("MALUOS_AGENTS_UI") or "/usr/share/maluos-agents/ui/index.html"
+BUS_NAME, OBJ, IFACE = "com.maluos.Session", "/com/maluos/Session", "com.maluos.Session1"
+XML = """<node><interface name="com.maluos.Session1">
+  <method name="GetState"><arg type="s" name="json" direction="out"/></method>
+  <method name="Refresh"/>
+  <method name="AgentAction"><arg type="s" name="name" direction="in"/><arg type="s" name="action" direction="in"/></method>
+  <method name="OfficeAction"><arg type="s" name="action" direction="in"/></method>
+  <signal name="StateChanged"><arg type="s" name="json"/></signal>
+</interface></node>"""
+
+
+def log(msg):
+    print(f"maluos-agents: {msg}", file=sys.stderr, flush=True)
+
+
+# -- the model: one list of agents from the session's state
+def unified(state):
+    out = []
+    for a in state.get("agents") or []:
+        out.append({"id": f"local:{a['name']}", "kind": "local", "name": a.get("display") or a["name"], "description": a.get("exec") or "", "icon": "maluos-logo",
+                    "mine": bool(a.get("mine")), "owner": a.get("owner"), "principal": a.get("principal"), "active": a.get("active"), "sub": a.get("sub"),
+                    "since": a.get("since"), "exec": a.get("exec"), "unit": a.get("unit"), "sandbox": a.get("sandbox"),
+                    "tasks": os.path.exists(f"/run/maluos/agents/{a['name']}/tasks.sock"), "capabilities": [], "presence": "online" if a.get("active") == "active" else "offline"})
+    o = state.get("office") or {}
+    for a in o.get("agents") or []:
+        out.append({"id": f"office:{a['id']}", "kind": "office", "name": a.get("name") or str(a["id"]), "description": a.get("description") or "", "icon": a.get("icon") or "maluos-logo",
+                    "mine": False, "owner": a.get("owner"), "principal": f"agent:{a['id']}", "presence": a.get("presence") or "unknown", "state": a.get("state"),
+                    "node": a.get("node"), "capabilities": a.get("capabilities") or [], "tasks": bool(a.get("tasks")), "tasks_url": a.get("tasks"),
+                    "activity_url": a.get("activity"), "page": a.get("page"), "office": o.get("office", {}).get("name") or o.get("url")})
+    out.sort(key=lambda x: (x["kind"] != "local", not x.get("mine"), x["name"].lower()))
+    return out
+
+
+class Bridge:
+    """The methods the UI calls (JSON-RPC over the WebKit script message handler)."""
+
+    def __init__(self, app):
+        self.app = app
+        self._office_token = None
+
+    # helpers
+    def state(self):
+        s = self.app.state or {}
+        o = s.get("office") or {}
+        return {"service": bool(s), "host": s.get("host") or {}, "me": s.get("me") or {}, "agents": unified(s),
+                "office": {"enrolled": bool(o.get("enrolled")), "name": (o.get("office") or {}).get("name"), "url": o.get("url"), "presence": o.get("presence"),
+                           "agents_error": o.get("agents_error")} if o else {"enrolled": False},
+                "selected": self.app.selected, "ts": s.get("ts")}
+
+    def find(self, aid):
+        a = next((x for x in unified(self.app.state or {}) if x["id"] == aid), None)
+        if not a:
+            raise ValueError(f"no agent {aid}")
+        return a
+
+    def office_token(self):
+        if self._office_token:
+            return self._office_token
+        from maluos_vault_client import Vault
+        self._office_token = Vault(os.environ.get("MALUOS_VAULT_SOCKET")).value("office-desk-token", "read", purpose="Agents app")["value"]
+        return self._office_token
+
+    def client(self, a):
+        import maluos_agent_tasks as T
+        if a["kind"] == "local":
+            return T.Client.local(a["id"][6:])
+        if not a.get("tasks_url"):
+            raise T.TaskError(-32000, "the office publishes no task interface for this agent")
+        return T.Client(a["tasks_url"], token=self.office_token())
+
+    # methods
+    def m_state(self, p):
+        return self.state()
+
+    def m_refresh(self, p):
+        self.app.call("Refresh", None)
+        self.app.call("OfficeAction", ("heartbeat",)) if (self.app.state or {}).get("office", {}).get("enrolled") else None
+        return {"ok": True}
+
+    def m_select(self, p):
+        self.app.selected = p.get("id")
+        return {"ok": True}
+
+    def m_agent_action(self, p):
+        a = self.find(p["id"])
+        if a["kind"] != "local":
+            raise ValueError("start, stop and restart of an office agent come with Phase 13 slice 2 (the operator's envelope)")
+        if p.get("action") not in ("start", "stop", "restart"):
+            raise ValueError("action: start, stop or restart")
+        self.app.call("AgentAction", (a["id"][6:], p["action"]), timeout=120000)
+        return {"ok": True}
+
+    def m_agent_logs(self, p):
+        a = self.find(p["id"])
+        if a["kind"] != "local":
+            raise ValueError("an office agent's logs come with Phase 13 slice 2; its Activity page shows what the office publishes")
+        n = int(p.get("lines") or 200)
+        r = subprocess.run(["journalctl", "-u", a["unit"], "-n", str(n), "--no-pager", "-o", "short-iso"], capture_output=True, text=True, timeout=30)
+        text = r.stdout
+        if r.returncode != 0 or ("No journal files" in r.stderr) or (not text.strip() and r.stderr.strip()):
+            raise ValueError((r.stderr.strip() or "journalctl failed")[:300] + " · Open in a terminal reads them with sudo")
+        return {"text": text, "unit": a["unit"]}
+
+    def m_agent_card(self, p):
+        return self.client(self.find(p["id"])).card()
+
+    def m_agent_send(self, p):
+        text = (p.get("text") or "").strip()
+        if not text:
+            raise ValueError("nothing to send")
+        return self.client(self.find(p["id"])).send(text, timeout=float(p.get("timeout") or 180))
+
+    def m_agent_tasks(self, p):
+        return {"tasks": self.client(self.find(p["id"])).list(int(p.get("limit") or 50))}
+
+    def m_agent_activity(self, p):
+        a = self.find(p["id"])
+        if a["kind"] == "local":
+            from maluos_vault_client import Vault
+            rows = Vault(os.environ.get("MALUOS_VAULT_SOCKET")).ledger(principal=a["principal"], limit=int(p.get("limit") or 60))
+            out = []
+            for r in rows:
+                d = r.get("detail") or {}
+                summary = {"model.call": f"{r.get('status')} · {r.get('model') or ''} · {r.get('tokens_in') or 0}/{r.get('tokens_out') or 0} tokens" + (f" · {r.get('reason')}" if r.get("reason") else ""),
+                           }.get(r.get("event"), " · ".join(str(x) for x in (r.get("status"), r.get("secret_name"), r.get("reason")) if x))
+                out.append({"ts": r.get("ts"), "kind": r.get("event"), "actor": r.get("broker_ref") or r.get("linux_user") or r.get("principal_ref"), "summary": summary, "detail": d})
+            return {"activity": out, "source": "the vault's ledger (rows of this agent, read as its owner)"}
+        if not a.get("activity_url"):
+            raise ValueError("the office publishes no activity for this agent")
+        import urllib.request
+        req = urllib.request.Request(a["activity_url"], headers={"Authorization": f"Bearer {self.office_token()}", "Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            d = json.loads(r.read() or b"{}")
+        return {"activity": d.get("activity") or [], "source": f"{a.get('office')} (activity endpoint)"}
+
+    def m_agent_policy(self, p):
+        a = self.find(p["id"])
+        out = {"agent": a, "delegations": [], "grants": [], "note": None}
+        if a["kind"] == "local":
+            try:
+                from maluos_vault_client import Vault
+                v = Vault(os.environ.get("MALUOS_VAULT_SOCKET"))
+                out["delegations"] = [d for d in v.delegations() if d.get("to") == a["principal"] or d.get("to_ref") == a["principal"] or d.get("grantee_ref") == a["principal"]]
+                for s in v.secrets():
+                    ref = s.get("ref") or s.get("name")
+                    try:
+                        for g in v.grants(ref):
+                            if g.get("grantee_ref") == a["principal"]:
+                                out["grants"].append({"secret": ref, "level": g.get("level"), "expires_at": g.get("expires_at")})
+                    except Exception:
+                        pass
+            except Exception as e:
+                out["note"] = f"vault: {e.__class__.__name__}: {str(e)[:120]}"
+            out["admin_hint"] = f"pkexec maluctl agent show {a['id'][6:]}"
+        else:
+            try:
+                out["card"] = self.client(a).card()
+            except Exception as e:
+                out["note"] = f"card: {str(e)[:160]}"
+        return out
+
+    def m_agent_memory(self, p):
+        a = self.find(p["id"])
+        out = {"compartments": [], "note": None}
+        if a["kind"] == "local":
+            try:
+                from maluos_vault_client import Vault
+                v = Vault(os.environ.get("MALUOS_VAULT_SOCKET"))
+                out["compartments"] = [c for c in v.compartments() if c.get("name") == a["principal"] or c.get("owner") == a["principal"] or c.get("owner_ref") == a["principal"]]
+            except Exception as e:
+                out["note"] = f"vault: {e.__class__.__name__}: {str(e)[:120]}"
+            out["claims_note"] = "What the agent remembers as claims with provenance comes with Phase 13 slice 4 (federated memory); its vault compartment is listed here."
+        else:
+            out["claims_note"] = "The office's memory endpoint answers agents, not desks, until Phase 13 slice 4."
+        return out
+
+    def m_open_terminal(self, p):
+        argv = p.get("argv") or []
+        if not argv or not all(isinstance(x, str) for x in argv):
+            raise ValueError("argv")
+        subprocess.Popen(["xdg-terminal-exec", "--"] + argv if os.path.exists("/usr/bin/xdg-terminal-exec") else ["ptyxis", "--"] + argv,
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return {"ok": True}
+
+    def m_open_url(self, p):
+        u = urllib.parse.urlsplit(p.get("url") or "")
+        if u.scheme not in ("http", "https"):
+            raise ValueError("http(s) URLs only")
+        subprocess.Popen(["xdg-open", p["url"]], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return {"ok": True}
+
+    def m_open_page(self, p):
+        a = self.find(p["id"])
+        if not a.get("page"):
+            raise ValueError("the office publishes no page for this agent")
+        self.app.win.show_page(a["page"], a["name"])
+        return {"ok": True}
+
+    def m_sync(self, p):
+        import maluos_agents_icons
+        return maluos_agents_icons.sync(self.app.state or {})
+
+    def dispatch(self, method, params):
+        fn = getattr(self, "m_" + method.replace(".", "_").replace("/", "_"), None)
+        if not fn:
+            raise ValueError(f"unknown method {method}")
+        return fn(params or {})
+
+
+def run_gui(argv, selected, self_test):
+    import gi
+    gi.require_version("Gtk", "4.0"); gi.require_version("Adw", "1"); gi.require_version("WebKit", "6.0")
+    from gi.repository import Adw, Gio, GLib, Gtk, WebKit
+
+    class Window(Adw.ApplicationWindow):
+        def __init__(self, app):
+            super().__init__(application=app, title="Agents", default_width=1040, default_height=720)
+            self.app = app
+            self.toasts = Adw.ToastOverlay(); self.set_content(self.toasts)
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL); self.toasts.set_child(box)
+            self.header = Adw.HeaderBar(); box.append(self.header)
+            self.back = Gtk.Button(icon_name="go-previous-symbolic", tooltip_text="Back to the agents", visible=False)
+            self.back.connect("clicked", lambda *_: self.show_ui()); self.header.pack_start(self.back)
+            refresh = Gtk.Button(icon_name="view-refresh-symbolic", tooltip_text="Refresh")
+            refresh.connect("clicked", lambda *_: app.bridge.m_refresh({})); self.header.pack_end(refresh)
+            desk = Gtk.Button(icon_name="preferences-system-symbolic", tooltip_text="Open the MaluOS Desk")
+            desk.connect("clicked", lambda *_: subprocess.Popen(["maluos-desk"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)); self.header.pack_end(desk)
+            self.stack = Gtk.Stack(vexpand=True); box.append(self.stack)
+            # the app's UI
+            ucm = WebKit.UserContentManager()
+            ucm.register_script_message_handler("maluos", None)
+            ucm.connect("script-message-received::maluos", self.on_message)
+            self.web = WebKit.WebView(user_content_manager=ucm)
+            st = self.web.get_settings()
+            st.set_enable_developer_extras(bool(os.environ.get("MALUOS_AGENTS_DEVTOOLS")))
+            st.set_allow_file_access_from_file_urls(True); st.set_allow_universal_access_from_file_urls(False)
+            st.set_enable_javascript(True); st.set_javascript_can_access_clipboard(True)
+            self.web.set_background_color(Gdk_rgba())
+            self.web.connect("decide-policy", self.on_policy)
+            self.stack.add_named(self.web, "ui")
+            # the office's own page for an agent, loaded beside it
+            self.page = WebKit.WebView()
+            self.page.get_settings().set_enable_developer_extras(False)
+            self.stack.add_named(self.page, "page")
+            self.web.load_uri("file://" + UI)
+
+        def on_policy(self, web, decision, kind):
+            # navigation inside the app UI stays in the file; links open outside
+            if kind == WebKit.PolicyDecisionType.NAVIGATION_ACTION or kind == WebKit.PolicyDecisionType.NEW_WINDOW_ACTION:
+                uri = decision.get_navigation_action().get_request().get_uri()
+                if not uri.startswith("file://") and not uri.startswith("about:"):
+                    decision.ignore()
+                    if uri.startswith(("http://", "https://")):
+                        subprocess.Popen(["xdg-open", uri], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    return True
+            return False
+
+        def show_page(self, url, name):
+            self.page.load_uri(url); self.stack.set_visible_child_name("page"); self.back.set_visible(True); self.set_title(f"{name} · office page")
+
+        def show_ui(self):
+            self.stack.set_visible_child_name("ui"); self.back.set_visible(False); self.set_title("Agents")
+
+        def toast(self, text):
+            self.toasts.add_toast(Adw.Toast(title=text[:120]))
+
+        def js(self, script):
+            self.web.evaluate_javascript(script, -1, None, None, None, None, None)
+
+        def emit(self, kind, data):
+            self.js(f"window.maluos && window.maluos._event({json.dumps({'type': kind, 'data': data}, default=str)})")
+
+        def on_message(self, _ucm, value):
+            try:
+                req = json.loads(value.to_string())
+            except Exception as e:
+                log(f"bad message: {e}"); return
+            rid, method, params = req.get("id"), req.get("method") or "", req.get("params") or {}
+            if method == "ready":
+                self.app.on_ready(params); return
+            if method == "toast":
+                self.toast(str(params.get("text") or "")); return
+
+            def work():
+                try:
+                    res = {"id": rid, "result": self.app.bridge.dispatch(method, params)}
+                except Exception as e:
+                    msg = getattr(e, "message", None) or str(e)
+                    res = {"id": rid, "error": f"{msg}"[:600]}
+                GLib.idle_add(lambda: self.js(f"window.maluos && window.maluos._reply({json.dumps(res, default=str)})") or False)
+            threading.Thread(target=work, daemon=True).start()
+
+    def Gdk_rgba():
+        gi.require_version("Gdk", "4.0")
+        from gi.repository import Gdk
+        c = Gdk.RGBA(); c.parse("rgba(0,0,0,0)"); return c
+
+    class App(Adw.Application):
+        def __init__(self):
+            super().__init__(application_id="com.maluos.Agents", flags=Gio.ApplicationFlags.NON_UNIQUE if self_test else Gio.ApplicationFlags.DEFAULT_FLAGS)
+            self.state, self.proxy, self.win, self.selected = None, None, None, selected
+            self.bridge = Bridge(self)
+            self.ready = False
+
+        def call(self, method, args, timeout=30000):
+            if not self.proxy:
+                raise ValueError("the session service (maluos-desktop-session) is not reachable")
+            sig = {"Refresh": None, "AgentAction": "(ss)", "OfficeAction": "(s)"}[method]
+            self.proxy.call_sync(method, GLib.Variant(sig, args) if sig else None, 0, timeout, None)
+
+        def do_activate(self):
+            if self.win:
+                self.win.present(); return
+            try:
+                node = Gio.DBusNodeInfo.new_for_xml(XML)
+                self.proxy = Gio.DBusProxy.new_for_bus_sync(Gio.BusType.SESSION, Gio.DBusProxyFlags.NONE, node.interfaces[0], BUS_NAME, OBJ, IFACE, None)
+                self.proxy.connect("g-signal", lambda _p, _s, sig, params: sig == "StateChanged" and self.set_state(params.unpack()[0]))
+                self.set_state(self.proxy.call_sync("GetState", None, 0, 10000, None).unpack()[0], push=False)
+            except Exception as e:
+                log(f"no session bus or service: {e}"); self.proxy = None
+            self.win = Window(self)
+            self.win.present()
+            if self_test:
+                GLib.timeout_add(90000, lambda: (print("self-test FAIL: the UI did not report ready within 90 s", file=sys.stderr), self.quit()) and False)
+
+        def set_state(self, text, push=True):
+            try:
+                self.state = json.loads(text) if text else None
+            except ValueError:
+                self.state = None
+            if push and self.win:
+                self.win.emit("state", self.bridge.state())
+
+        def on_ready(self, params):
+            self.ready = True
+            self.win.emit("state", self.bridge.state())
+            if self_test:
+                def report():
+                    st = self.bridge.state()
+                    loc = [a for a in st["agents"] if a["kind"] == "local"]; off = [a for a in st["agents"] if a["kind"] == "office"]
+                    print(f"self-test ok: Agents: service {'reachable' if st['service'] else 'unreachable'}, {len(loc)} local agents, {len(off)} office agents"
+                          + (f" at {st['office'].get('name')}" if st["office"].get("enrolled") else ", no office")
+                          + (f", selected {self.selected}" if self.selected else "") + f", ui {params.get('version')}")
+                    self.quit(); return False
+                GLib.timeout_add(800, report)
+
+    app = App()
+    return app.run(argv)
+
+
+def main(argv):
+    if "-h" in argv or "--help" in argv:
+        print(__doc__); return 0
+    if "--sync" in argv:
+        import maluos_agents_icons
+        state = {}
+        try:
+            r = subprocess.run(["gdbus", "call", "--session", "--dest", BUS_NAME, "--object-path", OBJ, "--method", f"{IFACE}.GetState"], capture_output=True, text=True, timeout=20)
+            import ast
+            state = json.loads(ast.literal_eval(r.stdout.strip())[0]) if r.returncode == 0 else {}
+        except Exception as e:
+            log(f"session state not readable ({e.__class__.__name__}); syncing from an empty state removes the icons")
+            if "--force" not in argv:
+                return 1
+        out = maluos_agents_icons.sync(state)
+        print(f"icons: {out['agents']} agents, {out['changed']} files changed, app folder {'written' if out['folder'] else 'not available'}"
+              + (f", {out['desktop_dir']}" if out.get("desktop_dir") else ""))
+        return 0
+    selected = None
+    if "--agent" in argv:
+        selected = argv[argv.index("--agent") + 1]
+    rest = [a for a in argv if a not in ("--self-test", "--agent", selected)]
+    return run_gui(rest, selected, "--self-test" in argv)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

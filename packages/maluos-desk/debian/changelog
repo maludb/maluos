@@ -1,3 +1,14 @@
+maluos-desk (0.3.0) resolute; urgency=medium
+
+  * The office's agents (Phase 12 slice 8): `maluctl office agents` lists
+    the directory the office publishes to this desk (endpoints.agents,
+    cached per user), `maluctl office agent ID card|send|tasks|activity`
+    talks to one over its task URL (maluos_agent_tasks) with the desk
+    token. The mock office serves two agents, their activity, their task
+    interface and an HTML page each.
+
+ -- Edward Honour <ed@maludb.org>  Fri, 23 Oct 2026 12:00:00 +0000
+
 maluos-desk (0.2.0) resolute; urgency=medium
 
   * MaluApps (Phase 12 slice 7): `maluctl office apps [--json] [--refresh]`

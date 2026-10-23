@@ -12,6 +12,10 @@ EnvironmentFile=/etc/maluos/agents/%i.env
 # The office this desk is enrolled with, when it is (maluctl office; MALUOS_OFFICE_*).
 EnvironmentFile=-/etc/maluos/office.env
 Environment=HOME=/var/lib/maluos/agents/%i
+# The agent's task socket (Phase 12 slice 8, maluos_agent_tasks): its owner talks to it here.
+RuntimeDirectory=maluos/agents/%i
+RuntimeDirectoryMode=0755
+Environment=MALUOS_AGENT_TASKS_SOCKET=/run/maluos/agents/%i/tasks.sock
 WorkingDirectory=/var/lib/maluos/agents/%i
 ExecStart=/bin/sh -c 'exec ${MALUOS_AGENT_EXEC}'
 LoadCredential=gateway-token:/etc/maluos/agents/%i.token

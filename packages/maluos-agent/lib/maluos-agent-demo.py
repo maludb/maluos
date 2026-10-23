@@ -24,6 +24,14 @@ def ask(prompt):
 
 
 print(f"demo agent {os.environ.get('MALUOS_AGENT')} as {os.environ.get('MALUOS_PRINCIPAL')} via {SOCK}", flush=True)
+# Tasks from the owner (the Agents app, maluctl agent send): each one is a question to the gateway (Phase 12 slice 8).
+try:
+    sys.path.insert(0, "/usr/lib/maluos")
+    import maluos_agent_tasks
+    if maluos_agent_tasks.serve(lambda t: ask(t["text"]), card={"description": "the demonstration agent: answers each task through the gateway", "capabilities": ["chat"]}):
+        print(f"tasks: serving {maluos_agent_tasks.socket_path()}", flush=True)
+except Exception as e:
+    print(f"tasks: not served ({e.__class__.__name__}: {str(e)[:120]})", flush=True)
 for attempt in range(30):
     try:
         print("answer: " + ask("Say hello from the demo agent."), flush=True); break

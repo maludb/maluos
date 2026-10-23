@@ -62,6 +62,9 @@ JSON over HTTPS on the office's person face (`app.<domain>`), versioned by
 | `GET /api/v1/desks/me` | bearer | the desk, its owner and endpoints (no presence change) |
 | `POST /api/v1/desks/leave` | bearer | retire the desk; the token is revoked |
 | `GET /api/v1/desks/apps` | bearer | the office's MaluApps catalogue for this desk (Phase 12 slice 7; `endpoints.apps` in the enrol and `me` answers; `null` when the office publishes none) |
+| `GET /api/v1/desks/agents` | bearer | the office's agents this desk may use (Phase 12 slice 8; `endpoints.agents`; `null` when the office publishes none) |
+| `GET …/agents/ID/activity` | bearer | one agent's recent activity as the desk's owner may see it (the agent entry's `activity` URL) |
+| `POST …/agents/ID/tasks` | bearer | the agent's task interface: JSON-RPC `agent/card`, `tasks/send`, `tasks/get`, `tasks/list` (the entry's `tasks` URL; maluos_agent_tasks) |
 
 **Enroll request**
 
@@ -219,3 +222,30 @@ the kernel's `desks/apps` endpoint is specified here for the kernel
 repository to build (the applications table decides what an office's
 desks see). The public catalogue is served over HTTPS and not yet signed.
 
+## Agents: the directory (Phase 12 slice 8)
+
+`maluctl office agents` lists the office's agents this desk may use, from
+`GET endpoints.agents` with the desk token, cached per user for 15
+minutes; the session service reads it after each heartbeat and the
+Agents app (maluos-agents) lists them beside the local agents:
+
+```json
+{"ok": true, "surface": 1,
+ "agents": [{"id": "helpdesk", "name": "Help Desk agent", "description": "Triages cases and drafts answers.",
+             "icon": "help-faq", "capabilities": ["helpdesk.triage", "kb.search"], "owner": "office", "node": "office-1",
+             "presence": "online", "state": "idle",
+             "page": "https://app.example.com/agents/helpdesk",
+             "tasks": "https://app.example.com/api/v1/desks/agents/helpdesk/tasks",
+             "activity": "https://app.example.com/api/v1/desks/agents/helpdesk/activity"}]}
+```
+
+`tasks` is the agent's task interface, the same JSON-RPC the local agents
+serve on their sockets (`maluos_agent_tasks`: `agent/card`, `tasks/send`
+with `message.parts[].text`, `tasks/get`, `tasks/list`), over HTTPS with
+the desk token; `activity` answers `{"activity": [{"ts", "kind", "actor",
+"summary"}]}`; `page` is the office's own page for the agent, which the
+Agents app loads beside it. Any of the three may be absent. Start, stop
+and restart of an office agent, and its logs, wait for the delegation
+envelope of Phase 13 slice 2. The mock office serves two agents; the
+kernel's `desks/agents` endpoint is specified here for the kernel
+repository (Agent HR decides what an office's desks see).

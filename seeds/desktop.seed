@@ -12,6 +12,8 @@ maluos-desktop-session
 maluos-desk
 # the Tools Installer (Phase 12 slice 7): maluctl tools and the install scripts
 maluos-tools
+# the Agents app (Phase 12 slice 8): local and office agents, their icons
+maluos-agents
 # session and shell
 gdm3
 gnome-shell

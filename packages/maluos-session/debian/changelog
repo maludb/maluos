@@ -1,3 +1,12 @@
+maluos-session (0.6.0) resolute; urgency=medium
+
+  * Phase 12 slice 8, the Agents app: the office's agents (maluctl office
+    agents) in the state as office.agents after each heartbeat; the agent
+    icons synced through `maluos-agents --sync` whenever the set of agents
+    changes; com.maluos.Agents.desktop pinned in the dock.
+
+ -- Edward Honour <ed@maludb.org>  Fri, 23 Oct 2026 12:00:00 +0000
+
 maluos-session (0.5.0) resolute; urgency=medium
 
   * Phase 12 slice 7, the Upgrade Manager: `maluos-desk --window updates`

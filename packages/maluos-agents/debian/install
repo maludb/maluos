@@ -1,0 +1,4 @@
+bin/maluos-agents                       usr/bin
+lib/maluos_agents_icons.py              usr/lib/maluos
+ui/*                                    usr/share/maluos-agents/ui
+desktop/com.maluos.Agents.desktop       usr/share/applications

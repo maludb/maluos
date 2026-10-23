@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agents</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div id="app">
+  <aside id="side">
+    <div class="side-head">
+      <h1>Agents</h1>
+      <span id="side-sub" class="muted"></span>
+    </div>
+    <div id="list"></div>
+    <div id="side-foot" class="muted"></div>
+  </aside>
+  <main id="main">
+    <div id="empty" class="empty">
+      <h2>No agent selected</h2>
+      <p class="muted">Pick an agent on the left. Agents on this desk are listed first, then the office's.</p>
+    </div>
+    <div id="detail" hidden>
+      <header id="head">
+        <div class="head-title">
+          <h2 id="name"></h2>
+          <div id="meta" class="muted"></div>
+        </div>
+        <div id="head-actions" class="actions"></div>
+      </header>
+      <nav id="tabs">
+        <button data-page="talk" class="tab active">Talk</button>
+        <button data-page="control" class="tab">Control</button>
+        <button data-page="policy" class="tab">Policy</button>
+        <button data-page="memory" class="tab">Memory</button>
+        <button data-page="activity" class="tab">Activity</button>
+      </nav>
+      <section id="page-talk" class="page active">
+        <div id="chat"></div>
+        <form id="compose">
+          <textarea id="text" rows="2" placeholder="Give the agent a task…"></textarea>
+          <button type="submit" id="send" class="primary">Send</button>
+        </form>
+        <div id="talk-note" class="note muted"></div>
+      </section>
+      <section id="page-control" class="page">
+        <div class="cards" id="control-cards"></div>
+        <div class="log-head"><h3>Logs</h3><div class="actions"><button id="logs-refresh">Refresh</button><button id="logs-terminal">Open in a terminal</button></div></div>
+        <pre id="logs" class="log"></pre>
+      </section>
+      <section id="page-policy" class="page"><div id="policy"></div></section>
+      <section id="page-memory" class="page"><div id="memory"></div></section>
+      <section id="page-activity" class="page">
+        <div class="log-head"><h3>Activity</h3><div class="actions"><button id="activity-refresh">Refresh</button></div></div>
+        <div id="activity"></div>
+      </section>
+    </div>
+  </main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

@@ -10,7 +10,7 @@ Rules-Requires-Root: no
 Package: maluos-desktop-session
 Architecture: all
 Depends: ${misc:Depends}, python3 (>= 3.12), python3-yaml, python3-gi, gir1.2-glib-2.0, gir1.2-gtk-4.0, gir1.2-adw-1, desktop-file-utils, gnome-shell (>= 50), gnome-shell (<< 51), maluos-desktop-branding (>= 0.4.2), maluos-firstboot (>= 0.1.8)
-Recommends: maluos-gateway (>= 0.3.2), maluos-vault (>= 0.3.0), maluos-agent (>= 0.2.1), maluos-desk (>= 0.2.0), gnome-software, xdg-terminal-exec
+Recommends: maluos-gateway (>= 0.3.2), maluos-vault (>= 0.3.0), maluos-agent (>= 0.3.0), maluos-desk (>= 0.3.0), maluos-agents (>= 0.1.0), gnome-software, xdg-terminal-exec
 Description: MaluOS agent-aware session: indicator, notifications, session service
  A per-user service (com.maluos.Session on the session bus, D-Bus
  activated) that reads what the OS already knows about this desk: the
@@ -40,3 +40,7 @@ Description: MaluOS agent-aware session: indicator, notifications, session servi
  signed in and says offline when the session ends, so the office's estate
  shows the desk's presence; the indicator and the Desk show the office,
  what it publishes to desks, and whether it still accepts this desk.
+ .
+ Agents: the office's agents ride in the state beside the local ones, and
+ the service keeps the agent icons (launchers, the Agents folder in the
+ grid, ~/Desktop/Agents) in sync through maluos-agents --sync.

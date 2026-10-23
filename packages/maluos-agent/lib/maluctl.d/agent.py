@@ -12,9 +12,12 @@ environment.
                      [--class agent] [--tiers a,b] [--backends a,b] [--cloud yes|no] [--egress public|internal|restricted]
                      [--budget usd_per_day=1] [--token] [--sandbox standard|strict] [--no-start]
                      [--owner user:NAME | --owner none]   who the agent belongs to (default: the sudo user)
-  maluctl agent list | show NAME
+  maluctl agent list [--json] | show NAME
   maluctl agent start|stop|restart|status|logs NAME
   maluctl agent run NAME -- CMD...            run a command as the agent (its identity, its environment)
+  maluctl agent card NAME [--json]            what the agent says about itself (its task interface, Phase 12 slice 8)
+  maluctl agent send NAME TEXT [--json]       give the agent a task and wait for its answer (as its owner, root or itself)
+  maluctl agent tasks NAME [--json]           the agent's recent tasks
   maluctl agent remove NAME [--purge]         stop the unit, disable the principal; --purge also deletes the user and its files
 
 Ownership (Phase 12 slice 3): an agent belongs to a person. The owner is
@@ -31,6 +34,13 @@ $CREDENTIALS_DIRECTORY/gateway-token. On a desk enrolled with an office
 (maluctl office) it also sees MALUOS_OFFICE_* from /etc/maluos/office.env:
 the office's URL and MCP endpoints, and the vault name of the desk token
 the owner may delegate or grant to it.
+
+Tasks (Phase 12 slice 8): an agent that serves maluos_agent_tasks (the
+demo agent does) answers tasks on /run/maluos/agents/NAME/tasks.sock
+(MALUOS_AGENT_TASKS_SOCKET in its environment; the unit's runtime
+directory). The socket admits its owner, root and the agent itself by
+peer credentials; the Agents app (maluos-agents) and `maluctl agent
+send|tasks|card` are its clients.
 """
 import json, os, pwd, re, subprocess, sys
 sys.path.insert(0, "/usr/lib/maluos")
@@ -131,6 +141,11 @@ def yaml_update(path, fn):
     os.chmod(path, 0o644)
 
 
+def tasks_mod():
+    import maluos_agent_tasks
+    return maluos_agent_tasks
+
+
 def main(args):
     try:
         return run(list(args))
@@ -143,13 +158,56 @@ def run(a):
         print(__doc__); return 0
     cmd = a.pop(0)
     if cmd == "list":
+        as_json = opt(a, "--json", flag=True)
         names = sorted(f[:-4] for f in os.listdir(AGENTS) if f.endswith(".env")) if os.path.isdir(AGENTS) else []
+        if as_json:
+            out = []
+            for n in names:
+                env = read_env(n)
+                out.append({"name": n, "principal": env.get("MALUOS_PRINCIPAL") or f"agent:{n}", "user": f"agent-{n}", "owner": env.get("MALUOS_AGENT_OWNER"),
+                            "exec": env.get("MALUOS_AGENT_EXEC"), "unit": UNIT.format(n),
+                            "active": subprocess.run(["systemctl", "is-active", UNIT.format(n)], capture_output=True, text=True).stdout.strip(),
+                            "tasks": os.path.exists(f"{tasks_mod().SOCKET_DIR}/{n}/tasks.sock")})
+            print(json.dumps(out, indent=1)); return 0
         if not names:
             print("(no agents; maluctl agent create NAME --exec CMD)"); return 0
         for n in names:
             st = subprocess.run(["systemctl", "is-active", UNIT.format(n)], capture_output=True, text=True).stdout.strip()
             print(f"{n:20} agent:{n:20} user agent-{n:18} owner {read_env(n).get('MALUOS_AGENT_OWNER') or '-':20} unit {st}")
         return 0
+    if cmd in ("card", "send", "tasks"):
+        as_json = opt(a, "--json", flag=True)
+        n = a.pop(0) if a else sys.exit(f"{cmd} NAME ...")
+        if not NAME_RE.match(n):
+            sys.exit("agent names: lowercase letters, digits, hyphens")
+        T = tasks_mod()
+        c = T.Client.local(n)
+        try:
+            if cmd == "card":
+                d = c.card()
+                if as_json:
+                    print(json.dumps(d, indent=1)); return 0
+                print(f"{d.get('name')}: {d.get('description') or '(no description)'}")
+                print(f"capabilities: {', '.join(d.get('capabilities') or []) or '-'}\nprincipal:    {d.get('principal')}\nowner:        {d.get('owner') or '-'}\nprotocol:     {d.get('protocol')}")
+                return 0
+            if cmd == "send":
+                text = " ".join(a).strip() or sys.exit("send NAME TEXT")
+                t = c.send(text)
+                if as_json:
+                    print(json.dumps(t, indent=1)); return 0 if t.get("state") == "completed" else 1
+                if t.get("state") == "completed":
+                    print(t["output"]["text"]); return 0
+                print(f"task {t['id']} {t['state']}: {t.get('error') or ''}", file=sys.stderr); return 1
+            rows = c.list()
+            if as_json:
+                print(json.dumps(rows, indent=1)); return 0
+            if not rows:
+                print("(no tasks yet)"); return 0
+            for t in rows:
+                print(f"{t['ts'][:19]}  {t['id']}  {t['state']:9} {t['input']['text'][:50]!r:54} -> {(t.get('output') or {}).get('text', t.get('error') or '')[:60]!r}")
+            return 0
+        except T.TaskError as e:
+            raise RuntimeError(f"agent {n}: {e.message}")
     if cmd in ("start", "stop", "restart", "status"):
         n = a.pop(0); return subprocess.run(["systemctl", cmd, UNIT.format(n)] + (["--no-pager"] if cmd == "status" else [])).returncode
     if cmd == "logs":

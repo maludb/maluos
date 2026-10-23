@@ -759,6 +759,28 @@ mock office's agents produce the launchers, the app folder and the
 desktop folder; the app starts, lists them, starts and stops a local
 agent, and shows a remote agent's activity.
 
+### Slice 8 status (2026-10-23)
+
+Built as planned, with the owner's decision for the WebKitGTK shell
+(2026-10-23) and three things the archive and the kernel decided:
+
+| Item | Where | Notes |
+|---|---|---|
+| The task interface | maluos-agent 0.3.0: `maluos_agent_tasks` | JSON-RPC shaped like A2A (`agent/card`, `tasks/send`, `tasks/get`, `tasks/list`) over HTTP on the agent's socket `/run/maluos/agents/NAME/tasks.sock` (the unit's new runtime directory; `MALUOS_AGENT_TASKS_SOCKET`). The socket admits the owner, root and the agent itself by peer credentials. The same client speaks to an office agent's task URL with the desk token. The demo agent serves it (each task is a question to the gateway); the idle agent does not. `maluctl agent card\|send\|tasks NAME`, `maluctl agent list --json`. Phase 13 slice 2 adds the delegation envelope on top, not a new protocol. |
+| The office's agents | maluos-desk 0.3.0: `maluctl office agents`, `maluctl office agent ID card\|send\|tasks\|activity` | `endpoints.agents` in the contract (docs/desk-enrolment.md): per agent a card, presence and state, capabilities, and optional `tasks`, `activity` and `page` URLs. The mock office serves two agents, their tasks, activity and an HTML page each. The kernel's endpoint is specified, not built. |
+| The Agents app | maluos-agents 0.1.0 (new): `maluos-agents [--agent ID]` | GTK 4/libadwaita window holding a WebKitGTK 6.0 view of `/usr/share/maluos-agents/ui` (HTML/CSS/JS, no framework); the native side answers the UI's JSON-RPC over the script message handler: the session bus (state, AgentAction), the task sockets and URLs, the vault (ledger, delegations, grants, compartments), journalctl, terminals, and the office's agent page in a second view behind a Back button. Pages Talk, Control, Policy, Memory, Activity as planned; where a thing waits for Phase 13 (an office agent's start/stop and logs, claims with provenance, Agent HR edits) the page says which slice brings it. `--self-test` builds the window, waits for the UI's ready message and prints the counts. |
+| The icons | maluos-agents: `maluos_agents_icons`, `maluos-agents --sync`; maluos-session 0.6.0 | One launcher per agent (`maluos-agent-local-NAME.desktop`, `maluos-agent-office-ID.desktop`, `Exec=maluos-agents --agent local:NAME\|office:ID`) in `~/.local/share/applications`, the **Agents** folder of the grid (`org.gnome.desktop.app-folders`, folder `maluos-agents`, written through Gio.Settings) and `~/Desktop/Agents`. The session runs the sync whenever the set of agents changes (local names, owners and commands; office ids, names and icons) and carries the office's agents in its state (`office.agents`, read after each heartbeat). An agent that goes away takes its icon with it; leaving the office removes the office's. |
+| Icons on the desktop background | not possible in 26.04 | `gnome-shell-extension-desktop-icons-ng` is not in the resolute archive (Ubuntu dropped it with GNOME 49), so nothing draws `~/Desktop` on the background. The Agents folder in the grid and `~/Desktop/Agents` (Files) carry the icons; if a maintained desktop-icons extension returns to the archive, the folder is already in place. Decision for the owner: live with the grid folder, or ship our own shell extension for it later. |
+| The dock | maluos-session 0.6.0 | `com.maluos.Agents.desktop` pinned after the Upgrade Manager. |
+| Packages | maluos-agent 0.3.0, maluos-desk 0.3.0, maluos-agents 0.1.0, maluos-desktop-session 0.6.0, maluos-meta 0.2.6 (desktop seed: maluos-agents) | gir1.2-webkit-6.0 (WebKitGTK 2.52) joins the desktop image through maluos-agents' Depends. |
+| Tests | tests/qcow2-boot-test.sh; desktop rootfs and qcow2 rebuilt 2026-10-23 12:29 UTC, UEFI boot test 230 ok / 0 FAIL | Server section: the demo agent serves its socket, `card`, `send` answered through the gateway, `tasks` lists it, another user refused by peer credentials, `list --json`. Desktop section: the launcher for agent desk written by the session, `~/Desktop/Agents`, the grid folder, the idle agent's clean refusal, `maluos-agents --agent local:desk --self-test` on the session's Wayland display; with the mock office: `office agents`, `office agent helpdesk send\|activity`, `office.agents` in the state, the office launchers, the self-test with 2 office agents, the icons gone after `office leave`. |
+
+Deferred inside slice 8: re-reading an office agent's activity on a
+timer (the page has Refresh); the office's agent page is loaded with no
+desk token (the office's own login applies); `tasks/send` waits for the
+answer (up to 3 minutes) rather than streaming; the Memory page lists the
+agent's vault compartment and names Phase 13 slice 4 for claims.
+
 ### After that
 
 1. **Desks at a real office.** The kernel half is built and vendored

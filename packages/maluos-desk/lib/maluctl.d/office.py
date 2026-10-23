@@ -16,6 +16,9 @@ shows the desk and whether it is online.
                                                    public one (download.maluos.com/apps/catalog.json), cached per user
   maluctl office apps install|remove|open ID       a web app becomes a launcher opening it in Firefox's own window;
                                                    a deb app installs from apt.maluos.com (pkexec apt-get)
+  maluctl office agents [--json] [--refresh]       the office's agents this desk may use (endpoints.agents; Phase 12 slice 8)
+  maluctl office agent ID card|activity|tasks [--json]       one of them: its card, its recent activity, the tasks sent from here
+  maluctl office agent ID send TEXT [--json]       give it a task and wait for the answer (its task URL, the desk token)
   sudo maluctl office leave [--keep-secret]
 
 Agents: /etc/maluos/office.env names the office's endpoints (MALUOS_OFFICE_*)
@@ -27,7 +30,7 @@ and read the token for the office's MCP servers with
 import json, os, pwd, socket, subprocess, sys, time, urllib.error, urllib.request
 sys.path.insert(0, "/usr/lib/maluos")
 
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 SURFACE = 1
 CONF = os.environ.get("MALUOS_OFFICE_CONF", "/etc/maluos/office.yaml")
 ENVF = os.environ.get("MALUOS_OFFICE_ENV", "/etc/maluos/office.env")
@@ -377,6 +380,130 @@ def apps(a):
     return rc
 
 
+# -- the office's agents (Phase 12 slice 8): the directory the Agents app lists beside the local agents
+def agents_cache_path():
+    base = os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache")
+    return os.path.join(base, "maluos-agents", "office.json")
+
+
+def _norm_agent(a, office_url, office_name):
+    a = dict(a)
+    a["id"] = str(a.get("id"))
+    a.setdefault("name", a["id"]); a.setdefault("description", ""); a.setdefault("icon", "maluos-logo")
+    a.setdefault("capabilities", []); a.setdefault("presence", "unknown"); a.setdefault("state", None)
+    a["office"] = office_name; a["office_url"] = office_url
+    return a
+
+
+def fetch_agents(refresh=False):
+    """The office's agents (endpoints.agents with the desk token), cached per user for 15 minutes; an empty
+    list with `error` when there is no office or it does not answer (the cache, marked stale, when there is one)."""
+    cache = None
+    try:
+        cache = json.load(open(agents_cache_path()))
+    except (OSError, ValueError):
+        pass
+    conf = read_conf()
+    if not conf:
+        try:
+            os.remove(agents_cache_path())
+        except OSError:
+            pass
+        return {"fetched_at": int(time.time()), "office": None, "office_url": None, "agents": [], "error": "not enrolled with an office"}
+    if cache and not refresh and cache.get("office_url") == conf.get("url") and time.time() - (cache.get("fetched_at") or 0) < 900:
+        return cache
+    ep = (conf.get("endpoints") or {}).get("agents")
+    office_name = (conf.get("office") or {}).get("name")
+    if not ep:
+        return {"fetched_at": int(time.time()), "office": office_name, "office_url": conf.get("url"), "agents": [], "error": "the office publishes no agents to desks (no endpoints.agents)"}
+    try:
+        st, r = http("GET", ep, token=token_for_me(), timeout=15)
+        if st != 200 or not isinstance(r.get("agents"), list):
+            raise RuntimeError(f"HTTP {st} {r.get('error') or ''}".strip())
+    except Exception as e:
+        err = f"office agents: {e.__class__.__name__ if not isinstance(e, RuntimeError) else ''} {str(e)[:120]}".strip()
+        if cache and cache.get("office_url") == conf.get("url"):
+            cache["stale"] = True; cache["error"] = err
+            return cache
+        return {"fetched_at": int(time.time()), "office": office_name, "office_url": conf.get("url"), "agents": [], "error": err}
+    cat = {"fetched_at": int(time.time()), "office": office_name, "office_url": conf.get("url"),
+           "agents": sorted((_norm_agent(a, conf.get("url"), office_name) for a in r["agents"] if a.get("id") is not None), key=lambda x: x["name"]), "error": None}
+    try:
+        os.makedirs(os.path.dirname(agents_cache_path()), exist_ok=True)
+        tmp = agents_cache_path() + ".tmp"
+        with open(tmp, "w") as fh:
+            json.dump(cat, fh)
+        os.replace(tmp, agents_cache_path())
+    except OSError:
+        pass
+    return cat
+
+
+def agents(a):
+    cat = fetch_agents(refresh=opt(a, "--refresh", flag=True))
+    if opt(a, "--json", flag=True):
+        print(json.dumps(cat, indent=None if opt(a, "--compact", flag=True) else 2)); return 0
+    if cat.get("error") and not cat.get("agents"):
+        print(cat["error"]); return 1
+    print(f"agents at {cat.get('office') or cat.get('office_url')}" + (" (cached, the office was unreachable)" if cat.get("stale") else "") + ":")
+    for x in cat["agents"]:
+        print(f"  {x['id']:<16} {x['name']:<22} {x.get('presence') or '':<8} {x.get('state') or '':<8} {', '.join(x.get('capabilities') or [])}")
+    return 0
+
+
+def agent(a):
+    """maluctl office agent ID card|activity|tasks|send ..."""
+    as_json = opt(a, "--json", flag=True)
+    if len(a) < 2:
+        sys.exit("maluctl office agent ID card|activity|tasks|send TEXT")
+    aid, sub = a.pop(0), a.pop(0)
+    cat = fetch_agents()
+    ag = next((x for x in cat.get("agents") or [] if x["id"] == aid), None)
+    if not ag:
+        raise RuntimeError(cat.get("error") or f"no agent {aid!r} at the office (maluctl office agents)")
+    if sub == "activity":
+        if not ag.get("activity"):
+            raise RuntimeError("the office publishes no activity for this agent")
+        st, r = http("GET", ag["activity"], token=token_for_me(), timeout=15)
+        if st != 200:
+            raise RuntimeError(f"HTTP {st} {r.get('error') or ''}")
+        rows = r.get("activity") or []
+        if as_json:
+            print(json.dumps(rows, indent=1)); return 0
+        for x in rows:
+            print(f"{(x.get('ts') or '')[:19]}  {x.get('kind') or '':<10} {x.get('actor') or '':<14} {x.get('summary') or ''}")
+        return 0
+    if not ag.get("tasks"):
+        raise RuntimeError("the office publishes no task interface for this agent")
+    sys.path.insert(0, "/usr/lib/maluos")
+    import maluos_agent_tasks as T
+    c = T.Client(ag["tasks"], token=token_for_me())
+    try:
+        if sub == "card":
+            d = c.card()
+            if as_json:
+                print(json.dumps(d, indent=1)); return 0
+            print(f"{d.get('name')}: {d.get('description') or ''}\ncapabilities: {', '.join(d.get('capabilities') or []) or '-'}\nprotocol:     {d.get('protocol')}"); return 0
+        if sub == "send":
+            text = " ".join(a).strip() or sys.exit("send TEXT")
+            t = c.send(text)
+            if as_json:
+                print(json.dumps(t, indent=1)); return 0 if t.get("state") == "completed" else 1
+            if t.get("state") == "completed":
+                print(t["output"]["text"]); return 0
+            print(f"task {t['id']} {t['state']}: {t.get('error') or ''}", file=sys.stderr); return 1
+        if sub == "tasks":
+            rows = c.list()
+            if as_json:
+                print(json.dumps(rows, indent=1)); return 0
+            for t in rows:
+                print(f"{t['ts'][:19]}  {t['id']}  {t['state']:9} {t['input']['text'][:50]!r:54} -> {(t.get('output') or {}).get('text', t.get('error') or '')[:60]!r}")
+            return 0
+    except T.TaskError as e:
+        raise RuntimeError(f"agent {aid}: {e.message}")
+    sys.exit("maluctl office agent ID card|activity|tasks|send TEXT")
+
+
 # -- commands
 def enroll(a):
     need_root()
@@ -569,6 +696,10 @@ def main(a):
             return leave(a)
         if cmd == "apps":
             return apps(a)
+        if cmd == "agents":
+            return agents(a)
+        if cmd == "agent":
+            return agent(a)
     except RuntimeError as e:
         sys.exit(f"maluctl office {cmd}: {e}")
     print(__doc__); return 2

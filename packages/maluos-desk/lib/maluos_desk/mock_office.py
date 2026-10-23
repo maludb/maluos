@@ -6,6 +6,10 @@ inspection hooks. Stdlib only; deterministic replies.
                                       [--models office-7b,office-embed] [--heartbeat-s 300]
 
   GET  /api/v1/health                      {"ok": true, "office": NAME}
+  GET  /api/v1/desks/agents                the office's agents this desk may use (Phase 12 slice 8); per agent:
+  GET  /api/v1/desks/agents/ID/activity    its recent activity, and
+  POST /api/v1/desks/agents/ID/tasks       its task interface (JSON-RPC agent/card, tasks/send, tasks/get, tasks/list)
+  GET  /agents/ID                          the office's own page for the agent (HTML; the Agents app shows it)
   POST /api/v1/desks/enroll                the contract
   POST /api/v1/desks/heartbeat, GET /api/v1/desks/me, POST /api/v1/desks/leave   (Bearer desk token)
   GET  /desk-models/                       200 (the gateway's reachability probe)
@@ -34,11 +38,53 @@ class Office:
         self.heartbeats, self.chats, self.mcp = [], [], []
         self.next_id = 41
         self.lock = threading.Lock()
+        self.tasks = {a["id"]: [] for a in self.AGENTS}      # agent id -> tasks (Phase 12 slice 8)
 
     def endpoints(self, base):
         return {"heartbeat": f"{base}/api/v1/desks/heartbeat", "me": f"{base}/api/v1/desks/me", "leave": f"{base}/api/v1/desks/leave",
                 "records": f"{base}/mcp/records", "activity": f"{base}/mcp/activity", "memory": f"{base}/mcp/memory", "actions": None,
-                "models": {"url": f"{base}/desk-models", "models": list(self.models)}, "apps": f"{base}/api/v1/desks/apps"}
+                "models": {"url": f"{base}/desk-models", "models": list(self.models)}, "apps": f"{base}/api/v1/desks/apps",
+                "agents": f"{base}/api/v1/desks/agents"}
+
+    AGENTS = [{"id": "helpdesk", "name": "Help Desk agent", "description": "Triages cases and drafts answers from the knowledgebase.", "icon": "help-faq",
+               "capabilities": ["helpdesk.triage", "kb.search"], "owner": "office", "node": "office-1", "presence": "online", "state": "idle"},
+              {"id": "research", "name": "Research agent", "description": "Reads the records you may see and summarises them.", "icon": "system-search",
+               "capabilities": ["research", "summarise"], "owner": "office", "node": "office-1", "presence": "online", "state": "idle"}]
+
+    def agents_answer(self, base):
+        out = []
+        for a in self.AGENTS:
+            d = dict(a, page=f"{base}/agents/{a['id']}", tasks=f"{base}/api/v1/desks/agents/{a['id']}/tasks", activity=f"{base}/api/v1/desks/agents/{a['id']}/activity")
+            d["task_count"] = len(self.tasks.get(a["id"]) or [])
+            out.append(d)
+        return {"ok": True, "surface": SURFACE, "agents": out}
+
+    def agent_activity(self, aid, desk):
+        rows = [{"ts": t["ts"], "kind": "task", "actor": f"desk #{t['desk_id']}", "summary": f"task {t['id']} {t['state']}: {t['input']['text'][:60]}"} for t in reversed(self.tasks.get(aid) or [])]
+        rows.append({"ts": now(), "kind": "directory", "actor": "office", "summary": f"agent {aid} listed for desk #{desk['id']} ({desk['owner']['email']})"})
+        return {"ok": True, "surface": SURFACE, "activity": rows[:50]}
+
+    def agent_rpc(self, aid, b, desk):
+        a = next((x for x in self.AGENTS if x["id"] == aid), None)
+        method, rid, params = b.get("method"), b.get("id"), b.get("params") or {}
+        if method == "agent/card":
+            return {"jsonrpc": "2.0", "id": rid, "result": dict(a, protocol="maluos-tasks/0.1", principal=f"agent:{aid}")}
+        if method == "tasks/send":
+            parts = (params.get("message") or {}).get("parts") or []
+            text = " ".join(p.get("text", "") for p in parts if isinstance(p, dict)).strip()
+            if not text:
+                return {"jsonrpc": "2.0", "id": rid, "error": {"code": -32602, "message": "tasks/send needs message.parts with text"}}
+            t = {"id": secrets.token_hex(6), "state": "completed", "ts": now(), "desk_id": desk["id"], "input": {"text": text, "parts": parts},
+                 "output": {"text": f"office agent {aid} reply to: {text}", "artifacts": []}, "error": None, "done_ts": now()}
+            self.tasks.setdefault(aid, []).append(t)
+            return {"jsonrpc": "2.0", "id": rid, "result": t}
+        if method == "tasks/get":
+            t = next((x for x in self.tasks.get(aid) or [] if x["id"] == params.get("id")), None)
+            return {"jsonrpc": "2.0", "id": rid, "result": t} if t else {"jsonrpc": "2.0", "id": rid, "error": {"code": -32004, "message": "no such task"}}
+        if method == "tasks/list":
+            mine = [t for t in self.tasks.get(aid) or [] if t["desk_id"] == desk["id"]]
+            return {"jsonrpc": "2.0", "id": rid, "result": {"tasks": list(reversed(mine))[:int(params.get("limit") or 50)]}}
+        return {"jsonrpc": "2.0", "id": rid, "error": {"code": -32601, "message": f"unknown method {method}"}}
 
     APPS = [{"id": "malumail", "name": "MaluMail", "description": "Mail for the office, with agents that read and draft with you.", "icon": "mail-unread", "kind": "web", "path": "/apps/mail", "version": "1"},
             {"id": "helpdesk", "name": "Help Desk", "description": "Cases, queues and the Help Desk agent.", "icon": "help-faq", "kind": "web", "path": "/apps/helpdesk", "version": "1"},
@@ -122,6 +168,31 @@ class Handler(BaseHTTPRequestHandler):
             if e:
                 return self.err(*e)
             return self.send(200, o.apps_answer(self.base()))
+        if p == "/api/v1/desks/agents":
+            desk, e = self.desk_from_bearer()
+            if e:
+                return self.err(*e)
+            with o.lock:
+                return self.send(200, o.agents_answer(self.base()))
+        if p.startswith("/api/v1/desks/agents/") and p.endswith("/activity"):
+            desk, e = self.desk_from_bearer()
+            if e:
+                return self.err(*e)
+            aid = p.split("/")[5]
+            if aid not in o.tasks:
+                return self.err(404, "not_found", f"no agent {aid}")
+            with o.lock:
+                return self.send(200, o.agent_activity(aid, desk))
+        if p.startswith("/agents/"):
+            aid = p.split("/")[2]
+            a = next((x for x in o.AGENTS if x["id"] == aid), None)
+            if not a:
+                return self.err(404, "not_found", f"no agent {aid}")
+            html = (f"<!doctype html><html><head><meta charset='utf-8'><title>{a['name']} · {o.name}</title></head>"
+                    f"<body style='font-family:sans-serif;margin:2em'><h1>{a['name']}</h1><p>{a['description']}</p>"
+                    f"<p>This is {o.name}'s page for agent <code>{aid}</code> (mock). Capabilities: {', '.join(a['capabilities'])}.</p></body></html>").encode()
+            self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.send_header("Content-Length", str(len(html))); self.end_headers()
+            self.wfile.write(html); return
         if p in ("/desk-models", "/desk-models/"):
             return self.send(200, {"ok": True, "office": o.name})
         if p == "/desk-models/v1/models":
@@ -176,6 +247,15 @@ class Handler(BaseHTTPRequestHandler):
             if e:
                 return self.err(*e)
             return self.mcp(p, b, desk)
+        if p.startswith("/api/v1/desks/agents/") and p.endswith("/tasks"):
+            desk, e = self.desk_from_bearer()
+            if e:
+                return self.err(*e)
+            aid = p.split("/")[5]
+            if aid not in o.tasks:
+                return self.err(404, "not_found", f"no agent {aid}")
+            with o.lock:
+                return self.send(200, o.agent_rpc(aid, b, desk))
         if p == "/mock/retire":
             with o.lock:
                 targets = [o.desks[b["desk_id"]]] if b.get("desk_id") in o.desks else list(o.desks.values())

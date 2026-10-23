@@ -1,0 +1,26 @@
+Source: maluos-agents
+Section: gnome
+Priority: optional
+Maintainer: Edward Honour <ed@maludb.org>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.6.2
+Homepage: https://github.com/maludb/maluos
+Rules-Requires-Root: no
+
+Package: maluos-agents
+Architecture: all
+Depends: ${misc:Depends}, python3 (>= 3.12), python3-gi, gir1.2-glib-2.0, gir1.2-gtk-4.0, gir1.2-adw-1, gir1.2-webkit-6.0, desktop-file-utils, xdg-user-dirs, maluos-desktop-session (>= 0.6.0), maluos-agent (>= 0.3.0), maluos-vault (>= 0.3.0)
+Recommends: maluos-desk (>= 0.3.0), xdg-terminal-exec
+Description: MaluOS Agents app: talk to and control local and office agents
+ One window for every agent the person can use: the agents on this desk
+ (theirs first) and, on a desk enrolled with a Business OS office, the
+ office's agents. For the selected agent: Talk (tasks sent and answers
+ received over the agent's task interface), Control (start, stop,
+ restart, logs, a one-off command), Policy, Memory and Activity. The UI
+ is web technology in a WebKitGTK window; the native side is this
+ package's Python: the session bus, the task sockets, the vault, the
+ office and the icons.
+ .
+ The icons: one launcher per agent in the Agents folder of the GNOME
+ grid and in ~/Desktop/Agents, kept in sync by the session service as
+ agents come and go (maluos-agents --sync).

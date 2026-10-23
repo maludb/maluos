@@ -4,7 +4,7 @@
 [org.gnome.shell:ubuntu]
 enabled-extensions=['maluos-session@maluos.com']
 # The dock (Phase 12 slice 7): the browser, files, settings and software, then the MaluOS windows.
-favorite-apps=['firefox.desktop', 'org.gnome.Nautilus.desktop', 'org.gnome.Settings.desktop', 'org.gnome.Software.desktop', 'org.gnome.Ptyxis.desktop', 'com.maluos.Desk.desktop', 'com.maluos.MaluApps.desktop', 'com.maluos.CredentialManager.desktop', 'com.maluos.ToolsInstaller.desktop', 'com.maluos.UpgradeManager.desktop']
+favorite-apps=['firefox.desktop', 'org.gnome.Nautilus.desktop', 'org.gnome.Settings.desktop', 'org.gnome.Software.desktop', 'org.gnome.Ptyxis.desktop', 'com.maluos.Desk.desktop', 'com.maluos.MaluApps.desktop', 'com.maluos.CredentialManager.desktop', 'com.maluos.ToolsInstaller.desktop', 'com.maluos.UpgradeManager.desktop', 'com.maluos.Agents.desktop']
 
 # GNOME Software keeps downloading updates in the background (offline updates
 # through PackageKit) but the MaluOS session does the one "updates available"
