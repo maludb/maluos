@@ -34,9 +34,9 @@ before it is green by about 20:00 UTC.
 | A2 | Fix what A1 finds; rebuild only what the fix touches | done, nothing to fix | S | A1 | |
 | A3 | Commit and push slice 8 | ready | S | A2 | CI then boot-tests the server image with maluos-agent 0.3.0 |
 | A4 | Server set: rootfs, qcow2, ISO, iso-check, UEFI boot test, share (BIOS is CI's) | done 13:30, 138 ok / 0 FAIL, share updated | 2 h wall | A3 | the server images on the share are still the slice 6 set; maluos-firstboot 0.1.8 and maluos-agent 0.3.0 apply to servers |
-| A5 | Desktop ISO rebuilt with slice 8 and A7, iso-check, share | queued behind A4 and the A7 desktop chain | S | A2 | five minutes with the chain script |
-| A6 | Release prep: docs/release.md row drafted, download page text ready, docs/PLAN.md and phase12 status rows final | planned | S | A4, A5 | |
-| A7 | Filler: the session refreshes the MaluApps catalogue on each heartbeat (slice 7 leftover) | coded (maluos-desktop-session 0.6.1), desktop chain queued | S | A3 | boot test check added; commit after the test |
+| A5 | Desktop ISO rebuilt with slice 8 and A7, iso-check, share | done 14:35 (sha 1a215c…) | S | A2 | |
+| A6 | Release prep: docs/release.md row drafted, download page text ready, docs/PLAN.md and phase12 status rows final | done 14:40 (the commit id goes in at the tag) | S | A4, A5 | docs/install-plan.md written for Phase 11 slice 2 meanwhile |
+| A7 | Filler: the session refreshes the MaluApps catalogue on each heartbeat (slice 7 leftover) | done: maluos-desktop-session 0.6.1, desktop UEFI 231 ok / 0 FAIL 14:31 | S | A3 | |
 | A8 | Filler: remove packages/maluos-meta/debian/docs/claude-log/ from the repo | done 2ba9fc7 (and `**/claude-log/` ignored) | S | nothing | |
 | A9 | Filler: anything the owner wants changed in the Agents app after seeing it | idea | S to M | A1 | |
 | A10 | Freeze 22:00 UTC: fixes only | | | A4, A5 | |

@@ -39,15 +39,22 @@ snaps; the browser is Firefox from Mozilla's own apt repository, GNOME
 Software installs debs only, and security and MaluOS updates install
 themselves through apt (`maluctl update status` shows what is pending).
 
-The desktop is the fourth desktop release. It adds desk enrolment:
-`sudo maluctl office enroll URL --code CODE` joins the desk to a MaluOS
-Business OS office, with the person's desk token in the vault, the
-office's model endpoint as a gateway rung, presence heartbeats from the
-session and the office on the Desk page; the server images carry the
-office half of the same contract. It is tested in virtual machines (BIOS
-and UEFI) and installed on a laptop and on Proxmox; the graphics stack
-and the boot splash have not yet been seen on a range of real hardware.
-The desktop needs at least 4 GB of memory and 40 GB of disk; 8 GB or more
+The desktop is the fifth desktop release, and the first to carry two
+slices at once. The desk now protects agents from a sleeping machine
+(the screen never blanks and nothing suspends on its own), and five new
+windows sit in the dock: the Upgrade Manager (pending updates, install
+now, the automatic-update switches, the history), the Tools Installer
+(Google Chrome, VS Code, Claude Code, Codex and Ollama in one click),
+MaluApps (the office's applications and the public catalogue as
+launchers), the Credential Manager (your vault secrets, delegations and
+requests) and the Agents app: one window to talk to and control the
+agents on your desk and, on an enrolled desk, the office's, with each
+agent an icon in the Agents folder of the app grid and in ~/Desktop/Agents.
+Agents gain a task interface (`maluctl agent send NAME "…"`); the server
+images carry it too. It is tested in virtual machines (BIOS and UEFI)
+and installed on a laptop and on Proxmox; the graphics stack and the
+boot splash have not yet been seen on a range of real hardware. The
+desktop needs at least 4 GB of memory and 40 GB of disk; 8 GB or more
 is recommended, plus the memory of any local model you run.
 
 ## Verify the download
