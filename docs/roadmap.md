@@ -33,7 +33,7 @@ before it is green by about 20:00 UTC.
 | A1 | Slice 8 desktop chain: publish, rootfs, qcow2, UEFI boot test | done 12:29, 230 ok / 0 FAIL | 1.5 h wall | packages built 11:35 | log build/logs/chain-slice8.log; the WebKit window built and reported ready on the first run |
 | A2 | Fix what A1 finds; rebuild only what the fix touches | done, nothing to fix | S | A1 | |
 | A3 | Commit and push slice 8 | ready | S | A2 | CI then boot-tests the server image with maluos-agent 0.3.0 |
-| A4 | Server set: rootfs, qcow2, ISO, iso-check, UEFI boot test, share (BIOS is CI's) | running since 12:32 | 2 h wall | A3 | the server images on the share are still the slice 6 set; maluos-firstboot 0.1.8 and maluos-agent 0.3.0 apply to servers |
+| A4 | Server set: rootfs, qcow2, ISO, iso-check, UEFI boot test, share (BIOS is CI's) | done 13:30, 138 ok / 0 FAIL, share updated | 2 h wall | A3 | the server images on the share are still the slice 6 set; maluos-firstboot 0.1.8 and maluos-agent 0.3.0 apply to servers |
 | A5 | Desktop ISO rebuilt with slice 8 and A7, iso-check, share | queued behind A4 and the A7 desktop chain | S | A2 | five minutes with the chain script |
 | A6 | Release prep: docs/release.md row drafted, download page text ready, docs/PLAN.md and phase12 status rows final | planned | S | A4, A5 | |
 | A7 | Filler: the session refreshes the MaluApps catalogue on each heartbeat (slice 7 leftover) | coded (maluos-desktop-session 0.6.1), desktop chain queued | S | A3 | boot test check added; commit after the test |
@@ -42,19 +42,20 @@ before it is green by about 20:00 UTC.
 | A10 | Freeze 22:00 UTC: fixes only | | | A4, A5 | |
 | A11 | Release 26.04.20261024: scripts/release.sh in tmux (the owner types the passphrase), then verify GitHub, R2, apt.maluos.com, publish the download page, start the CI run | planned | 1 h wall | A10, 00:00 UTC | the release holds slices 7 and 8 |
 
-## B. Slice 9 candidates (Phase 12)
+## B. Slice 9 (Phase 12), planned 2026-10-23
 
-Not yet cut. The owner picks; the recommendation is B1 plus B2 as one
-slice, since every item is in this repo and visible on the desk.
+Cut as recommended: the session leftovers and the slice 7 and 8
+leftovers, all in this repository (docs/phase12-desktop.md "Slice 9").
 
 | # | Task | Status | Effort | Depends on | Notes |
 |---|---|---|---|---|---|
-| B1 | The session, further: grant budget and level choice in the notification; credential requests surfaced with the model call that caused them; agents' budget alerts attributed to their owners | planned (phase12 "After that" 5) | M | nothing | |
-| B2 | Slice 7 and 8 leftovers: re-authentication before the Credential Manager reveals a secret; streaming answers in the Agents app; the office agent page loaded with the desk's identity; activity re-read on a timer | planned | M | nothing | re-authentication needs a polkit or PAM path, the one design question |
-| B3 | A desktop-icons shell extension of our own, so agent icons appear on the desktop background | idea | M to L | owner's decision | gnome-shell-extension-desktop-icons-ng is not in the 26.04 archive; the grid's Agents folder and ~/Desktop/Agents stand in |
-| B4 | Signing the public apps catalogue (download.maluos.com/apps/catalog.json) | planned | S to M | a key decision | which key, where verification happens (maluctl office apps) |
-| B5 | Updates, further: DEP-11 metadata for apt.maluos.com so GNOME Software lists MaluOS packages; a release upgrade path to the next LTS | planned (phase12 "After that" 2) | M (DEP-11), L (upgrade path) | nothing | |
-| B6 | Branding the rest: firmware logo path on hardware, GNOME help, the ISO's own boot splash | planned (phase12 "After that" 3) | M | hardware to test on | |
+| B1 | Grant requests decided with level, expiry and budget; "Choose…" opens the Credential Manager | planned | S | nothing | session, Desk, Credential Manager |
+| B2 | A grant request carries the model call that caused it | planned | M | nothing | vault request rows, gateway, session |
+| B3 | Agents' budget alerts reach their owners | planned | S | nothing | gateway alerts, session |
+| B4 | Re-authentication (polkit auth_self) before a reveal, a rotation and a backup | planned | M | nothing | the one design in the slice; ledger detail reauth |
+| B5 | Agents app: streaming answers, the office page with the desk's identity, timers | planned | M | nothing | maluos-agent task progress, maluos-agents, mock office |
+| B6 | The public MaluApps catalogue signed and verified | planned | S | a key decision (F2) | release key by default |
+| B7 | Not in slice 9: desktop-background icons (F1), DEP-11 and the upgrade path, branding on hardware | deferred | | | their own slices later |
 
 ## C. Kernel-side work (maludb-os-core repository)
 
@@ -97,8 +98,8 @@ owner. Each slice ends with its test on the three-machine proof.
 
 | # | Decision | Where it is written | Blocks |
 |---|---|---|---|
-| F1 | Agent icons on the desktop background: live with the grid folder, or ship our own shell extension | docs/phase12-desktop.md, slice 8 status | B3 |
-| F2 | Which key signs the public apps catalogue | docs/phase12-desktop.md, slice 7 status | B4 |
+| F1 | Agent icons on the desktop background: live with the grid folder, or ship our own shell extension | docs/phase12-desktop.md, slice 8 status | B7 |
+| F2 | Which key signs the public apps catalogue (the release key is proposed) | docs/phase12-desktop.md, slice 9 | B6 |
 | F3 | Lid switch behaviour with the new power defaults | docs/phase12-desktop.md, slice 7 | nothing yet |
 | F4 | Office catalogue location in the kernel (which table decides what desks see) | docs/desk-enrolment.md | C1 |
 | F5 | Edition boundary for estate features | docs/phase13-estate.md, open questions | E4 |

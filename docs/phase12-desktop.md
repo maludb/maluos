@@ -781,6 +781,98 @@ desk token (the office's own login applies); `tasks/send` waits for the
 answer (up to 3 minutes) rather than streaming; the Memory page lists the
 agent's vault compartment and names Phase 13 slice 4 for claims.
 
+### Slice 9 (planned 2026-10-23): the session, further, and the slice 7 and 8 leftovers
+
+Cut from the "After that" list (item 5) and the leftovers recorded in
+the slice 7 and 8 status tables: everything in it is in this repository,
+visible on the desk, and checked by the boot test, so it fits the days
+between the 26.04.20261024 release and the start of Phase 11.
+
+**1. Grant requests, decided properly.** The notification for a grant
+request offers "Allow for a week" and "Deny" (slice 3). Slice 9 gives
+the decision its parameters: the Desk's and the Credential Manager's
+request rows get a level (read or use), an expiry (a day, a week, a
+month, until revoked) and a budget (uses per day, where the secret is a
+spend credential), the notification keeps its two buttons and gains
+"Choose…", which opens the Credential Manager on that request. The
+session's `RequestDecide` takes the three values; the vault's
+`approve(level, expires_at, budget)` already does.
+
+**2. A request with its cause.** When the gateway looks up a credential
+for a model call and the vault refuses, the gateway files the grant
+request as broker (slice 6 of Phase 6). The session shows the request but
+not the call. Slice 9 joins them: the vault's request row carries the
+ledger id of the model call that caused it (the gateway passes it when it
+asks), and the notification and the request rows say "for `--model
+office` from agent research, 14:02: …prompt title…", with the call's
+ledger row one click away on the Desk's Models page.
+
+**3. Agents' budgets, to their owners.** The vault's ledger scopes an
+owner's view to their agents (slice 3). The gateway's budget alerts
+(`alert.budget.*` rows, phase 6 slice 4) are written for the principal
+whose budget it is, so an agent's budget alert reaches nobody's desk.
+Slice 9 has the gateway write the alert for the agent *and* for its
+owner (`maluos_agent.owner_principal_ref`), with the agent named in the
+title, so the owner's session notifies "Agent research: budget nearly
+used (day)" and the Desk's Alerts page lists it under the agent.
+
+**4. Re-authentication before a reveal.** The Credential Manager's
+"Show" asks a confirmation dialog (slice 7). Slice 9 asks for the
+person's password: a polkit action `com.maluos.vault.reveal` with
+`allow_active=auth_self` (the user's own password, no administrator;
+GNOME Shell's agent draws the prompt, and polkit remembers nothing: every
+reveal asks), checked by the window over the system bus
+(`CheckAuthorization` with `AllowUserInteraction`) before the vault is
+read; the vault's ledger row for the read gains `detail.reauth: polkit`.
+The same check guards "Rotate" (the new value is typed, so it reveals
+nothing, but it changes the secret) and the Credential Manager's backup.
+
+**5. The Agents app, further.** Three leftovers of slice 8: (a) answers
+stream: `tasks/send` returns at once with the task in `working`, the
+agent's handler reports partial text through a callback the module gives
+it (`task.progress(text)`), and the app polls `tasks/get` once a second
+while the task works, drawing the answer as it grows, so a long task
+reads like a conversation; `maluctl agent send` prints the growing
+answer the same way. (b) the office's page loads with the desk's
+identity: the office's `page` URL is requested with the desk token as
+the Bearer header on its first request (WebKit lets the native side set
+it), and the office may answer with a session cookie for that page; the
+mock office checks the header and shows "signed in as …". (c) the
+Activity and Control pages re-read on a timer while they are visible
+(every 30 s; logs every 5 s while the unit is active).
+
+**6. The public catalogue, signed.** The MaluApps catalogue's public half is
+signed: `docs/site/apps/catalog.json` is published with a detached
+signature by the release key, `maluctl office apps` verifies it with the
+keyring maluos-keyring ships (the public catalogue is refused unsigned;
+the office's catalogue is trusted by the desk token as now). This closes
+the slice 7 note. If the owner prefers a separate catalogue key, that is
+the one decision in this slice.
+
+**Not in slice 9**: agent icons on the desktop background (needs a shell
+extension of our own; decision F1 in docs/roadmap.md), the kernel's real
+`desks/apps` and `desks/agents` endpoints (kernel repository), DEP-11
+metadata and the release upgrade path (item 2 of "After that", their own
+slice), the branding on hardware (item 3).
+
+**Packages:** maluos-desktop-session (RequestDecide parameters,
+"Choose…", the cause in the notification, owner-attributed alerts, the
+timer refreshes), maluos-vault (request rows with a cause; the ledger's
+reauth detail), maluos-gateway (the cause passed when asking; alerts for
+the owner), maluos-agent (task progress; streaming in `maluctl agent
+send`), maluos-agents (streaming in Talk; the page request with the
+token; timers), maluos-desk (catalogue verification; the mock office's
+signed-in page), maluos-keyring if a catalogue key is added, the release
+script (signing the catalogue). **Test:** a request decided from the
+Desk with level use, a month and a budget of 10 a day shows those values
+in the vault; a refused credential lookup for a model call produces a
+request naming that call; an agent over budget notifies its owner; a
+reveal without the polkit authorisation is refused and one with it is
+ledgered with `reauth: polkit`; a streamed task shows partial text before
+completion on the serial log of `maluctl agent send`; the mock office's
+page answers "signed in as person@mock.office" to the app; the public
+catalogue with a bad signature is refused and the signed one accepted.
+
 ### After that
 
 1. **Desks at a real office.** The kernel half is built and vendored
@@ -798,11 +890,7 @@ agent's vault compartment and names Phase 13 slice 4 for claims.
    installed); the ISO's own boot, which is Ubuntu's server live
    installer and shows its text splash before subiquity.
 4. **A graphical live session** on the ISO, with Phase 11.
-5. **The session, further.** A grant budget and level choice in the
-   notification, requests from the gateway's credential lookup surfaced
-   with the model call that caused them, and alerts for agents' own
-   budgets attributed to their owners in the gateway as they now are in
-   the vault.
+5. **The session, further.** Moved into slice 9 (planned 2026-10-23).
 
 ## Status
 
