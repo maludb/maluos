@@ -34,10 +34,10 @@ before it is green by about 20:00 UTC.
 | A2 | Fix what A1 finds; rebuild only what the fix touches | done, nothing to fix | S | A1 | |
 | A3 | Commit and push slice 8 | ready | S | A2 | CI then boot-tests the server image with maluos-agent 0.3.0 |
 | A4 | Server set: rootfs, qcow2, ISO, iso-check, UEFI boot test, share (BIOS is CI's) | running since 12:32 | 2 h wall | A3 | the server images on the share are still the slice 6 set; maluos-firstboot 0.1.8 and maluos-agent 0.3.0 apply to servers |
-| A5 | Desktop ISO rebuilt with slice 8, iso-check, share | planned | S | A2 | five minutes with the chain script |
+| A5 | Desktop ISO rebuilt with slice 8 and A7, iso-check, share | queued behind A4 and the A7 desktop chain | S | A2 | five minutes with the chain script |
 | A6 | Release prep: docs/release.md row drafted, download page text ready, docs/PLAN.md and phase12 status rows final | planned | S | A4, A5 | |
-| A7 | Filler: the session refreshes the MaluApps catalogue on each heartbeat (slice 7 leftover) | planned | S | A3 | maluos-desktop-session; boot test check |
-| A8 | Filler: remove packages/maluos-meta/debian/docs/claude-log/ from the repo | planned | S | nothing | on the owner's list since slice 6; `git rm -r` and a commit |
+| A7 | Filler: the session refreshes the MaluApps catalogue on each heartbeat (slice 7 leftover) | coded (maluos-desktop-session 0.6.1), desktop chain queued | S | A3 | boot test check added; commit after the test |
+| A8 | Filler: remove packages/maluos-meta/debian/docs/claude-log/ from the repo | done 2ba9fc7 (and `**/claude-log/` ignored) | S | nothing | |
 | A9 | Filler: anything the owner wants changed in the Agents app after seeing it | idea | S to M | A1 | |
 | A10 | Freeze 22:00 UTC: fixes only | | | A4, A5 | |
 | A11 | Release 26.04.20261024: scripts/release.sh in tmux (the owner types the passphrase), then verify GitHub, R2, apt.maluos.com, publish the download page, start the CI run | planned | 1 h wall | A10, 00:00 UTC | the release holds slices 7 and 8 |
@@ -86,8 +86,8 @@ owner. Each slice ends with its test on the three-machine proof.
 
 | # | Task | Status | Effort | Depends on | Notes |
 |---|---|---|---|---|---|
-| E1 | Phase 11: a MaluOS installer (text UI: disks, user, network, unpack the squashfs, seed first boot) replacing subiquity | proposed | L | nothing | the last Ubuntu-branded surface |
-| E2 | A graphical live session on the ISO | planned (phase12 "After that" 4) | L | E1 | |
+| E1 | Phase 11: a MaluOS installer replacing subiquity, five slices (docs/phase11-installer.md): the live environment and our own ISO assembly; the engine and the unattended plan; the urwid screens; parity and the switch; the graphical live installer | planned 2026-10-23, the owner's five answers in | L per slice | nothing (slice 5 after Phase 12) | the last Ubuntu-branded surface; telemetry endpoint needed beside the download site (slice 2) |
+| E2 | A graphical live session on the ISO | folded into Phase 11 slice 5 | L | E1 | |
 | E3 | Phase 7 rest: ISO catalogue layers and the maluctl component selector | in progress | M | nothing | docs/components.md |
 | E4 | Phase 9 rest: editions and entitlements (Professional, Enterprise) | requirements drafted | L | a pricing decision | Phase 13 absorbs fleet and scheduler |
 | E5 | Phase 14+: journal to memory, quality judge | idea | L | D4 | |
@@ -112,6 +112,6 @@ owner. Each slice ends with its test on the three-machine proof.
 |---|---|---|---|
 | G1 | Proxmox host memory: balloon floors on the other VMs, KSM check | with the owner | commands given 2026-10-23; the dev VM has its cap and floor |
 | G2 | Cloudflare transform rule for download.maluos.com | with the owner | from the Phase 10 release work |
-| G3 | packages/maluos-meta/debian/docs/claude-log/ out of the repo | planned | A8 |
+| G3 | packages/maluos-meta/debian/docs/claude-log/ out of the repo | done | A8 |
 | G4 | Lintian back on in the local package build (SKIP_LINTIAN=1 since slice 7 because of maludb-os-core's node_modules) | idea | exclude that package from lintian instead |
 | G5 | Memory notes and docs kept current after each release | ongoing | |
