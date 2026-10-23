@@ -1,3 +1,12 @@
+maluos-session (0.6.1) resolute; urgency=medium
+
+  * The MaluApps catalogue is re-read after each successful heartbeat
+    (`maluctl office apps --refresh`), a slice 7 leftover: the window and
+    the launchers follow the office; a summary rides in the state as
+    office.apps.
+
+ -- Edward Honour <ed@maludb.org>  Fri, 23 Oct 2026 13:00:00 +0000
+
 maluos-session (0.6.0) resolute; urgency=medium
 
   * Phase 12 slice 8, the Agents app: the office's agents (maluctl office

@@ -49,11 +49,14 @@ office.agents, refreshed after each successful heartbeat; whenever the set
 of agents (local names and owners, office ids and names) changes, the
 service runs `maluos-agents --sync`, which keeps one launcher per agent in
 ~/.local/share/applications, the Agents folder of the grid and
-~/Desktop/Agents.
+~/Desktop/Agents. The MaluApps catalogue (`maluctl office apps --refresh`)
+is re-read after each successful heartbeat too, so the MaluApps window
+and its launchers follow the office without waiting for the window's own
+timer; a summary rides in the state as office.apps.
 """
 import http.client, json, os, pwd, re, socket, subprocess, sys, threading, time, urllib.parse
 
-VERSION = "0.6.0"
+VERSION = "0.6.1"
 BUS_NAME, OBJ, IFACE = "com.maluos.Session", "/com/maluos/Session", "com.maluos.Session1"
 GW = os.environ.get("MALUOS_GATEWAY_SOCKET", "/run/maluos/gateway.sock")
 VAULT = os.environ.get("MALUOS_VAULT_SOCKET", "/run/maluos/vault.sock")
@@ -298,13 +301,14 @@ def office_conf():
         return None
 
 
-def office_state(conf, hb, agents=None):
+def office_state(conf, hb, agents=None, apps=None):
     """What the desk knows about its office: the enrolment, the last heartbeat's outcome, and (slice 8) its agents."""
     if not conf:
         return {"enrolled": False}
     hb = dict(hb or {})
     hb.pop("_at", None)
     agents = agents or {}
+    apps = apps or {}
     eps = conf.get("endpoints") or {}
     models = eps.get("models") if isinstance(eps.get("models"), dict) else None
     d = hb.get("desk") or conf.get("desk") or {}
@@ -317,7 +321,9 @@ def office_state(conf, hb, agents=None):
             "gateway": g.get("alias") or g.get("backend"), "presence": presence, "ok": bool(hb.get("ok")),
             "last_heartbeat_at": hb.get("ts") if hb.get("ok") else None, "last_error": hb.get("error"), "revoked": bool(hb.get("revoked")),
             "agents": [a for a in (agents.get("agents") or []) if agents.get("office_url") == conf.get("url")], "agents_error": agents.get("error"),
-            "agents_fetched_at": agents.get("fetched_at")}
+            "agents_fetched_at": agents.get("fetched_at"),
+            "apps": {"count": len(apps.get("apps") or []), "installed": sum(1 for a in apps.get("apps") or [] if a.get("installed")),
+                     "fetched_at": apps.get("fetched_at"), "stale": bool(apps.get("stale")), "errors": apps.get("errors") or []} if apps else None}
 
 
 def updates_state():
@@ -358,6 +364,7 @@ class Service:
         self.office_force = False
         self.office_token = None         # the desk token, read from the vault once per enrolment (not persisted)
         self.office_agents = None        # the office's agents, from `maluctl office agents` after a heartbeat (slice 8)
+        self.office_apps = None          # the MaluApps catalogue summary, re-read after a heartbeat (slice 7 leftover)
         self.icons_key = None            # what the agent icons were last synced for (slice 8)
         self.updates = None              # the last reading (updates thread writes, under updates_lock)
         self.updates_lock = threading.Lock()
@@ -450,10 +457,21 @@ class Service:
             u["reading"] = self.updates_reading
             u["last_action"] = self.updates_last_action
         with self.office_lock:
-            hb = self.office_hb; oa = self.office_agents
+            hb = self.office_hb; oa = self.office_agents; op = self.office_apps
         st = {"version": VERSION, "ts": int(time.time()), "host": host_state(), "gateway": gw, "me": me_state(me),
-              "vault": vault, "agents": agents_state(units, mine), "alerts": alerts_state(), "updates": u, "office": office_state(office_conf(), hb, oa)}
+              "vault": vault, "agents": agents_state(units, mine), "alerts": alerts_state(), "updates": u, "office": office_state(office_conf(), hb, oa, op)}
         return st
+
+    def office_apps_read(self):
+        """`maluctl office apps --json --refresh` as this user: the merged catalogue, written to the per-user cache the MaluApps window reads."""
+        env = dict(os.environ)
+        if self.office_token:
+            env["MALUOS_OFFICE_TOKEN"] = self.office_token
+        try:
+            r = subprocess.run(["maluctl", "office", "apps", "--json", "--compact", "--refresh"], capture_output=True, text=True, timeout=90, env=env)
+            return json.loads(r.stdout.strip().splitlines()[-1])
+        except Exception as e:
+            return {"fetched_at": int(time.time()), "apps": [], "errors": [f"maluctl office apps: {e.__class__.__name__}: {str(e)[:120]}"]}
 
     def office_agents_read(self):
         """`maluctl office agents --json` as this user (the token from the vault, or the cached one)."""
@@ -532,9 +550,9 @@ class Service:
                 with self.office_lock:
                     force = self.office_force; self.office_force = False; prev = self.office_hb
                 if not conf:
-                    if prev is not None or self.office_token or self.office_agents:
+                    if prev is not None or self.office_token or self.office_agents or self.office_apps:
                         with self.office_lock:
-                            self.office_hb = None; self.office_agents = None
+                            self.office_hb = None; self.office_agents = None; self.office_apps = None
                         self.office_token = None
                         self.refresh_soon(0.5)
                 else:
@@ -556,10 +574,13 @@ class Service:
                         if not d.get("ok"):
                             log(f"office: heartbeat failed: {d.get('error')}")
                         oa = self.office_agents_read() if d.get("ok") else ({"fetched_at": int(time.time()), "agents": [], "error": "the office retired this desk"} if d.get("revoked") else None)
+                        op = self.office_apps_read() if d.get("ok") else None
                         with self.office_lock:
                             self.office_hb = d
                             if oa is not None:
                                 self.office_agents = oa
+                            if op is not None:
+                                self.office_apps = op
                         self.refresh_soon(0.5)
             except Exception as e:
                 log(f"office: {e.__class__.__name__}: {str(e)[:160]}")
