@@ -144,6 +144,10 @@ Each slice is a product on its own; each later one reuses the earlier.
 - The desk's personal agent as the person's representative: it sends
   work to office agents and receives requests for assistance or approval,
   which appear on the Desk (the grant-request path, generalised to tasks).
+- The Agents app (Phase 12 slice 8) is the person's window on all of
+  this: the same task interface for a local agent over the socket and a
+  remote one through the office; the directory feeds its list and the
+  agent icons.
 - Operator actions on remote nodes from the Estate page, through the
   same envelope.
 - Test: a desk agent finds a Help Desk agent by capability on the office

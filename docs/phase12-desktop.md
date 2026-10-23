@@ -683,6 +683,81 @@ maluos-firstboot (`maluctl update auto`, the status line), maluos-vault
 (maluos-desktop depends on maluos-tools). The slice's test adds the
 checks above to `tests/qcow2-boot-test.sh`.
 
+### Slice 8 (planned 2026-10-23): the Agents app and the agent icons
+
+Requested by the owner on 2026-10-23: the agents a person can use,
+local and remote, as icons on the desktop or in an "Agents" folder, and
+one management application to talk to an agent and control it. The
+Business OS kernel already has a browser-based agent management at the
+office's `os.` address; on the desktop the owner wants an application in
+its own window, "something like an Electron application", not a browser
+tab. It works the same for an agent on this desk and one on an office
+server.
+
+**The icons.** Two places, one source. The session keeps a launcher per
+agent (`~/.local/share/applications/maluos-agent-<id>.desktop`, with the
+agent's icon and name, `Exec=maluos-agents --agent <id>`) in sync with
+the agent list: the local agents the person owns or may use (`maluctl
+agent list`, filtered by the vault's grants as the Desk's Agents page is)
+and, on an enrolled desk, the office's directory (Phase 13 slice 2; until
+then the office's agents listed by its `me` answer). GNOME shows them in
+an "Agents" app folder in the grid (`org.gnome.desktop.app-folders`,
+folder `maluos-agents`, written by the session), and on the desktop
+itself through Ubuntu's desktop-icons extension
+(`gnome-shell-extension-desktop-icons-ng`, in the archive, not yet in the
+desktop seed), which shows `~/Desktop`: the session puts an "Agents"
+folder there holding the same launchers, so the person sees agents on
+their desktop and in the grid without two lists to maintain. An agent
+that goes away takes its icon with it.
+
+**The application: `maluos-agents`.** One window, one list on the left
+(local agents, then the office's, with presence and state), and for the
+selected agent:
+
+| Page | Local agent (this desk) | Remote agent (an office server) |
+|---|---|---|
+| Talk | a conversation with the agent: tasks sent and answers received, with the ledger rows each answer caused and the files or records it touched | the same, through the office |
+| Control | start, stop, restart, the unit's logs live, `run` a one-off command | start, stop, restart and logs as the operator's authority allows (Phase 13 slice 2 envelope) |
+| Policy | class, tiers, backends, cloud, egress, budget and what is used of it; the delegations the agent holds (use-only keys) and the scopes it reads | read; edits where the kernel's Agent HR allows |
+| Memory | what the agent remembers in its compartment and scopes, as claims with provenance | the same, through the office's `memory` endpoint (Phase 13 slice 4) |
+| Activity | the audit trail: calls, grant requests, tasks delegated and received | the same |
+
+One protocol for both columns: the A2A-compatible task interface that
+Phase 13 slice 2 puts on every node. `maluos-agent` serves it for the
+local agents over a Unix socket (peer credentials, no token), the office
+serves it for its agents over HTTPS with the desk token; the app does
+not know or care where an agent runs except to show it. Until slice 2
+exists, the local column works over the session's D-Bus (the Desk's
+`AgentAction` today) and the remote column is read-only from the office's
+`me` and `activity` endpoints.
+
+**Why not Electron itself, and what instead.** Electron bundles a
+Chromium and a Node runtime (about 250 MB per application), is not in
+Ubuntu's archive, and would be the one component of the desktop built
+from an upstream tarball rather than a Debian package; it also puts a
+second browser engine beside Firefox for the security team to track. The
+same kind of application, a web UI in its own window with native
+integration, is what Tauri or a WebKitGTK shell gives: the archive's
+WebKitGTK 6.0 (the engine behind GNOME's own Web and Software), a few MB,
+packaged like everything else, with the same JavaScript UI code. The
+plan therefore is **a web-technology application in a WebKitGTK window**:
+the UI is HTML/JS, which the kernel's browser-based management and this
+app can share (the office's agent pages are loaded in the same window
+for remote agents, so one UI does not have to be written twice), and the
+native side (the window, the Unix socket, D-Bus, notifications, the vault
+approvals) is the Desk's Python/GTK. Decision for the owner: this, or
+Electron proper packaged by us. Both give "an Electron-like application";
+only the first stays inside the distribution's packaging and update model.
+
+**Packages:** maluos-agents (new: the app, the launcher writer, the app
+folder and the desktop folder), maluos-desktop-session (agent list
+changes trigger the launcher sync), maluos-meta (the desktop depends on
+maluos-agents and the desktop-icons extension), maluos-agent (the local
+A2A socket, with Phase 13 slice 2). Boot test: two local agents and the
+mock office's agents produce the launchers, the app folder and the
+desktop folder; the app starts, lists them, starts and stops a local
+agent, and shows a remote agent's activity.
+
 ### After that
 
 1. **Desks at a real office.** The kernel half is built and vendored
