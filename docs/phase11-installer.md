@@ -126,6 +126,10 @@ Debian package in 26.04, nor is debian-installer. The engine is ours.
 
 ### Slice 1: the live environment and the ISO we assemble
 
+Specified in docs/phase11-slice1-live.md (2026-10-23): the live seed,
+the media layout, the boot chain, the stub installer package, the
+assembly script and the test.
+
 - seeds/live.seed and the `live` profile: a rootfs with casper, the
   branding, the network tools, openssh-server (started only by the
   `maluos.ssh=` boot option), the installer package (empty at this

@@ -87,7 +87,7 @@ owner. Each slice ends with its test on the three-machine proof.
 
 | # | Task | Status | Effort | Depends on | Notes |
 |---|---|---|---|---|---|
-| E1 | Phase 11: a MaluOS installer replacing subiquity, five slices (docs/phase11-installer.md): the live environment and our own ISO assembly; the engine and the unattended plan; the urwid screens; parity and the switch; the graphical live installer | planned 2026-10-23, the owner's five answers in | L per slice | nothing (slice 5 after Phase 12) | the last Ubuntu-branded surface; telemetry endpoint needed beside the download site (slice 2) |
+| E1 | Phase 11: a MaluOS installer replacing subiquity, five slices (docs/phase11-installer.md): the live environment and our own ISO assembly; the engine and the unattended plan; the urwid screens; parity and the switch; the graphical live installer | planned 2026-10-23, the owner's five answers in; slice 1 specified (docs/phase11-slice1-live.md) | L per slice | nothing (slice 5 after Phase 12) | the last Ubuntu-branded surface; telemetry endpoint needed beside the download site (slice 2) |
 | E2 | A graphical live session on the ISO | folded into Phase 11 slice 5 | L | E1 | |
 | E3 | Phase 7 rest: ISO catalogue layers and the maluctl component selector | in progress | M | nothing | docs/components.md |
 | E4 | Phase 9 rest: editions and entitlements (Professional, Enterprise) | requirements drafted | L | a pricing decision | Phase 13 absorbs fleet and scheduler |
