@@ -1,3 +1,35 @@
+maluos-session (0.5.0) resolute; urgency=medium
+
+  * Phase 12 slice 7, the Upgrade Manager: `maluos-desk --window updates`
+    (com.maluos.UpgradeManager, pinned in the dock) with four pages: Updates
+    (pending, Update now, Update everything, restart, check again), Automatic
+    (the switches: automatic updates on/off, security, MaluOS and Mozilla each
+    on/off, restart automatically at a time), History and Release. The
+    session's UpdateAction grows apply | apply-all (a terminal running pkexec
+    maluctl update apply, apt's log live) and auto:… (pkexec maluctl update
+    auto in a thread, the outcome in updates.last_action); the state's
+    updates carry maluctl's `auto` block. The Desk's window code is shared
+    (Window base class); the dock pins Firefox, Files, Settings, Software,
+    the terminal, the Desk and the Upgrade Manager (favorite-apps override).
+    Depends on maluos-firstboot 0.1.8 (maluctl update auto, the polkit action).
+  * The Tools Installer window (`maluos-desk --window tools`,
+    com.maluos.ToolsInstaller, pinned in the dock): the tools from
+    maluos-tools (`maluctl tools list --json`) with their state; Install
+    runs the script in a terminal, Open starts the tool, Log shows the log.
+  * The Credential Manager window (`maluos-desk --window vault`,
+    com.maluos.CredentialManager, pinned in the dock): the vault's full user
+    side over /usr/lib/maluos/maluos_vault_client.py as the session user:
+    secrets (add, show with a 30 s clipboard, rotate, delete naming the
+    grants), delegations (delegate with expiry and budget, undelegate),
+    requests (allow for a week or a day, deny; your own), compartments,
+    backup (export and import in a terminal for the passphrase). Each
+    button is one `maluctl secret` verb. Recommends maluos-vault.
+  * The MaluApps window (`maluos-desk --window apps`, com.maluos.MaluApps,
+    pinned in the dock): the catalogue from `maluctl office apps --json`
+    (maluos-desk 0.2.0); Install, Open, Remove.
+
+ -- Edward Honour <ed@maludb.org>  Fri, 23 Oct 2026 02:50:00 +0000
+
 maluos-session (0.4.0) resolute; urgency=medium
 
   * Desk enrolment (Phase 12 slice 6): the state carries `office` (from

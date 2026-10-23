@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Tools Installer
+Comment=Install developer tools on this desk: Chrome, VS Code, Claude Code, Codex, Ollama
+Exec=maluos-desk --window tools
+Icon=system-software-install
+Terminal=false
+Categories=System;Settings;
+Keywords=MaluOS;install;tools;chrome;code;claude;codex;ollama;
+StartupNotify=true
+DBusActivatable=false

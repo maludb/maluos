@@ -1,0 +1,4 @@
+{"id": "ollama", "name": "Ollama", "scope": "system", "icon": "network-server",
+ "description": "Local models for the MaluOS gateway: the release MaluOS pins and checks (maluctl gateway ollama install), the ollama user, a localhost-only service, registered as the gateway's local backend. Pull a model afterwards: sudo maluctl gateway ollama pull llama3.1:8b.",
+ "vendor_url": "https://ollama.com/", "notice": "Ollama (MIT) from github.com/ollama/ollama, about 1.5 GB with the GPU libraries; models are downloaded separately.",
+ "check": "ollama --version 2>&1 | head -1", "open": "xdg-terminal-exec sh -c 'maluctl gateway ollama status; exec ${SHELL:-bash}'"}

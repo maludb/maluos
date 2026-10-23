@@ -650,21 +650,22 @@ place, over a `maluctl update` that grows the verbs it needs:
 | Page | What you do there | CLI |
 |---|---|---|
 | Updates | what is pending, from where (Ubuntu security, MaluOS, Mozilla, other), the last refresh; **Update now** (the automatic policy's set) and **Update everything** (`full-upgrade`), with the apt log live and the restart notice | `update status`, `check`, `apply`, `apply --all` |
-| Automatic | one switch, **Automatic updates** (default on), and under it what they cover: security, MaluOS, Mozilla, each its own switch; **Restart automatically to finish updates** (default off) with a time window; the time of the daily run | `update auto on|off|status`, `update auto set security|maluos|mozilla on|off`, `update auto reboot on|off [--window 03:00-05:00]` |
+| Automatic | one switch, **Automatic updates** (default on), and under it what they cover: security, MaluOS, Mozilla, each its own switch; **Restart automatically to finish updates** (default off) at a given time (unattended-upgrades takes a time, not a window); the last and next daily run | `update auto on|off|status`, `update auto set security|maluos|mozilla on|off`, `update auto reboot on|off [--at 03:00]` |
 | History | the automatic runs and apt's history, as `history` prints them, with the packages of each run | `update history` |
 | Release | the MaluOS release of this system (`VERSION`, the 26.04 base), and, once item 2 of "After that" exists, the upgrade to the next base; until then the page says there is none | (later) `update release` |
 
 `maluctl update auto` writes two drop-ins and nothing else:
-`/etc/apt/apt.conf.d/53maluos-auto.conf` with `APT::Periodic::Unattended-Upgrade`
+`/etc/apt/apt.conf.d/53maluos-auto` with `APT::Periodic::Unattended-Upgrade`
 (`"0"` is off; the lists still refresh daily so **Update now** has
 something to show) and the `Unattended-Upgrade::Automatic-Reboot*` keys,
-and `/etc/apt/apt.conf.d/54maluos-origins.conf`, which restates the
-`Allowed-Origins` from `52maluos-unattended-upgrades` minus the ones
-switched off. The policy file itself is never edited, so a package
+and `/etc/apt/apt.conf.d/54maluos-origins`, which restates the
+`Allowed-Origins` and `Origins-Pattern` from `52maluos-unattended-upgrades`
+minus the ones switched off (a `#clear` and the remaining list), with the
+choice itself in `/var/lib/maluos/update-auto.json`. The policy file itself is never edited, so a package
 upgrade of maluos-branding cannot silently flip a choice back, and
 removing both drop-ins restores the shipped defaults. Changing the
 switches needs administrator authentication (polkit action
-`com.maluos.update.configure`, once per window); **Update now** is the
+`com.maluos.admin`, shared with the Tools Installer, once per session); **Update now** is the
 existing `UpdateAction`. Turning automatic updates off is a choice the
 system remembers and reports: `update status` says "automatic updates
 off since DATE by USER", the Desk's System page and the indicator carry
@@ -788,6 +789,17 @@ released in 26.04.20261020; slices 3 and 4 built 2026-10-20 and
 2026-10-21 and released in 26.04.20261021 (docs/release.md); slice 5
 built 2026-10-22 and released in 26.04.20261022; slice 6 built
 2026-10-22 (unreleased).
+
+### Slice 7 status (2026-10-23)
+
+| Item | Result |
+|---|---|
+| 1 Power defaults | built: maluos-desktop-branding 0.4.2 (idle-delay 0; sleep-inactive-ac/battery-type nothing in the ubuntu session and for GNOME-Greeter) |
+| 5 Upgrade Manager | built: maluos-firstboot 0.1.8 (`maluctl update auto`, polkit action com.maluos.admin for `pkexec maluctl`), maluos-desktop-session 0.5.0 (`maluos-desk --window updates`: Updates, Automatic, History, Release; UpdateAction apply, apply-all, auto:…; the dock pins the Desk and the Upgrade Manager). The auto verbs round-tripped in a scratch apt.conf.d on the dev host (off, per-origin off, reboot at a time, a bad time refused, defaults restore the shipped policy byte for byte) |
+| 2 Tools Installer | built: maluos-tools 0.1.0 (five tool directories with tool.json and install.sh; `maluctl tools list|check|install|open|log`; system scope through `pkexec maluctl`), the Tools Installer window in maluos-desktop-session 0.5.0 (`--window tools`), maluos-meta 0.2.5 (the desktop depends on maluos-tools). Chrome from Google's .deb (which registers Google's repository), VS Code from Microsoft's repository, Claude Code by Anthropic's native installer per user, Codex via Ubuntu's nodejs/npm system-wide, Ollama through `maluctl gateway ollama install` (already pinned and checksummed) |
+| 3 MaluApps | built: maluos-desk 0.2.0 (`maluctl office apps [--json] [--refresh]`, `install|remove|open`; the office's catalogue at `endpoints.apps` over the public one, cached per user, stale when unreachable; a web app becomes a launcher opening the office's URL in its own Firefox window; the mock office serves four apps), the MaluApps window in maluos-desktop-session 0.5.0 (`--window apps`), the public catalogue published at download.maluos.com/apps/catalog.json (four office apps, `requires: office`; unsigned for now), the contract row and schema in docs/desk-enrolment.md. The kernel's `desks/apps` endpoint is specified, not built; the session does not yet refresh the catalogue on heartbeat (the window does, every minute) |
+| 4 Credential Manager | built: the Credential Manager window in maluos-desktop-session 0.5.0 (`--window vault`) over the vault client library as the session user: secrets (add, show with a 30 s clipboard, rotate, delete naming the grants), delegations, requests, compartments, backup through the CLI in a terminal. The plan's re-authentication before a reveal is not done: a confirmation dialog stands in, and the read is in the ledger |
+| Tests | desktop rootfs, qcow2 rebuilt 2026-10-23 (qcow2 sha 8be5720d…); UEFI boot test 210 ok / 0 FAIL (the auto round trip, the power defaults in the session and on the greeter, the dock and the four launchers, the five tools listed and checked, the four windows built from the live state, the mock office's apps listed, installed as a launcher and removed). The dev VM was OOM-killed by its Proxmox host during the first qcow2 build (host: 251 GiB, 866 MiB available, swap full; five such kills match our five outages); the chain now throttles the rootfs copy and the convert and keeps the guest cache small. ISO not yet rebuilt |
 
 ### Slice 6 status (2026-10-22)
 

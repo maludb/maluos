@@ -1,0 +1,4 @@
+{"id": "google-chrome", "name": "Google Chrome", "scope": "system", "icon": "web-browser",
+ "description": "Google's browser. Installed from Google's own .deb, which registers Google's apt repository so Chrome updates with the system.",
+ "vendor_url": "https://www.google.com/chrome/", "notice": "Google's software and terms (google.com/chrome/terms); the install downloads about 110 MB from dl.google.com.",
+ "check": "google-chrome --version", "open": "google-chrome"}

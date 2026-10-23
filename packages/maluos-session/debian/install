@@ -4,3 +4,6 @@ extension/maluos-session@maluos.com        usr/share/gnome-shell/extensions
 share/30_maluos-session.gschema.override   usr/share/glib-2.0/schemas
 desk/maluos-desk                           usr/bin
 desk/com.maluos.Desk.desktop               usr/share/applications
+desk/com.maluos.UpgradeManager.desktop   usr/share/applications
+desk/com.maluos.CredentialManager.desktop usr/share/applications
+desk/com.maluos.MaluApps.desktop          usr/share/applications

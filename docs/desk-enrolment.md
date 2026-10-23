@@ -61,6 +61,7 @@ JSON over HTTPS on the office's person face (`app.<domain>`), versioned by
 | `POST /api/v1/desks/heartbeat` | `Authorization: Bearer <desk token>` | presence and facts; the office may answer with new endpoints |
 | `GET /api/v1/desks/me` | bearer | the desk, its owner and endpoints (no presence change) |
 | `POST /api/v1/desks/leave` | bearer | retire the desk; the token is revoked |
+| `GET /api/v1/desks/apps` | bearer | the office's MaluApps catalogue for this desk (Phase 12 slice 7; `endpoints.apps` in the enrol and `me` answers; `null` when the office publishes none) |
 
 **Enroll request**
 
@@ -191,3 +192,30 @@ retired this desk. `OfficeAction(open|heartbeat)` on the bus.
   `memory` and `actions` as null until their own kernel slice, so against
   it `enroll` makes no gateway rung yet; the mock office answers all of
   them and stays the boot test's office.
+
+## MaluApps: the catalogue (Phase 12 slice 7)
+
+`maluctl office apps` merges two lists, the office's over the public one,
+and the MaluApps window shows the result. The office's list is
+`GET endpoints.apps` with the desk token:
+
+```json
+{"ok": true, "surface": 1,
+ "apps": [{"id": "helpdesk", "name": "Help Desk", "description": "Cases, queues and the Help Desk agent.",
+           "icon": "help-faq", "kind": "web", "url": "https://app.example.com/apps/helpdesk", "version": "1"}]}
+```
+
+The public list is `https://download.maluos.com/apps/catalog.json`
+(source: `docs/site/apps/catalog.json`, published with the download
+page), the same schema with `path` (relative to the office's URL) in
+place of `url` and `"requires": ["office"]` for apps that only exist on
+an office. `kind` is `web` (installed as a launcher that opens the URL in
+its own Firefox window), `deb` (`package`: installed from apt.maluos.com
+through pkexec apt-get, `exec` to open) or `script` (not supported yet).
+An entry from the office replaces a public entry with the same `id`. The
+desk caches the merged catalogue per user for 15 minutes and shows it
+stale when neither source answers. The mock office serves four web apps;
+the kernel's `desks/apps` endpoint is specified here for the kernel
+repository to build (the applications table decides what an office's
+desks see). The public catalogue is served over HTTPS and not yet signed.
+

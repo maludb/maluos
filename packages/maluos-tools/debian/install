@@ -1,0 +1,3 @@
+lib/maluctl.d/tools.py              usr/lib/maluos/maluctl.d
+tools/*                             usr/share/maluos-tools
+desktop/com.maluos.ToolsInstaller.desktop usr/share/applications

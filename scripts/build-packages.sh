@@ -31,6 +31,8 @@ for pkg in "$ROOT"/packages/*/; do
     mv "$ROOT"/packages/*.deb "$ROOT"/packages/*.changes "$ROOT"/packages/*.buildinfo "$BUILD"/
     ( cd "$pkg" && dpkg-buildpackage -T clean >/dev/null 2>&1 ) || true
 done
+if [ "${SKIP_LINTIAN:-0}" = 1 ]; then echo "== lintian skipped (SKIP_LINTIAN=1)"; else
 echo "== lintian"
 lintian --tag-display-limit 0 "$BUILD"/*.changes || true
+fi
 ls -1 "$BUILD"/*.deb

@@ -13,3 +13,18 @@ picture-options = 'zoom'
 
 [org.gnome.desktop.screensaver:ubuntu]
 picture-uri = 'file:///usr/share/backgrounds/maluos/maluos-dark.png'
+
+# Power (Phase 12 slice 7): a desk runs agents, gateway calls and office heartbeats; a
+# suspended desk ends them all. Automatic Screen Blank and Automatic Suspend are off by
+# default in the session and on the login screen (GDM suspends an idle greeter after
+# 20 min on its own). Defaults, not locks: Settings → Power changes them per user.
+[org.gnome.desktop.session:ubuntu]
+idle-delay = uint32 0
+
+[org.gnome.settings-daemon.plugins.power:ubuntu]
+sleep-inactive-ac-type = 'nothing'
+sleep-inactive-battery-type = 'nothing'
+
+[org.gnome.settings-daemon.plugins.power:GNOME-Greeter]
+sleep-inactive-ac-type = 'nothing'
+sleep-inactive-battery-type = 'nothing'

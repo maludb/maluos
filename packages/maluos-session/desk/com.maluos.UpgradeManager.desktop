@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Upgrade Manager
+Comment=Software updates on this desk: what is pending, install now, automatic updates on or off
+Exec=maluos-desk --window updates
+Icon=software-update-available
+Terminal=false
+Categories=System;Settings;
+Keywords=MaluOS;updates;upgrade;apt;
+StartupNotify=true
+DBusActivatable=false

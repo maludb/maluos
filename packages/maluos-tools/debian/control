@@ -1,0 +1,21 @@
+Source: maluos-tools
+Section: admin
+Priority: optional
+Maintainer: Edward Honour <ed@maludb.org>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.7.0
+Homepage: https://maluos.com
+
+Package: maluos-tools
+Architecture: all
+Depends: ${misc:Depends}, python3, maluos-firstboot (>= 0.1.8), curl, ca-certificates, polkitd | policykit-1
+Recommends: maluos-desktop-session (>= 0.5.0), maluos-gateway, xdg-terminal-exec
+Description: MaluOS Tools Installer: install scripts for developer tools
+ One place to install the tools a person wants on a desk: Google Chrome,
+ Visual Studio Code, Claude Code, Codex and Ollama today, each as a
+ directory with its tool.json and install script under
+ /usr/share/maluos-tools. `maluctl tools list|check|install|open|log` drives
+ the scripts from a terminal; the Tools Installer window (maluos-desk
+ --window tools, pinned in the dock) shows each tool's state and runs the
+ same scripts. System-scope installs run as root through polkit (pkexec
+ maluctl); user-scope installs run as the person.

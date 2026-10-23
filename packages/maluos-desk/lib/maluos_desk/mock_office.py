@@ -38,7 +38,15 @@ class Office:
     def endpoints(self, base):
         return {"heartbeat": f"{base}/api/v1/desks/heartbeat", "me": f"{base}/api/v1/desks/me", "leave": f"{base}/api/v1/desks/leave",
                 "records": f"{base}/mcp/records", "activity": f"{base}/mcp/activity", "memory": f"{base}/mcp/memory", "actions": None,
-                "models": {"url": f"{base}/desk-models", "models": list(self.models)}}
+                "models": {"url": f"{base}/desk-models", "models": list(self.models)}, "apps": f"{base}/api/v1/desks/apps"}
+
+    APPS = [{"id": "malumail", "name": "MaluMail", "description": "Mail for the office, with agents that read and draft with you.", "icon": "mail-unread", "kind": "web", "path": "/apps/mail", "version": "1"},
+            {"id": "helpdesk", "name": "Help Desk", "description": "Cases, queues and the Help Desk agent.", "icon": "help-faq", "kind": "web", "path": "/apps/helpdesk", "version": "1"},
+            {"id": "crm", "name": "CRM", "description": "Accounts, contacts, deals.", "icon": "x-office-address-book", "kind": "web", "path": "/apps/crm", "version": "1"},
+            {"id": "knowledgebase", "name": "Knowledgebase", "description": "Articles and procedures, searched by agents and people.", "icon": "accessories-dictionary", "kind": "web", "path": "/apps/kb", "version": "1"}]
+
+    def apps_answer(self, base):
+        return {"ok": True, "surface": SURFACE, "apps": [dict(a, url=base + a["path"]) for a in self.APPS]}
 
     def answer(self, desk, base):
         return {"ok": True, "surface": SURFACE,
@@ -109,6 +117,11 @@ class Handler(BaseHTTPRequestHandler):
             if e:
                 return self.err(*e)
             return self.send(200, o.answer(desk, self.base()))
+        if p == "/api/v1/desks/apps":
+            desk, e = self.desk_from_bearer()
+            if e:
+                return self.err(*e)
+            return self.send(200, o.apps_answer(self.base()))
         if p in ("/desk-models", "/desk-models/"):
             return self.send(200, {"ok": True, "office": o.name})
         if p == "/desk-models/v1/models":

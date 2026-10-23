@@ -11,10 +11,18 @@ whether a restart is due) and this desk's identity. Everything comes from
 maluos-desktop-session over the session bus (com.maluos.Session); this
 window renders and forwards.
 
-  maluos-desk                 open the window
-  maluos-desk --self-test     build the window from the live state (or an empty one), print a summary, exit
+  maluos-desk                   open the Desk window
+  maluos-desk --window updates  open the Upgrade Manager instead (slice 7): what is pending and install now,
+                                the automatic-update switches (pkexec maluctl update auto …), the history,
+                                this desk's release
+  maluos-desk --window tools    open the Tools Installer (slice 7): the tools under /usr/share/maluos-tools
+                                (maluos-tools) with their state; Install runs `maluctl tools install` in a terminal
+  maluos-desk --window vault    open the Credential Manager (slice 7): your secrets, delegations, requests,
+                                compartments and backup, over the vault client `maluctl secret` uses
+  maluos-desk --window apps     open MaluApps (slice 7): the office's and the public catalogue (maluctl office apps)
+  maluos-desk --self-test       build the window from the live state (or an empty one), print a summary, exit
 """
-import json, os, subprocess, sys, time
+import json, os, subprocess, sys, threading, time
 
 import gi
 gi.require_version("Gtk", "4.0"); gi.require_version("Adw", "1")
@@ -66,9 +74,13 @@ def terminal(argv):
         pass
 
 
-class Desk(Adw.ApplicationWindow):
+class Window(Adw.ApplicationWindow):
+    """The skeleton every MaluOS window shares: a view switcher over preference pages, a refresh
+    button, toasts, and the calls to the session service."""
+    TITLE = "MaluOS"; PAGES = (); SIZE = (820, 640)
+
     def __init__(self, app, proxy):
-        super().__init__(application=app, title="MaluOS Desk", default_width=820, default_height=640)
+        super().__init__(application=app, title=self.TITLE, default_width=self.SIZE[0], default_height=self.SIZE[1])
         self.proxy = proxy
         self.state = None
         self.toasts = Adw.ToastOverlay()
@@ -85,9 +97,7 @@ class Desk(Adw.ApplicationWindow):
         box.append(header)
         box.append(self.stack)
         self.pages = {}
-        for name, title, icon in (("agents", "Agents", "system-run-symbolic"), ("models", "Models", "network-server-symbolic"),
-                                  ("vault", "Vault", "dialog-password-symbolic"), ("alerts", "Alerts", "dialog-warning-symbolic"),
-                                  ("system", "System", "software-update-available-symbolic")):
+        for name, title, icon in self.PAGES:
             page = Adw.PreferencesPage()
             self.pages[name] = page
             self.stack.add_titled_with_icon(page, name, title, icon)
@@ -105,6 +115,76 @@ class Desk(Adw.ApplicationWindow):
         g = Adw.PreferencesGroup(title=title, description=description)
         self.pages[name].add(g); self.pages[name]._groups.append(g)
         return g
+
+    def render(self):
+        pass
+
+    def switch(self, title, subtitle, active, cb):
+        r = Adw.SwitchRow(title=GLib.markup_escape_text(str(title)), subtitle=GLib.markup_escape_text(str(subtitle)) if subtitle else "")
+        r.set_active(bool(active))
+        r.connect("notify::active", lambda w, _p: cb(w.get_active()))
+        return r
+
+    # -- the calls to the session service, shared by every window
+    def toast(self, text):
+        self.toasts.add_toast(Adw.Toast(title=text[:120]))
+
+    def agent(self, name, action):
+        if not self.proxy:
+            return
+        def done(proxy, res, _):
+            try:
+                proxy.call_finish(res)
+            except Exception as e:
+                self.toast(f"Agent {name}: {action} failed: {str(e)[:100]}")
+        self.proxy.call("AgentAction", GLib.Variant("(ss)", (name, action)), 0, 120000, None, done, None)
+
+    def decide(self, rid, decision, expires):
+        if not self.proxy:
+            return
+        def done(proxy, res, _):
+            try:
+                proxy.call_finish(res)
+                self.toast(f"Request #{rid}: {'allowed' if decision == 'approve' else 'denied'}")
+            except Exception as e:
+                self.toast(f"Request #{rid}: {decision} failed: {str(e)[:100]}")
+        self.proxy.call("RequestDecide", GLib.Variant("(iss)", (int(rid), decision, expires)), 0, 30000, None, done, None)
+
+    def update(self, action):
+        if not self.proxy:
+            return
+        def done(proxy, res, _):
+            try:
+                proxy.call_finish(res)
+            except Exception as e:
+                self.toast(f"Updates: {action} failed: {str(e)[:100]}")
+        self.proxy.call("UpdateAction", GLib.Variant("(s)", (action,)), 0, 30000, None, done, None)
+
+    def office(self, action):
+        if not self.proxy:
+            return
+        def done(proxy, res, _):
+            try:
+                proxy.call_finish(res)
+                if action == "heartbeat":
+                    self.toast("Checking in with the office…")
+            except Exception as e:
+                self.toast(f"Office: {action} failed: {str(e)[:100]}")
+        self.proxy.call("OfficeAction", GLib.Variant("(s)", (action,)), 0, 30000, None, done, None)
+
+    def set_state(self, text):
+        try:
+            self.state = json.loads(text) if text else None
+        except ValueError:
+            self.state = None
+        self.render()
+
+
+class Desk(Window):
+    TITLE = "MaluOS Desk"
+    PAGES = (("agents", "Agents", "system-run-symbolic"), ("models", "Models", "network-server-symbolic"),
+             ("vault", "Vault", "dialog-password-symbolic"), ("alerts", "Alerts", "dialog-warning-symbolic"),
+             ("system", "System", "software-update-available-symbolic"))
 
     def render(self):
         s = self.state
@@ -267,64 +347,539 @@ class Desk(Adw.ApplicationWindow):
         if o.get("revoked"):
             grp.add(row("Retired", "the office no longer accepts this desk's token; sudo maluctl office leave removes the enrolment", "dialog-warning-symbolic"))
 
-    # -- actions
-    def toast(self, text):
-        self.toasts.add_toast(Adw.Toast(title=text[:120]))
 
-    def agent(self, name, action):
-        if not self.proxy:
-            return
-        def done(proxy, res, _):
-            try:
-                proxy.call_finish(res)
-            except Exception as e:
-                self.toast(f"Agent {name}: {action} failed: {str(e)[:100]}")
-        self.proxy.call("AgentAction", GLib.Variant("(ss)", (name, action)), 0, 120000, None, done, None)
 
-    def decide(self, rid, decision, expires):
-        if not self.proxy:
-            return
-        def done(proxy, res, _):
-            try:
-                proxy.call_finish(res)
-                self.toast(f"Request #{rid}: {'allowed' if decision == 'approve' else 'denied'}")
-            except Exception as e:
-                self.toast(f"Request #{rid}: {decision} failed: {str(e)[:100]}")
-        self.proxy.call("RequestDecide", GLib.Variant("(iss)", (int(rid), decision, expires)), 0, 30000, None, done, None)
 
-    def update(self, action):
-        if not self.proxy:
-            return
-        def done(proxy, res, _):
-            try:
-                proxy.call_finish(res)
-            except Exception as e:
-                self.toast(f"Updates: {action} failed: {str(e)[:100]}")
-        self.proxy.call("UpdateAction", GLib.Variant("(s)", (action,)), 0, 30000, None, done, None)
+class UpgradeManager(Window):
+    """Slice 7: software updates in one place. Updates (pending, install now), Automatic (the
+    switches: on/off, per origin, restart), History, Release. The switches call UpdateAction
+    auto:… on the session service, which runs `pkexec maluctl update auto …`; the outcome comes
+    back as updates.last_action and the switches are re-read from the state."""
+    TITLE = "Upgrade Manager"; SIZE = (780, 600)
+    PAGES = (("updates", "Updates", "software-update-available-symbolic"), ("automatic", "Automatic", "alarm-symbolic"),
+             ("history", "History", "document-open-recent-symbolic"), ("release", "Release", "emblem-system-symbolic"))
+    ORIGINS = (("security", "Ubuntu security updates", "the resolute-security pocket of the Ubuntu archive"),
+               ("maluos", "MaluOS updates", "apt.maluos.com: the MaluOS packages, the kernel and the applications"),
+               ("mozilla", "Firefox from Mozilla", "packages.mozilla.org"))
 
-    def office(self, action):
-        if not self.proxy:
+    def __init__(self, app, proxy):
+        self.history_text = None; self.history_loading = False; self.seen_action = "first"; self.reboot_at = None
+        super().__init__(app, proxy)
+
+    def render(self):
+        s = self.state
+        for n in self.pages:
+            self.clear(n)
+        if not s:
+            self.group("updates", "Upgrade Manager", "The session service (maluos-desktop-session) is not running or not reachable.")
             return
-        def done(proxy, res, _):
+        u = s.get("updates") or {}
+        self.set_title(f"Upgrade Manager · {(s.get('host') or {}).get('hostname', '')}")
+        la = u.get("last_action")
+        if la and la.get("ts") != self.seen_action:
+            if self.seen_action != "first":
+                self.toast("Automatic updates changed" if la.get("ok") else f"Could not change automatic updates: {la.get('error') or 'refused'}")
+            self.seen_action = la.get("ts")
+        elif self.seen_action == "first":
+            self.seen_action = None
+        self.render_updates(s, u); self.render_automatic(u); self.render_history(u); self.render_release(s)
+
+    def render_updates(self, s, u):
+        if not u.get("available"):
+            self.group("updates", "Software updates", f"Not readable: {u.get('error') or 'maluctl update is not installed'}"); return
+        manual = u.get("manual_count", (u.get("pending_count") or 0) - (u.get("automatic_count") or 0))
+        if u.get("reboot_required"):
+            pk = u.get("reboot_packages") or []
+            desc = "A restart finishes the installed updates" + (f" ({', '.join(pk[:6])})" if pk else "") + "."
+        elif u.get("pending_error"):
+            desc = f"Pending updates unknown right now: {u['pending_error']}."
+        elif not u.get("pending_count"):
+            desc = f"Up to date as of the last refresh ({u.get('lists_refreshed') or '?'})."
+        else:
+            desc = f"{u['pending_count']} pending · {u.get('security_count', 0)} security · {u.get('automatic_count', 0)} covered by the automatic policy · {manual} wait for you."
+        grp = self.group("updates", "Software updates", desc + (" Reading…" if u.get("reading") else ""))
+        r = row("Install", "Update now installs what the automatic policy covers; Update everything installs every pending update (apt-get full-upgrade). Both open a terminal with apt's log and ask for an administrator's password.", "software-update-available-symbolic")
+        if u.get("automatic_count"):
+            r.add_suffix(button("Update now", lambda: self.update("apply"), "suggested-action"))
+        if u.get("pending_count"):
+            r.add_suffix(button("Update everything", lambda: self.update("apply-all")))
+        if u.get("reboot_required"):
+            r.add_suffix(button("Restart now", lambda: self.update("restart"), "destructive-action"))
+        r.add_suffix(button("Check again", lambda: self.update("refresh")))
+        grp.add(r)
+        by = u.get("by_source") or {}
+        if by:
+            grp.add(row("From", " · ".join(f"{k} {v}" for k, v in sorted(by.items())), "network-server-symbolic"))
+        pending = u.get("pending") or []
+        if pending:
+            grp = self.group("updates", "Pending", "Where each update comes from, and whether the automatic policy covers it.")
+            for p in pending[:60]:
+                grp.add(row(p.get("name"), f"{p.get('installed') or '-'} → {p.get('candidate')} · {p.get('source')}"
+                            + (" · security" if p.get("security") and p.get("source") != "security" else "") + ("" if p.get("automatic") else " · waits for you"),
+                            "security-high-symbolic" if p.get("security") else "package-x-generic-symbolic"))
+            if len(pending) > 60:
+                grp.add(row(f"… and {len(pending) - 60} more", "maluctl update status lists them all"))
+
+    def render_automatic(self, u):
+        if not u.get("available"):
+            self.group("automatic", "Automatic updates", "Not readable on this desk."); return
+        a = u.get("automatic") or {}; au = u.get("auto") or {}
+        enabled = bool(a.get("enabled"))
+        since = f" Off since {au['changed_at'][:16].replace('T', ' ')} UTC by {au.get('changed_by')}." if not enabled and au.get("changed_at") else ""
+        grp = self.group("automatic", "Automatic updates", ("Security, MaluOS and Mozilla updates install on their own once a day; everything else waits for you." if enabled
+                                                            else "Nothing installs on its own; the package lists still refresh daily so Update now has something to install.") + since
+                         + " Changing a switch asks for an administrator's password once per session.")
+        grp.add(self.switch("Automatic updates", "the shipped policy: security, MaluOS, Mozilla", enabled, lambda on: self.update("auto:on" if on else "auto:off")))
+        grp = self.group("automatic", "What installs on its own", "Each origin can be switched off on its own.")
+        disabled = au.get("disabled") or []
+        for kind, title, sub in self.ORIGINS:
+            r = self.switch(title, sub, kind not in disabled, lambda on, k=kind: self.update(f"auto:set:{k}:{'on' if on else 'off'}"))
+            r.set_sensitive(enabled); grp.add(r)
+        rb = au.get("reboot") or {}
+        grp = self.group("automatic", "Restart", "Kernel and systemd updates finish with a restart. Off by default: a restart ends the agents on this desk. On, the desk restarts at the given time when one is due.")
+        self.reboot_at = Gtk.Entry(text=rb.get("at") or "03:00", max_length=5, width_chars=6, valign=Gtk.Align.CENTER, tooltip_text="HH:MM, 24-hour clock; Enter applies it")
+        self.reboot_at.connect("activate", lambda e: self.update(f"auto:reboot:{'on' if rb.get('enabled') else 'off'}:{e.get_text().strip()}"))
+        r = self.switch("Restart automatically to finish updates", "at the time on the right", bool(rb.get("enabled")),
+                        lambda on: self.update(f"auto:reboot:{'on' if on else 'off'}:{self.reboot_at.get_text().strip() or '03:00'}"))
+        r.add_suffix(self.reboot_at); r.set_sensitive(enabled); grp.add(r)
+        grp = self.group("automatic", "Runs")
+        grp.add(row("Last automatic run", u.get("last_automatic_run") or "never", "alarm-symbolic"))
+        if a.get("next_run") and a["next_run"] != "n/a":
+            grp.add(row("Next automatic run", a["next_run"], "alarm-symbolic"))
+        grp.add(row("Package lists refreshed", u.get("lists_refreshed") or "?", "view-refresh-symbolic"))
+        if a.get("origins"):
+            grp.add(row("Effective origins", ", ".join(a["origins"]), "network-server-symbolic"))
+        if au.get("managed"):
+            grp.add(row("Configuration", "/etc/apt/apt.conf.d/53maluos-auto (and 54maluos-origins); the shipped policy 52maluos-unattended-upgrades is untouched. Every switch at its default removes them.", "document-properties-symbolic"))
+
+    def render_history(self, u):
+        grp = self.group("history", "History", "The automatic runs (unattended-upgrades) and apt's own history, as `maluctl update history` prints them.")
+        r = row("Read", "the logs are root-only on some systems; then `sudo maluctl update history` shows them", "document-open-recent-symbolic")
+        r.add_suffix(button("Read again", self.load_history)); grp.add(r)
+        if self.history_text is None and not self.history_loading:
+            self.load_history()
+        text = self.history_text if self.history_text is not None else "Reading…"
+        lbl = Gtk.Label(label=text, xalign=0, selectable=True, wrap=False, css_classes=["monospace"], margin_start=12, margin_end=12, margin_top=6, margin_bottom=6)
+        grp.add(lbl)
+
+    def load_history(self):
+        self.history_loading = True
+        def run():
             try:
-                proxy.call_finish(res)
-                if action == "heartbeat":
-                    self.toast("Checking in with the office…")
+                r = subprocess.run(["maluctl", "update", "history", "-n", "15"], capture_output=True, text=True, timeout=60)
+                out = (r.stdout + r.stderr).strip() or "(nothing)"
             except Exception as e:
-                self.toast(f"Office: {action} failed: {str(e)[:100]}")
-        self.proxy.call("OfficeAction", GLib.Variant("(s)", (action,)), 0, 30000, None, done, None)
+                out = f"{e.__class__.__name__}: {e}"
+            GLib.idle_add(self.set_history, out)
+        threading.Thread(target=run, daemon=True).start()
+
+    def set_history(self, text):
+        self.history_text = text; self.history_loading = False
+        self.render(); return False
+
+    def render_release(self, s):
+        h = s.get("host") or {}
+        osr = {}
+        try:
+            for line in open("/etc/os-release"):
+                if "=" in line:
+                    k, v = line.rstrip("\n").split("=", 1); osr[k] = v.strip('"')
+        except OSError:
+            pass
+        grp = self.group("release", "This desk", f"{osr.get('PRETTY_NAME') or h.get('pretty_name') or 'MaluOS'} · {h.get('hostname', '')}")
+        grp.add(row("MaluOS", f"{osr.get('VERSION', '?')}{' · ' + osr['VARIANT'] if osr.get('VARIANT') else ''}", "maluos-logo"))
+        grp.add(row("Base", f"Ubuntu {osr.get('VERSION_ID', '26.04')} LTS ({osr.get('VERSION_CODENAME', 'resolute')}); the packages come from the Ubuntu archive, apt.maluos.com and packages.mozilla.org", "package-x-generic-symbolic"))
+        grp.add(row("Kernel", os.uname().release, "emblem-system-symbolic"))
+        grp = self.group("release", "Release upgrade", "MaluOS releases are dated builds on the same 26.04 base (the number is at download.maluos.com/LATEST); an installed desk follows them through the updates above. An upgrade to the next base, when one exists, will be offered here.")
+        grp.add(row("Next base", "none available", "software-update-urgent-symbolic"))
+
+
+class ToolsInstaller(Window):
+    """Slice 7: the Tools Installer. The tools under /usr/share/maluos-tools (maluos-tools) with their
+    state from `maluctl tools list --json`; Install runs `maluctl tools install ID` in a terminal
+    (the script's log live; system-scope tools ask for an administrator's password through
+    pkexec), Open starts the tool, Log shows the last install log."""
+    TITLE = "Tools Installer"; SIZE = (780, 580)
+    PAGES = (("tools", "Tools", "system-software-install-symbolic"),)
+
+    def __init__(self, app, proxy):
+        self.tools = None; self.loading = False
+        super().__init__(app, proxy)
+        GLib.timeout_add_seconds(20, self.poll)
+
+    def poll(self):
+        if not self.loading:
+            self.load()
+        return True
+
+    def load(self):
+        self.loading = True
+        def run():
+            try:
+                r = subprocess.run(["maluctl", "tools", "list", "--json", "--compact"], capture_output=True, text=True, timeout=90)
+                rows = json.loads(r.stdout) if r.returncode == 0 and r.stdout.strip() else []
+            except Exception as e:
+                print(f"maluos-desk: maluctl tools list: {e}", file=sys.stderr); rows = []
+            GLib.idle_add(self.set_tools, rows)
+        threading.Thread(target=run, daemon=True).start()
+
+    def set_tools(self, rows):
+        self.tools = rows; self.loading = False
+        self.render(); return False
+
+    def render(self):
+        for n in self.pages:
+            self.clear(n)
+        h = (self.state or {}).get("host") or {}
+        self.set_title(f"Tools Installer · {h.get('hostname', '')}")
+        if self.tools is None:
+            if not self.loading:
+                self.load()
+            self.group("tools", "Tools", "Reading the tools and their state…"); return
+        if not self.tools:
+            self.group("tools", "Tools", "No tools found: maluos-tools is not installed, or /usr/share/maluos-tools is empty."); return
+        grp = self.group("tools", "Tools", "Install scripts for the tools people want on a desk. Each install opens a terminal with the script's log; "
+                         "a system-wide install asks for an administrator's password; every install needs the network. "
+                         "The software and its terms are the vendor's (the notice and link on each row).")
+        r = row("Read again", "the state is re-read every 20 s while this window is open", "view-refresh-symbolic")
+        r.add_suffix(button("Read again", self.load)); grp.add(r)
+        for t in sorted(self.tools, key=lambda x: x.get("name", "")):
+            state = f"installed: {t.get('version')}" if t.get("installed") else "not installed"
+            sub = f"{state} · {t.get('scope')} scope · {t.get('description', '')}\n{t.get('notice', '')} {t.get('vendor_url', '')}".strip()
+            rr = row(t.get("name"), sub, t.get("icon") or "package-x-generic")
+            if not t.get("installed"):
+                rr.add_suffix(button("Install", lambda i=t["id"]: terminal(["sh", "-c", f"maluctl tools install {i}; echo; echo '--- press Enter to close'; read _"]), "suggested-action"))
+            elif t.get("open"):
+                rr.add_suffix(button("Open", lambda i=t["id"]: subprocess.Popen(["maluctl", "tools", "open", i], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)))
+            if t.get("log_at"):
+                rr.add_suffix(button("Log", lambda l=t.get("log"): terminal(["sh", "-c", f"less +G {l}"])))
+            grp.add(rr)
+
+
+class CredentialManager(Window):
+    """Slice 7: the vault's full user side, over the same client library and API `maluctl secret`
+    uses (/usr/lib/maluos/maluos_vault_client.py, the vault socket as this user, peer credentials).
+    Secrets (list, add, show, rotate, delete), Delegations (delegate, undelegate), Requests (approve,
+    deny, your own), Compartments, Backup (export and import run `maluctl secret` in a terminal for
+    the passphrase prompts). Every button is one verb of the CLI, so policy and audit are the same."""
+    TITLE = "Credential Manager"; SIZE = (820, 620)
+    PAGES = (("secrets", "Secrets", "dialog-password-symbolic"), ("delegations", "Delegations", "system-users-symbolic"),
+             ("requests", "Requests", "dialog-question-symbolic"), ("compartments", "Compartments", "folder-symbolic"),
+             ("backup", "Backup", "drive-harddisk-symbolic"))
+
+    def __init__(self, app, proxy):
+        self.vault = None; self.data = None; self.loading = False; self.error = None
+        super().__init__(app, proxy)
+        GLib.timeout_add_seconds(30, self.poll)
+
+    def client(self):
+        if self.vault is None:
+            sys.path.insert(0, "/usr/lib/maluos")
+            import maluos_vault_client
+            self.vault = maluos_vault_client.VaultClient(timeout=20)
+        return self.vault
+
+    def poll(self):
+        if not self.loading:
+            self.load()
+        return True
+
+    def load(self):
+        self.loading = True
+        def run():
+            d, err = None, None
+            try:
+                v = self.client()
+                who = v.whoami()
+                d = {"who": who, "secrets": v.secrets() if who.get("enrolled") else [], "delegations": v.delegations() if who.get("enrolled") else [],
+                     "requests": v.requests("pending") if who.get("enrolled") else [], "compartments": v.compartments() if who.get("enrolled") else []}
+            except Exception as e:
+                err = f"{e.__class__.__name__}: {str(e)[:160]}"
+            GLib.idle_add(self.set_data, d, err)
+        threading.Thread(target=run, daemon=True).start()
+
+    def set_data(self, d, err):
+        self.data = d; self.error = err; self.loading = False
+        self.render(); return False
 
     def set_state(self, text):
-        try:
-            self.state = json.loads(text) if text else None
-        except ValueError:
-            self.state = None
-        self.render()
+        super().set_state(text)
+
+    # -- rendering
+    def render(self):
+        for n in self.pages:
+            self.clear(n)
+        h = (self.state or {}).get("host") or {}
+        self.set_title(f"Credential Manager · {h.get('hostname', '')}")
+        if self.data is None:
+            if not self.loading and not self.error:
+                self.load()
+            self.group("secrets", "Vault", self.error or "Reading your vault…"); return
+        who = self.data["who"]
+        if not who.get("enrolled"):
+            self.group("secrets", "Vault", "You are not enrolled as a principal in this desk's vault; an operator enrols you (maluctl secret whoami)."); return
+        self.render_secrets(who); self.render_delegations(); self.render_requests(); self.render_compartments(); self.render_backup()
+
+    def render_secrets(self, who):
+        secs = self.data["secrets"]
+        grp = self.group("secrets", "Your secrets", f"{who.get('principal')} · {len(secs)} secrets · maluctl secret list" + (f" · {self.error}" if self.error else ""))
+        r = row("Add a secret", "a name, a kind (api-key, token, password…) and the value; the value is never shown again except with Show", "list-add-symbolic")
+        r.add_suffix(button("Add…", self.add_dialog, "suggested-action")); r.add_suffix(button("Read again", self.load)); grp.add(r)
+        for sct in sorted(secs, key=lambda x: x.get("ref") or x.get("name") or ""):
+            ref = sct.get("ref") or sct.get("name")
+            acc = (sct.get("access") or {}).get("level") if isinstance(sct.get("access"), dict) else sct.get("access")
+            sub = f"{sct.get('kind') or 'secret'}{' · ' + sct['provider'] if sct.get('provider') else ''}{' · $' + sct['env_var'] if sct.get('env_var') else ''}"
+            sub += f" · access {acc or '-'}" + (f" · expires {sct['expires_at'][:10]}" if sct.get("expires_at") else "") + (" · locked" if sct.get("locked") else "")
+            sub += (f" · created {sct['created_at'][:10]}" if sct.get("created_at") else "") + (f" · rotated {sct['rotated_at'][:10]}" if sct.get("rotated_at") else "")
+            rr = row(ref, sub, "dialog-password-symbolic")
+            mine = sct.get("compartment") == who.get("principal") or acc in ("owner", "read", "admin")
+            if mine:
+                rr.add_suffix(button("Show", lambda n=ref: self.show_dialog(n)))
+                rr.add_suffix(button("Rotate", lambda n=ref: self.rotate_dialog(n)))
+                rr.add_suffix(button("Delete", lambda n=ref: self.delete_dialog(n), "destructive-action"))
+            grp.add(rr)
+        if not secs:
+            grp.add(row("No secrets yet", "Add one here, or from a terminal: maluctl secret add NAME --kind api-key"))
+
+    def render_delegations(self):
+        dels = self.data["delegations"]
+        grp = self.group("delegations", "Delegations", "Who may use your keys: agents get use-only access (the gateway applies the key, the agent never reads it), with an expiry and a budget. maluctl secret delegate")
+        r = row("Delegate a key", "to an agent on this desk (agent:NAME) or a person, one secret or all, for a time, within a budget", "list-add-symbolic")
+        r.add_suffix(button("Delegate…", self.delegate_dialog, "suggested-action")); grp.add(r)
+        for d in dels:
+            to = d.get("to") or d.get("to_ref"); sec = d.get("secret") or d.get("secret_name") or "all secrets"
+            b = d.get("budget") or {}
+            sub = (f"until {d['expires_at'][:16].replace('T', ' ')}" if d.get("expires_at") else "no expiry") + (" · " + ", ".join(f"{k} {v}" for k, v in b.items()) if b else "") + (f" · from {d['from']}" if d.get("from") else "")
+            rr = row(f"{sec} → {to}", sub, "system-users-symbolic")
+            rr.add_suffix(button("Undelegate", lambda t=to, s2=(d.get("secret") or d.get("secret_name")): self.act("undelegate", lambda v: v.undelegate(t, secret=s2), f"undelegated {s2 or 'all'} from {t}"), "destructive-action"))
+            grp.add(rr)
+        if not dels:
+            grp.add(row("No delegations", "Agents cannot use your keys until you delegate one."))
+
+    def render_requests(self):
+        reqs = self.data["requests"]
+        me = (self.data["who"] or {}).get("principal")
+        asks = [r for r in reqs if r.get("owner") == me]
+        mine = [r for r in reqs if r.get("requester") == me]
+        grp = self.group("requests", "Requests for your secrets", "An agent or a person was refused one of your secrets and asks for a grant. Approve for a week, a day, or deny. maluctl secret requests")
+        for r in asks:
+            rid = r.get("request_id") or r.get("id")
+            rr = row(f"{r.get('requester') or '?'} asks for {r.get('secret')}", f"{r.get('level')} access{' · ' + r['purpose'] if r.get('purpose') else ''}" + (f" · {r['process']}" if r.get("process") else "") + (f" · asked {r['asked_count']} times" if (r.get("asked_count") or 1) > 1 else ""), "dialog-question-symbolic")
+            rr.add_suffix(button("Allow for a week", lambda i=rid: self.act("approve", lambda v: v.approve(i, expires_at="7d"), f"request #{i} allowed for a week"), "suggested-action"))
+            rr.add_suffix(button("Allow for a day", lambda i=rid: self.act("approve", lambda v: v.approve(i, expires_at="1d"), f"request #{i} allowed for a day")))
+            rr.add_suffix(button("Deny", lambda i=rid: self.act("deny", lambda v: v.deny_request(i), f"request #{i} denied"), "destructive-action"))
+            grp.add(rr)
+        if not asks:
+            grp.add(row("Nothing waiting for you", "Requests also arrive as notifications with Allow and Deny."))
+        if mine:
+            grp = self.group("requests", "Your own requests", "Waiting for the owner's answer.")
+            for r in mine:
+                grp.add(row(r.get("secret"), f"{r.get('level')} access" + (f" · {r['purpose']}" if r.get("purpose") else "")))
+
+    def render_compartments(self):
+        comps = self.data["compartments"]
+        grp = self.group("compartments", "Compartments", "Yours, and the agents' you own: each agent keeps its own secrets in its own compartment (maluctl secret as the agent manages them). maluctl secret compartment")
+        for c in comps:
+            grp.add(row(c.get("name"), f"owner {c.get('owner') or '-'}" + (f" · scope {c['scope']}" if c.get("scope") else "") + (" · locked" if c.get("locked") else "") + (f" · {c['secrets']} secrets" if c.get("secrets") is not None else ""), "folder-symbolic"))
+        if not comps:
+            grp.add(row("No compartments visible", ""))
+
+    def render_backup(self):
+        grp = self.group("backup", "Backup", "Export your vault to a passphrase-protected file, or import one. Both run maluctl secret in a terminal, which asks for the passphrase (never typed into this window).")
+        r = row("Export", "maluctl secret export ~/vault-DATE.bin", "document-save-symbolic")
+        r.add_suffix(button("Export…", lambda: terminal(["sh", "-c", "f=$HOME/vault-$(date +%Y-%m-%d).bin; maluctl secret export \"$f\" && echo \"written $f\"; echo; echo '--- press Enter to close'; read _"])))
+        grp.add(r)
+        r = row("Import", "maluctl secret import FILE (you type the path in the terminal)", "document-open-symbolic")
+        r.add_suffix(button("Import…", lambda: terminal(["sh", "-c", "printf 'file to import: '; read f; maluctl secret import \"$f\"; echo; echo '--- press Enter to close'; read _"])))
+        grp.add(r)
+
+    # -- actions, each one CLI verb
+    def act(self, what, fn, done_text):
+        def run():
+            try:
+                fn(self.client()); msg = done_text
+            except Exception as e:
+                msg = f"{what} failed: {getattr(e, 'message', None) or str(e)[:120]}"
+            GLib.idle_add(lambda: (self.toast(msg), self.load()) and False)
+        threading.Thread(target=run, daemon=True).start()
+
+    def form(self, heading, body, fields, on_ok, ok_label="OK", destructive=False):
+        """An AlertDialog with labelled entries; FIELDS = [(key, label, placeholder, hidden)]."""
+        dlg = Adw.AlertDialog(heading=heading, body=body)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        entries = {}
+        for key, label, placeholder, hidden in fields:
+            e = Adw.PasswordEntryRow(title=label) if hidden else Adw.EntryRow(title=label)
+            if placeholder and not hidden:
+                e.set_text(placeholder)
+            entries[key] = e
+            lb = Gtk.ListBox(css_classes=["boxed-list"]); lb.append(e); box.append(lb)
+        dlg.set_extra_child(box)
+        dlg.add_response("cancel", "Cancel"); dlg.add_response("ok", ok_label)
+        dlg.set_response_appearance("ok", Adw.ResponseAppearance.DESTRUCTIVE if destructive else Adw.ResponseAppearance.SUGGESTED)
+        dlg.set_default_response("ok"); dlg.set_close_response("cancel")
+        def on_resp(_d, resp):
+            if resp == "ok":
+                on_ok({k: e.get_text().strip() for k, e in entries.items()})
+        dlg.connect("response", on_resp)
+        dlg.present(self)
+
+    def add_dialog(self):
+        def ok(f):
+            if not f["name"] or not f["value"]:
+                self.toast("A name and a value are needed"); return
+            self.act("add", lambda v: v.add(f["name"], f["value"], kind=f["kind"] or None, provider=f["provider"] or None, env_var=f["env"] or None, expires_at=f["expires"] or None), f"added {f['name']}")
+        self.form("Add a secret", "Stored in your compartment; agents use it only through a delegation.",
+                  [("name", "Name", "", False), ("kind", "Kind", "api-key", False), ("provider", "Provider (optional)", "", False),
+                   ("env", "Environment variable (optional)", "", False), ("expires", "Expires (optional, e.g. 90d)", "", False), ("value", "Value", "", True)], ok, "Add")
+
+    def show_dialog(self, ref):
+        def ok(_f):
+            def run():
+                try:
+                    val = self.client().value(ref, "read", purpose="Credential Manager show")["value"]
+                except Exception as e:
+                    GLib.idle_add(lambda: self.toast(f"show failed: {getattr(e, 'message', None) or str(e)[:120]}") or False); return
+                GLib.idle_add(self.show_value, ref, val)
+            threading.Thread(target=run, daemon=True).start()
+        self.form("Show the value?", f"{ref} is read from the vault and shown here; the read is in the ledger. Copy puts it on the clipboard for 30 seconds.", [], ok, "Show")
+
+    def show_value(self, ref, val):
+        dlg = Adw.AlertDialog(heading=ref, body="")
+        e = Gtk.Entry(text=val, editable=False, visibility=False, hexpand=True)
+        tog = Gtk.ToggleButton(icon_name="view-reveal-symbolic", tooltip_text="Reveal"); tog.connect("toggled", lambda b: e.set_visibility(b.get_active()))
+        box = Gtk.Box(spacing=6); box.append(e); box.append(tog); dlg.set_extra_child(box)
+        dlg.add_response("close", "Close"); dlg.add_response("copy", "Copy for 30 s")
+        def on_resp(_d, resp):
+            if resp == "copy":
+                cb = self.get_clipboard(); cb.set_text(val)
+                GLib.timeout_add_seconds(30, lambda: cb.set_text("") and False)
+                self.toast("Copied; the clipboard is cleared in 30 s")
+        dlg.connect("response", on_resp); dlg.present(self); return False
+
+    def rotate_dialog(self, ref):
+        def ok(f):
+            if not f["value"]:
+                self.toast("A new value is needed"); return
+            grace = f["grace"].strip()
+            hours = 0
+            if grace:
+                try:
+                    hours = int(grace[:-1]) * (24 if grace.endswith("d") else 1) if grace[-1] in "dh" else int(grace)
+                except ValueError:
+                    self.toast("Grace is hours (e.g. 24h) or days (e.g. 2d)"); return
+            self.act("rotate", lambda v: v.rotate(ref, f["value"], grace_hours=hours), f"rotated {ref}")
+        self.form(f"Rotate {ref}", "The new value replaces the old one; with a grace period the old one stays valid that long.", [("value", "New value", "", True), ("grace", "Grace (optional, e.g. 24h)", "", False)], ok, "Rotate")
+
+    def delete_dialog(self, ref):
+        def run():
+            try:
+                grants = self.client().grants(ref)
+            except Exception:
+                grants = []
+            GLib.idle_add(self.delete_confirm, ref, grants)
+        threading.Thread(target=run, daemon=True).start()
+
+    def delete_confirm(self, ref, grants):
+        who = ", ".join(f"{g.get('grantee_kind')}:{g.get('grantee_ref')}" for g in grants) if grants else "nobody else"
+        self.form(f"Delete {ref}?", f"The secret is removed from the vault. Access held by: {who}. Agents using it stop working.", [], lambda _f: self.act("delete", lambda v: v.delete(ref), f"deleted {ref}"), "Delete", destructive=True)
+        return False
+
+    def delegate_dialog(self):
+        agents = [a["principal"] for a in (self.state or {}).get("agents") or [] if a.get("principal")]
+        def ok(f):
+            if not f["to"]:
+                self.toast("A principal is needed (agent:NAME)"); return
+            budget = None
+            if f["budget"]:
+                try:
+                    budget = {"usd_per_day": float(f["budget"])}
+                except ValueError:
+                    self.toast("Budget is dollars per day, a number"); return
+            self.act("delegate", lambda v: v.delegate(f["to"], secret=f["secret"] or None, expires_at=f["expires"] or None, budget=budget), f"delegated {f['secret'] or 'all secrets'} to {f['to']}")
+        self.form("Delegate a key", "Use only: the gateway applies the key for the agent, which never reads it." + (f" Agents here: {', '.join(agents[:6])}" if agents else ""),
+                  [("to", "To (principal, e.g. agent:research)", agents[0] if agents else "agent:", False), ("secret", "Secret (empty = all your secrets)", "", False),
+                   ("expires", "Expires (e.g. 7d)", "7d", False), ("budget", "Budget, USD per day (optional)", "", False)], ok, "Delegate")
+
+
+class MaluApps(Window):
+    """Slice 7: MaluApps. The catalogue from `maluctl office apps --json` (the office's apps over the
+    public list, cached); Install makes a web app a launcher in its own Firefox window or installs
+    a deb app in a terminal; Open starts it; Remove takes the launcher away."""
+    TITLE = "MaluApps"; SIZE = (780, 580)
+    PAGES = (("apps", "Apps", "view-grid-symbolic"),)
+
+    def __init__(self, app, proxy):
+        self.cat = None; self.loading = False
+        super().__init__(app, proxy)
+        GLib.timeout_add_seconds(60, self.poll)
+
+    def poll(self):
+        if not self.loading:
+            self.load(refresh=True)
+        return True
+
+    def load(self, refresh=False):
+        self.loading = True
+        def run():
+            try:
+                r = subprocess.run(["maluctl", "office", "apps", "--json", "--compact"] + (["--refresh"] if refresh else []), capture_output=True, text=True, timeout=90)
+                cat = json.loads(r.stdout) if r.stdout.strip() else {"apps": [], "errors": [r.stderr.strip()[:160]]}
+            except Exception as e:
+                cat = {"apps": [], "errors": [f"{e.__class__.__name__}: {str(e)[:120]}"]}
+            GLib.idle_add(self.set_cat, cat)
+        threading.Thread(target=run, daemon=True).start()
+
+    def set_cat(self, cat):
+        self.cat = cat; self.loading = False
+        self.render(); return False
+
+    def render(self):
+        for n in self.pages:
+            self.clear(n)
+        h = (self.state or {}).get("host") or {}
+        self.set_title(f"MaluApps · {h.get('hostname', '')}")
+        if self.cat is None:
+            if not self.loading:
+                self.load()
+            self.group("apps", "MaluApps", "Reading the catalogue…"); return
+        cat = self.cat; apps = cat.get("apps") or []
+        src = f"from {cat['office']}" if cat.get("office") else "the public catalogue (enrol this desk with an office for its own apps)"
+        desc = f"Applications for this desk, {src}" + (" · cached, the sources were unreachable" if cat.get("stale") else "") + (" · " + "; ".join(cat["errors"]) if cat.get("errors") and not apps else "") + ". A web app opens in its own Firefox window; a deb app installs from the MaluOS repository."
+        grp = self.group("apps", "MaluApps", desc)
+        r = row("Read again", "the catalogue is re-read every minute while this window is open", "view-refresh-symbolic")
+        r.add_suffix(button("Read again", lambda: self.load(refresh=True))); grp.add(r)
+        for a in apps:
+            state = "installed" if a.get("installed") else ("available" if a.get("available") else a.get("reason") or "not available")
+            rr = row(a.get("name") or a["id"], f"{state} · {a.get('kind')} · {a.get('source')} · {a.get('description', '')}" + (f"\n{a['url']}" if a.get("url") else ""), a.get("icon") or "application-x-executable")
+            if a.get("installed"):
+                rr.add_suffix(button("Open", lambda i=a["id"]: subprocess.Popen(["maluctl", "office", "apps", "open", i], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL), "suggested-action"))
+                rr.add_suffix(button("Remove", lambda i=a["id"]: self.run_cli(["remove", i]), "destructive-action"))
+            elif a.get("available"):
+                if a.get("kind") == "deb":
+                    rr.add_suffix(button("Install", lambda i=a["id"]: terminal(["sh", "-c", f"maluctl office apps install {i}; echo; echo '--- press Enter to close'; read _"]), "suggested-action"))
+                else:
+                    rr.add_suffix(button("Install", lambda i=a["id"]: self.run_cli(["install", i]), "suggested-action"))
+            grp.add(rr)
+        if not apps:
+            grp.add(row("No apps listed", "The office publishes none yet, and the public catalogue could not be read."))
+
+    def run_cli(self, argv):
+        def run():
+            r = subprocess.run(["maluctl", "office", "apps", *argv], capture_output=True, text=True, timeout=120)
+            msg = (r.stdout.strip() or r.stderr.strip()).splitlines()[-1][:120] if (r.stdout.strip() or r.stderr.strip()) else ("done" if r.returncode == 0 else "failed")
+            GLib.idle_add(lambda: (self.toast(msg), self.load()) and False)
+        threading.Thread(target=run, daemon=True).start()
+
+
+WINDOWS = {"desk": ("com.maluos.Desk", Desk), "updates": ("com.maluos.UpgradeManager", UpgradeManager), "tools": ("com.maluos.ToolsInstaller", ToolsInstaller),
+           "vault": ("com.maluos.CredentialManager", CredentialManager), "apps": ("com.maluos.MaluApps", MaluApps)}
 
 
 class App(Adw.Application):
-    def __init__(self, self_test=False):
-        super().__init__(application_id="com.maluos.Desk", flags=Gio.ApplicationFlags.NON_UNIQUE if self_test else Gio.ApplicationFlags.DEFAULT_FLAGS)
+    def __init__(self, window="desk", self_test=False):
+        app_id, self.window_class = WINDOWS[window]
+        super().__init__(application_id=app_id, flags=Gio.ApplicationFlags.NON_UNIQUE if self_test else Gio.ApplicationFlags.DEFAULT_FLAGS)
         self.self_test = self_test
         self.proxy = None
         self.win = None
@@ -338,7 +893,7 @@ class App(Adw.Application):
             self.proxy.connect("g-signal", lambda _p, _s, sig, params: sig == "StateChanged" and self.win and self.win.set_state(params.unpack()[0]))
         except Exception as e:
             print(f"maluos-desk: no session bus or service: {e}", file=sys.stderr); self.proxy = None
-        self.win = Desk(self, self.proxy)
+        self.win = self.window_class(self, self.proxy)
         if self.proxy:
             try:
                 self.win.set_state(self.proxy.call_sync("GetState", None, 0, 10000, None).unpack()[0])
@@ -349,9 +904,11 @@ class App(Adw.Application):
             def report():
                 s = self.win.state or {}
                 o = s.get("office") or {}
-                print(f"self-test ok: service {'reachable' if s else 'unreachable'}, {len(s.get('agents') or [])} agents, "
+                u = s.get("updates") or {}
+                print(f"self-test ok: {self.win.TITLE}: service {'reachable' if s else 'unreachable'}, {len(s.get('agents') or [])} agents, "
                       f"{len((s.get('vault') or {}).get('requests') or [])} requests, pages {', '.join(self.win.pages)}, "
-                      + (f"office {(o.get('office') or {}).get('name') or o.get('url')} ({o.get('presence')})" if o.get("enrolled") else "no office"))
+                      + (f"office {(o.get('office') or {}).get('name') or o.get('url')} ({o.get('presence')})" if o.get("enrolled") else "no office")
+                      + (f", automatic updates {'on' if (u.get('automatic') or {}).get('enabled') else 'off'}" if u.get("available") else ""))
                 self.quit(); return False
             GLib.timeout_add(1500, report)
 
@@ -359,8 +916,13 @@ class App(Adw.Application):
 def main(argv):
     if "-h" in argv or "--help" in argv:
         print(__doc__); return 0
-    app = App(self_test="--self-test" in argv)
-    return app.run([a for a in argv if a != "--self-test"])
+    window = "desk"
+    if "--window" in argv:
+        window = argv[argv.index("--window") + 1]
+        if window not in WINDOWS:
+            print(f"maluos-desk: --window takes {', '.join(WINDOWS)}", file=sys.stderr); return 2
+    app = App(window=window, self_test="--self-test" in argv)
+    return app.run([a for a in argv if a not in ("--self-test", "--window", window)])
 
 
 if __name__ == "__main__":

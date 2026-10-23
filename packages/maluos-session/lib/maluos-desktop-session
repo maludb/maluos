@@ -18,7 +18,7 @@ anything else on the session bus.
 D-Bus: com.maluos.Session at /com/maluos/Session, interface com.maluos.Session1:
   GetState() -> s (JSON)   Refresh()   AgentAction(name, start|stop|restart)
   RequestDecide(id, approve|deny, expires) -> s (JSON)      answer a vault grant request (as the owner)
-  UpdateAction(open|restart|refresh)                        open the updates page (GNOME Software), restart, re-read
+  UpdateAction(open|restart|refresh|apply|apply-all|auto:...)  the updates page, restart, re-read, install now (a terminal), the switches (pkexec)
   signal StateChanged(s)   property Version
 
 Slice 3: agents carry their owner (`mine` when it is the session user); the
@@ -34,10 +34,18 @@ needed. Opening the apt cache can take seconds (minutes under emulation),
 so that thread never blocks the poll loop or the bus. Updates that wait
 for the user become one notification with Install (GNOME Software's
 updates page); a pending restart becomes one with Restart.
+
+Slice 7: the Upgrade Manager (maluos-desk --window updates). UpdateAction
+apply | apply-all open a terminal running `pkexec maluctl update apply [--all]`;
+UpdateAction auto:on | auto:off | auto:set:ORIGIN:on|off | auto:reboot:on|off[:HH:MM]
+run `pkexec maluctl update auto …` in a thread (polkit action
+com.maluos.admin, the shell's agent asks once per session) and
+leave the outcome in updates.last_action; the switches are read back from
+`maluctl update status` (its `auto` block) like everything else.
 """
 import http.client, json, os, pwd, re, socket, subprocess, sys, threading, time, urllib.parse
 
-VERSION = "0.4.0"
+VERSION = "0.5.0"
 BUS_NAME, OBJ, IFACE = "com.maluos.Session", "/com/maluos/Session", "com.maluos.Session1"
 GW = os.environ.get("MALUOS_GATEWAY_SOCKET", "/run/maluos/gateway.sock")
 VAULT = os.environ.get("MALUOS_VAULT_SOCKET", "/run/maluos/vault.sock")
@@ -51,7 +59,8 @@ OFFICE_CONF = os.environ.get("MALUOS_OFFICE_CONF", "/etc/maluos/office.yaml")
 OFFICE_SECRET = "office-desk-token"
 OFFICE_RETRY = 60                # after a failed heartbeat
 UPDATE_MARKS = ("/var/lib/dpkg/status", "/var/lib/apt/lists", "/var/lib/apt/periodic/update-success-stamp",
-                "/var/lib/apt/periodic/unattended-upgrades-stamp", "/var/run/reboot-required")
+                "/var/lib/apt/periodic/unattended-upgrades-stamp", "/var/run/reboot-required",
+                "/etc/apt/apt.conf.d/53maluos-auto", "/etc/apt/apt.conf.d/54maluos-origins")
 NAME_RE = re.compile(r"^[a-z][a-z0-9-]{0,30}$")
 STEADY = ("active", "inactive", "failed")
 
@@ -320,7 +329,7 @@ def updates_state():
             "pending_error": d.get("pending_error"), "by_source": d.get("by_source") or {},
             "lists_refreshed": d.get("lists_refreshed"), "lists_refreshed_at": d.get("lists_refreshed_at"),
             "last_automatic_run": d.get("last_automatic_run"), "last_automatic_run_at": d.get("last_automatic_run_at"),
-            "automatic": d.get("automatic") or {}, "reboot_required": bool(d.get("reboot_required")),
+            "automatic": d.get("automatic") or {}, "auto": d.get("auto") or {}, "reboot_required": bool(d.get("reboot_required")),
             "reboot_packages": d.get("reboot_packages") or []}
 
 
@@ -341,6 +350,7 @@ class Service:
         self.updates_lock = threading.Lock()
         self.updates_wake = threading.Event()
         self.updates_force = False
+        self.updates_last_action = None  # the last apply/auto action's outcome: {action, ok, error, ts}
         self.updates_reading = False
         self.updates_notified = ()       # the set of manual updates last notified
         self.prev = None
@@ -425,6 +435,7 @@ class Service:
         with self.updates_lock:
             u = {k: v for k, v in (self.updates or {"available": False}).items() if not k.startswith("_")}
             u["reading"] = self.updates_reading
+            u["last_action"] = self.updates_last_action
         with self.office_lock:
             hb = self.office_hb
         st = {"version": VERSION, "ts": int(time.time()), "host": host_state(), "gateway": gw, "me": me_state(me),
@@ -739,8 +750,43 @@ class Service:
             with self.updates_lock:
                 self.updates_force = True
             self.updates_wake.set()
+        elif action in ("apply", "apply-all"):
+            # Install now, with apt's log live: a terminal running maluctl update apply as root (pkexec, the
+            # shell's polkit agent asks). The updates thread re-reads when dpkg's state changes.
+            extra = " --all" if action == "apply-all" else ""
+            subprocess.Popen(["xdg-terminal-exec", "sh", "-c", f"pkexec maluctl update apply{extra} -y; echo; echo '--- done (maluctl update apply{extra}); press Enter to close'; read _"],
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        elif action.startswith("auto:"):
+            parts = action.split(":")[1:]
+            argv = None
+            if parts[0] in ("on", "off") and len(parts) == 1:
+                argv = [parts[0]]
+            elif parts[0] == "set" and len(parts) == 3 and parts[1] in ("security", "maluos", "mozilla") and parts[2] in ("on", "off"):
+                argv = ["set", parts[1], parts[2]]
+            elif parts[0] == "reboot" and len(parts) in (2, 3) and parts[1] in ("on", "off"):
+                argv = ["reboot", parts[1]] + (["--at", parts[2]] if len(parts) == 3 else [])
+            if argv is None:
+                raise ValueError(f"unknown update action {action!r}")
+            threading.Thread(target=self.update_auto, args=(action, argv), daemon=True).start()
         else:
-            raise ValueError(f"unknown update action {action!r} (open, restart, refresh)")
+            raise ValueError(f"unknown update action {action!r} (open, restart, refresh, apply, apply-all, auto:…)")
+
+    def update_auto(self, action, argv):
+        """`pkexec maluctl update auto ARGV` (polkit com.maluos.admin); the outcome goes to
+        updates.last_action and the updates thread re-reads the switches."""
+        try:
+            r = subprocess.run(["pkexec", "maluctl", "update", "auto", *argv], capture_output=True, text=True, timeout=300, stdin=subprocess.DEVNULL)
+            ok = r.returncode == 0
+            err = "" if ok else (r.stderr.strip().splitlines() or ["cancelled" if r.returncode in (126, 127) else f"exit {r.returncode}"])[-1][:160]
+        except (OSError, subprocess.SubprocessError) as e:
+            ok, err = False, f"{e.__class__.__name__}: {str(e)[:120]}"
+        if not ok:
+            log(f"update auto {' '.join(argv)}: {err}")
+        with self.updates_lock:
+            self.updates_last_action = {"action": action, "ok": ok, "error": err, "ts": int(time.time())}
+            self.updates_force = True
+        self.updates_wake.set()
+        self.refresh_soon(0.2)
 
     # -- D-Bus
     def on_call(self, conn, sender, path, iface, method, params, invocation):

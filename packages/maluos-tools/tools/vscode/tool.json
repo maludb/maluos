@@ -1,0 +1,4 @@
+{"id": "vscode", "name": "Visual Studio Code", "scope": "system", "icon": "text-editor",
+ "description": "Microsoft's editor, from Microsoft's apt repository (packages.microsoft.com/repos/code), so it updates with the system.",
+ "vendor_url": "https://code.visualstudio.com/", "notice": "Microsoft's software and licence (code.visualstudio.com/license); adds packages.microsoft.com as an apt source.",
+ "check": "code --version | head -1", "open": "code"}

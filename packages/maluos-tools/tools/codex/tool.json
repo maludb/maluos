@@ -1,0 +1,4 @@
+{"id": "codex", "name": "Codex", "scope": "system", "icon": "utilities-terminal",
+ "description": "OpenAI's coding agent for the terminal: Ubuntu's Node.js and npm, then @openai/codex system-wide. Sign in on first run.",
+ "vendor_url": "https://github.com/openai/codex", "notice": "OpenAI's software (Apache-2.0) from the npm registry; installs Ubuntu's nodejs and npm packages first.",
+ "check": "codex --version", "open": "xdg-terminal-exec codex"}

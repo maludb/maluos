@@ -1,3 +1,12 @@
+maluos-branding (0.4.2) resolute; urgency=medium
+
+  * maluos-desktop-branding: power defaults that keep agents alive (Phase 12
+    slice 7): Automatic Screen Blank off (idle-delay 0) and Automatic Suspend
+    off on battery and on mains in the MaluOS session, and no suspend on the
+    login screen (GNOME-Greeter), as gschema overrides a person can change.
+
+ -- Edward Honour <ed@maludb.org>  Fri, 23 Oct 2026 02:30:00 +0000
+
 maluos-branding (0.4.1) resolute; urgency=medium
 
   * unattended-upgrades: Mozilla's repository (site=packages.mozilla.org) joins

@@ -1,0 +1,4 @@
+{"id": "claude-code", "name": "Claude Code", "scope": "user", "icon": "utilities-terminal",
+ "description": "Anthropic's coding agent for the terminal, installed for you by Anthropic's native installer (~/.local/bin/claude). Sign in on first run.",
+ "vendor_url": "https://claude.com/claude-code", "notice": "Anthropic's software and terms; the installer downloads the current release from claude.ai.",
+ "check": "claude --version", "open": "xdg-terminal-exec claude"}

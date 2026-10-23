@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=MaluApps
+Comment=Applications for this desk from your office and the MaluOS catalogue: MaluMail, Help Desk, CRM, Knowledgebase
+Exec=maluos-desk --window apps
+Icon=view-grid
+Terminal=false
+Categories=System;Office;
+Keywords=MaluOS;apps;office;mail;helpdesk;crm;knowledgebase;
+StartupNotify=true
+DBusActivatable=false

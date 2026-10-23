@@ -41,7 +41,9 @@ mkfs.ext4 -q -L maluos-root "${LOOP}p3"
 
 echo "== copying rootfs"
 mount "${LOOP}p3" "$MNT"
-rsync -aHAX --numeric-ids "$ROOTFS/" "$MNT/"
+# MALUOS_RSYNC_BWLIMIT (e.g. 60m) throttles the copy: the dev VM's host has frozen and killed the VM under
+# sustained writes (docs/phase12-desktop.md, slice 6 status; 2026-10-23 02:11 during this step).
+rsync -aHAX --numeric-ids ${MALUOS_RSYNC_BWLIMIT:+--bwlimit=$MALUOS_RSYNC_BWLIMIT} "$ROOTFS/" "$MNT/"
 mkdir -p "$MNT/boot/efi"; mount "${LOOP}p2" "$MNT/boot/efi"
 cat > "$MNT/etc/fstab" <<FSTAB
 LABEL=maluos-root  /          ext4  defaults,discard  0 1
@@ -84,7 +86,8 @@ umount -R "$MNT"; losetup -d "$LOOP"; LOOP=""
 
 echo "== converting to qcow2"
 rm -f "$QCOW"
-qemu-img convert -f raw -O qcow2 -c "$RAW" "$QCOW"
+# direct I/O on both sides (no page cache) and, with MALUOS_IMAGE_RATE (e.g. 80M), a rate limit: see the rsync note above
+qemu-img convert -t none -T none ${MALUOS_IMAGE_RATE:+-r $MALUOS_IMAGE_RATE} -f raw -O qcow2 -c "$RAW" "$QCOW"
 rm -f "$RAW"
 chown "$(stat -c %u:%g "$ROOT")" "$QCOW"
 ls -la "$QCOW"

@@ -1,0 +1,7 @@
+{"schema": 1, "updated": "2026-10-23",
+ "apps": [
+  {"id": "malumail", "name": "MaluMail", "description": "Mail for the office, with agents that read and draft with you. Runs on your office's MaluOS server.", "icon": "mail-unread", "kind": "web", "path": "/apps/mail", "requires": ["office"], "version": "1"},
+  {"id": "helpdesk", "name": "Help Desk", "description": "Cases, queues and the Help Desk agent. Runs on your office's MaluOS server.", "icon": "help-faq", "kind": "web", "path": "/apps/helpdesk", "requires": ["office"], "version": "1"},
+  {"id": "crm", "name": "CRM", "description": "Accounts, contacts and deals. Runs on your office's MaluOS server.", "icon": "x-office-address-book", "kind": "web", "path": "/apps/crm", "requires": ["office"], "version": "1"},
+  {"id": "knowledgebase", "name": "Knowledgebase", "description": "Articles and procedures, searched by agents and people. Runs on your office's MaluOS server.", "icon": "accessories-dictionary", "kind": "web", "path": "/apps/kb", "requires": ["office"], "version": "1"}
+ ]}

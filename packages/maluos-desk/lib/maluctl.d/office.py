@@ -12,6 +12,10 @@ shows the desk and whether it is online.
   sudo maluctl office enroll URL --code CODE [--name "Ed's desk"] [--owner LOGIN] [--no-gateway] [--force]
   maluctl office status [--json] [--live]          the configuration and the last heartbeat; --live asks the office
   maluctl office heartbeat [--presence online|offline] [--json]       as the desk's owner
+  maluctl office apps [--json] [--refresh]         the MaluApps catalogue: the office's (endpoints.apps) over the
+                                                   public one (download.maluos.com/apps/catalog.json), cached per user
+  maluctl office apps install|remove|open ID       a web app becomes a launcher opening it in Firefox's own window;
+                                                   a deb app installs from apt.maluos.com (pkexec apt-get)
   sudo maluctl office leave [--keep-secret]
 
 Agents: /etc/maluos/office.env names the office's endpoints (MALUOS_OFFICE_*)
@@ -23,7 +27,7 @@ and read the token for the office's MCP servers with
 import json, os, pwd, socket, subprocess, sys, time, urllib.error, urllib.request
 sys.path.insert(0, "/usr/lib/maluos")
 
-VERSION = "0.1.1"
+VERSION = "0.2.0"
 SURFACE = 1
 CONF = os.environ.get("MALUOS_OFFICE_CONF", "/etc/maluos/office.yaml")
 ENVF = os.environ.get("MALUOS_OFFICE_ENV", "/etc/maluos/office.env")
@@ -204,6 +208,173 @@ def token_for_me():
         return t
     from maluos_vault_client import Vault
     return Vault(os.environ.get("MALUOS_VAULT_SOCKET")).value(SECRET, "read", purpose="office heartbeat")["value"]
+
+
+# -- MaluApps (Phase 12 slice 7): the catalogue and its installs
+PUBLIC_CATALOG = os.environ.get("MALUOS_APPS_PUBLIC_URL", "https://download.maluos.com/apps/catalog.json")
+APP_KINDS = ("web", "deb", "script")
+
+
+def apps_cache_path():
+    base = os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache")
+    return os.path.join(base, "maluos-apps", "catalog.json")
+
+
+def launcher_dir():
+    return os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"), ".local", "share"), "applications")
+
+
+def launcher_path(app_id):
+    return os.path.join(launcher_dir(), f"maluapp-{app_id}.desktop")
+
+
+def _norm_app(a, source, office_url=None):
+    a = dict(a); a["source"] = source
+    a["kind"] = a.get("kind") if a.get("kind") in APP_KINDS else "web"
+    if a["kind"] == "web" and not a.get("url") and a.get("path") and office_url:
+        a["url"] = office_url.rstrip("/") + "/" + a["path"].lstrip("/")
+    req = a.get("requires") or []
+    a["available"] = not (a["kind"] == "web" and not a.get("url")) and not ("office" in req and source == "public" and not office_url)
+    a["reason"] = None if a["available"] else ("needs an office: enrol this desk (sudo maluctl office enroll)" if "office" in req else "no URL")
+    return a
+
+
+def fetch_apps(refresh=False):
+    """The merged catalogue: the office's apps over the public ones; the cache when neither answers."""
+    cache = None
+    try:
+        cache = json.load(open(apps_cache_path()))
+    except (OSError, ValueError):
+        pass
+    if cache and not refresh and time.time() - (cache.get("fetched_at") or 0) < 900:
+        return cache
+    conf = read_conf() or {}
+    office_url = conf.get("url")
+    out, errors = {}, []
+    try:
+        st, r = http("GET", PUBLIC_CATALOG, timeout=10)
+        if st == 200 and isinstance(r.get("apps"), list):
+            for a in r["apps"]:
+                if a.get("id"):
+                    out[a["id"]] = _norm_app(a, "public", office_url)
+        else:
+            errors.append(f"public catalogue: HTTP {st}")
+    except Exception as e:
+        errors.append(f"public catalogue: {e.__class__.__name__}")
+    ep = (conf.get("endpoints") or {}).get("apps") if conf else None
+    if ep:
+        try:
+            st, r = http("GET", ep, token=token_for_me(), timeout=15)
+            if st == 200 and isinstance(r.get("apps"), list):
+                for a in r["apps"]:
+                    if a.get("id"):
+                        out[a["id"]] = _norm_app(a, "office", office_url)
+            else:
+                errors.append(f"office catalogue: HTTP {st} {r.get('error') or ''}")
+        except Exception as e:
+            errors.append(f"office catalogue: {e.__class__.__name__}")
+    if not out and cache:
+        cache["stale"] = True; cache["errors"] = errors
+        return cache
+    cat = {"fetched_at": int(time.time()), "office": (conf.get("office") or {}).get("name") if conf else None, "office_url": office_url,
+           "apps": sorted(out.values(), key=lambda x: x.get("name") or x["id"]), "errors": errors}
+    for a in cat["apps"]:
+        a["installed"] = app_installed(a)
+    try:
+        os.makedirs(os.path.dirname(apps_cache_path()), exist_ok=True)
+        tmp = apps_cache_path() + ".tmp"
+        with open(tmp, "w") as fh:
+            json.dump(cat, fh)
+        os.replace(tmp, apps_cache_path())
+    except OSError:
+        pass
+    return cat
+
+
+def refresh_launchers():
+    try:
+        subprocess.run(["update-desktop-database", launcher_dir()], capture_output=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def app_installed(a):
+    if a["kind"] == "web":
+        return os.path.exists(launcher_path(a["id"]))
+    if a["kind"] == "deb" and a.get("package"):
+        return subprocess.run(["dpkg-query", "-W", "-f=${Status}", a["package"]], capture_output=True, text=True).stdout.startswith("install ok")
+    return False
+
+
+def app_install(a):
+    if not a.get("available"):
+        raise RuntimeError(a.get("reason") or "not available")
+    if a["kind"] == "web":
+        os.makedirs(launcher_dir(), exist_ok=True)
+        text = ("[Desktop Entry]\nType=Application\n" f"Name={a.get('name') or a['id']}\n" f"Comment={(a.get('description') or '').replace(chr(10), ' ')}\n"
+                f"Exec=firefox --new-window {a['url']}\n" f"Icon={a.get('icon') or 'maluos-logo'}\nTerminal=false\nCategories=Office;Network;\n"
+                f"X-MaluOS-App={a['id']}\nX-MaluOS-Source={a.get('source')}\nStartupNotify=true\n")
+        tmp = launcher_path(a["id"]) + ".tmp"
+        with open(tmp, "w") as fh:
+            fh.write(text)
+        os.chmod(tmp, 0o755); os.replace(tmp, launcher_path(a["id"]))
+        refresh_launchers()
+        print(f"installed {a.get('name')}: launcher {launcher_path(a['id'])} opens {a['url']} in its own Firefox window")
+        return 0
+    if a["kind"] == "deb":
+        pkg = a.get("package") or sys.exit("the catalogue entry names no package")
+        print(f"installing {pkg} from the MaluOS repository (pkexec apt-get)", flush=True)
+        return subprocess.call(["pkexec", "apt-get", "install", "-y", pkg], env=dict(os.environ, DEBIAN_FRONTEND="noninteractive"))
+    raise RuntimeError("script apps are not supported yet; the Tools Installer handles install scripts")
+
+
+def app_remove(a):
+    if a["kind"] == "web":
+        try:
+            os.unlink(launcher_path(a["id"])); print(f"removed the launcher for {a.get('name')}")
+        except FileNotFoundError:
+            print("not installed")
+        refresh_launchers(); return 0
+    if a["kind"] == "deb":
+        return subprocess.call(["pkexec", "apt-get", "remove", "-y", a.get("package") or ""])
+    return 1
+
+
+def app_open(a):
+    if a["kind"] == "web" and a.get("url"):
+        subprocess.Popen(["firefox", "--new-window", a["url"]], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True); return 0
+    if a["kind"] == "deb" and a.get("exec"):
+        subprocess.Popen(["sh", "-c", a["exec"]], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True); return 0
+    sys.exit(f"{a['id']}: nothing to open")
+
+
+def apps(a):
+    sub = a.pop(0) if a and not a[0].startswith("--") else "list"
+    cat = fetch_apps(refresh=opt(a, "--refresh", flag=True) or sub != "list")
+    for x in cat.get("apps") or []:
+        x["installed"] = app_installed(x)
+    if sub == "list":
+        if opt(a, "--json", flag=True):
+            print(json.dumps(cat, indent=None if opt(a, "--compact", flag=True) else 2)); return 0
+        if not cat.get("apps"):
+            print("no catalogue: " + "; ".join(cat.get("errors") or ["nothing listed"])); return 1
+        print(f"MaluApps{' from ' + cat['office'] if cat.get('office') else ''}" + (" (cached, the sources were unreachable)" if cat.get("stale") else "") + ":")
+        for x in cat["apps"]:
+            print(f"  {x['id']:<16} {x.get('name') or '':<18} {x['kind']:<6} {x['source']:<7} {'installed' if x.get('installed') else ('available' if x.get('available') else x.get('reason') or '-')}")
+        return 0
+    if not a:
+        sys.exit(f"maluctl office apps {sub} ID")
+    app = next((x for x in cat.get("apps") or [] if x["id"] == a[0]), None) or sys.exit(f"no app {a[0]!r} in the catalogue")
+    if sub == "install":
+        rc = app_install(app)
+    elif sub == "remove":
+        rc = app_remove(app)
+    elif sub == "open":
+        rc = app_open(app)
+    else:
+        sys.exit("maluctl office apps [list|install|remove|open]")
+    fetch_apps(refresh=True)
+    return rc
 
 
 # -- commands
@@ -396,6 +567,8 @@ def main(a):
             return heartbeat(a)
         if cmd == "leave":
             return leave(a)
+        if cmd == "apps":
+            return apps(a)
     except RuntimeError as e:
         sys.exit(f"maluctl office {cmd}: {e}")
     print(__doc__); return 2
