@@ -30,7 +30,7 @@ What is installed.
 
 | Key | Type | Default | Notes |
 |---|---|---|---|
-| `image` | string | the media's default (`maluos-server` or `maluos-desktop`, from the ISO's menu) | the name of a squashfs under `/casper/` on the media, or a URL (netboot, later) |
+| `image` | string | the media's default (`maluos-server` or `maluos-desktop`, from the ISO's menu) | the name of a squashfs under `/maluos/images/` on the media (Phase 11 slice 1 keeps `/casper/` for the live image alone), or a URL (netboot, later) |
 | `verify` | bool | true | the squashfs is checked against the media's SHA256SUMS before unpacking; `false` only for experiments |
 | `repository` | `media` \| `none` | media | copy the on-media MaluOS repository to the target (`/var/lib/maluos/apt`, a cdrom-style source beside apt.maluos.com), as the late-commands do today |
 

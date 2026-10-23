@@ -150,6 +150,10 @@ assembly script and the test.
 
 ### Slice 2: the engine and the unattended install
 
+Specified in docs/phase11-slice2-engine.md (2026-10-23): the steps and
+their commands, the four layouts, the journal and resume, the events,
+the SSH option, the telemetry document and endpoint, the tests.
+
 - maluos-installer: `maluos-install --plan FILE|URL [--dry-run]`, the
   plan schema (docs/install-plan.md), the steps of decision 4 for the
   guided whole-disk layouts (ext4, LVM, LUKS), the log, the resume.

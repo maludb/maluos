@@ -138,7 +138,7 @@ tests/live-iso-boot-test.sh [--uefi] -p server     # boots it under QEMU to the 
 /maluos/images/maluos-server.size, .manifest
 /maluos/SHA256SUMS                  the live and target images, the kernel and initrd
 /maluos/apt/{dists,pool,bootstrap}  the on-media repository, as today
-/maluos/plans/                      slice 2: the unattended plans (empty directory now)
+/maluos/plan/                       slice 2: the unattended plans (empty directory now)
 EFI partition (appended, GPT 2)     EFI/BOOT/{BOOTx64.EFI,grubx64.efi,mmx64.efi,grub.cfg}
 ```
 
