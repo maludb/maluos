@@ -35,6 +35,16 @@ uploads: the dev VM is a 14 GB guest that its hypervisor killed four times
 when plain `cp` and `sha256sum` over the images filled the guest's cache
 (docs/phase12-desktop.md, slice 6 status). Run the script in tmux.
 
+The passphrase prompt comes first, before staging. The script sets
+`GPG_TTY`, signs a test line with the production key and lets gpg-agent
+cache the passphrase (10 minutes by default) for the real signature a
+few minutes later; files already staged under the day's name (same size,
+newer than the build) are not copied again. Before 2026-10-23 the prompt
+came after five minutes of staging, pinentry-curses drew it on the
+release terminal while the maintainer was looking at another pane, and it
+expired after its 60 s default: `gpg: signing failed: Timeout`.
+`~/.gnupg/gpg-agent.conf` on the dev host now sets `pinentry-timeout 1800`.
+
 ## Signing keys
 
 Two keys, two roles:

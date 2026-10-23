@@ -40,16 +40,30 @@ PROFILES=server
 OUT=build/release/$VERSION; mkdir -p "$OUT"
 gpg --batch --list-secret-keys "$MALUOS_PUBLIC_SIGNING_UID" >/dev/null 2>&1 || { echo "production key not on this host" >&2; exit 1; }
 echo "== release $VERSION ($TAG): $PROFILES"
+if [ $DRY = 0 ]; then
+    # Unlock the production key now, while you are watching the terminal: the agent caches the
+    # passphrase (10 min by default) for the real signature after staging. On 2026-10-23 the prompt
+    # came after five minutes of staging, drew on a terminal nobody was looking at and expired
+    # (pinentry-curses times out after 60 s): "gpg: signing failed: Timeout".
+    export GPG_TTY=$(tty); gpg-connect-agent updatestartuptty /bye >/dev/null 2>&1 || true
+    echo "== production key: enter the passphrase now (cached for the signature after staging)"
+    echo "maluos release $VERSION" | gpg --clearsign -u "$MALUOS_PUBLIC_SIGNING_UID" >/dev/null \
+        || { echo "could not unlock the production key; run from an interactive terminal (tmux) and answer the pinentry dialog" >&2; exit 1; }
+fi
+stage() {   # stage SRC DEST: gentle copy, skipped when DEST is already a complete copy of this SRC (same size, newer)
+    if [ -f "$2" ] && [ "$(stat -c %s "$1")" = "$(stat -c %s "$2")" ] && [ "$2" -nt "$1" ]; then echo "   already staged: $2"
+    else "$ROOT_DIR/scripts/gentle.py" cp "$1" "$2"; fi
+}
 files=(); qcows=()
 for p in $PROFILES; do
     echo "== staging $p ISO and image into $OUT (several GB at 100 MB/s, takes a while)"
-    "$ROOT_DIR/scripts/gentle.py" cp "build/maluos-26.04.1-$p-amd64.iso" "$OUT/maluos-$VERSION-$p-amd64.iso"
-    "$ROOT_DIR/scripts/gentle.py" cp "build/image/maluos-$p-26.04-amd64.qcow2" "$OUT/maluos-$VERSION-$p-amd64.qcow2"
+    stage "build/maluos-26.04.1-$p-amd64.iso" "$OUT/maluos-$VERSION-$p-amd64.iso"
+    stage "build/image/maluos-$p-26.04-amd64.qcow2" "$OUT/maluos-$VERSION-$p-amd64.qcow2"
     files+=("maluos-$VERSION-$p-amd64.iso" "maluos-$VERSION-$p-amd64.qcow2"); qcows+=("$OUT/maluos-$VERSION-$p-amd64.qcow2")
 done
 echo "== checksums (reads every file once, 100 MB/s)"
 ( cd "$OUT" && "$ROOT_DIR/scripts/gentle.py" sum "${files[@]}" > SHA256SUMS )
-[ $DRY = 1 ] || echo "== signing SHA256SUMS with the production key: the passphrase prompt follows"
+[ $DRY = 1 ] || echo "== signing SHA256SUMS with the production key (cached passphrase; a second prompt only if staging took over 10 min)"
 if [ $DRY = 0 ]; then
     ( cd "$OUT" && gpg --yes --clearsign -u "$MALUOS_PUBLIC_SIGNING_UID" -o SHA256SUMS.gpg SHA256SUMS )   # production key: asks for the passphrase
     gpg --batch --verify "$OUT/SHA256SUMS.gpg" >/dev/null 2>&1 || { echo "SHA256SUMS.gpg did not verify" >&2; exit 1; }
