@@ -510,10 +510,10 @@ notification, and `leave`.
 
 ## Next slices
 
-### Slice 7 (planned 2026-10-23): power defaults, Tools Installer, MaluApps, Credential Manager
+### Slice 7 (planned 2026-10-23): power defaults, Tools Installer, MaluApps, Credential Manager, Upgrade Manager
 
-Requested by the owner on 2026-10-23, after release 26.04.20261023. Four
-items, one slice: the first is a settings change, the other three are
+Requested by the owner on 2026-10-23, after release 26.04.20261023. Five
+items, one slice: the first is a settings change, the other four are
 pages of the Desk's code, each pinned in the dock as its own entry, and
 the second brings one new package.
 
@@ -551,7 +551,7 @@ greeter's dconf profile resolves the same two keys to `'nothing'`.
 applications, not folders, so "Tools Installer" is an application: one
 pinned entry (`com.maluos.ToolsInstaller.desktop`, in
 `org.gnome.shell favorite-apps` after Firefox, Files and Software, next
-to the Desk, MaluApps and the Credential Manager) that opens a window listing the tools with their state (not
+to the Desk, MaluApps, the Credential Manager and the Upgrade Manager) that opens a window listing the tools with their state (not
 installed / installing, with the log / installed, version, Open). The
 window is the Desk's code (GTK 4, libadwaita, `packages/maluos-session/desk`)
 with a second page, and the list is data: a new package `maluos-tools`
@@ -639,11 +639,47 @@ adds, delegates and deletes a secret through its own D-Bus actions and
 the vault's `maluctl secret list` and `delegations` agree after each
 step.
 
+**5. "Upgrade Manager", pinned in the dock.** Slice 5 made updates
+install on their own and gave the Desk's System page "Install…",
+"Restart now" and "Check again"; what it has no way to do is turn the
+automatic updates off, choose what they cover, or see and change the
+restart policy. The Upgrade Manager (`com.maluos.UpgradeManager.desktop`,
+the fourth new pinned entry, same Desk code) is the update side in one
+place, over a `maluctl update` that grows the verbs it needs:
+
+| Page | What you do there | CLI |
+|---|---|---|
+| Updates | what is pending, from where (Ubuntu security, MaluOS, Mozilla, other), the last refresh; **Update now** (the automatic policy's set) and **Update everything** (`full-upgrade`), with the apt log live and the restart notice | `update status`, `check`, `apply`, `apply --all` |
+| Automatic | one switch, **Automatic updates** (default on), and under it what they cover: security, MaluOS, Mozilla, each its own switch; **Restart automatically to finish updates** (default off) with a time window; the time of the daily run | `update auto on|off|status`, `update auto set security|maluos|mozilla on|off`, `update auto reboot on|off [--window 03:00-05:00]` |
+| History | the automatic runs and apt's history, as `history` prints them, with the packages of each run | `update history` |
+| Release | the MaluOS release of this system (`VERSION`, the 26.04 base), and, once item 2 of "After that" exists, the upgrade to the next base; until then the page says there is none | (later) `update release` |
+
+`maluctl update auto` writes two drop-ins and nothing else:
+`/etc/apt/apt.conf.d/53maluos-auto.conf` with `APT::Periodic::Unattended-Upgrade`
+(`"0"` is off; the lists still refresh daily so **Update now** has
+something to show) and the `Unattended-Upgrade::Automatic-Reboot*` keys,
+and `/etc/apt/apt.conf.d/54maluos-origins.conf`, which restates the
+`Allowed-Origins` from `52maluos-unattended-upgrades` minus the ones
+switched off. The policy file itself is never edited, so a package
+upgrade of maluos-branding cannot silently flip a choice back, and
+removing both drop-ins restores the shipped defaults. Changing the
+switches needs administrator authentication (polkit action
+`com.maluos.update.configure`, once per window); **Update now** is the
+existing `UpdateAction`. Turning automatic updates off is a choice the
+system remembers and reports: `update status` says "automatic updates
+off since DATE by USER", the Desk's System page and the indicator carry
+the same line, and nothing nags beyond that. Boot test: `auto off`,
+`status` reports it and `apt-config dump` shows the `"0"`; `auto set
+mozilla off` drops Mozilla from the effective origins and keeps the
+other two; `auto on` restores the shipped policy byte for byte; `apply`
+still installs on a system with automatic updates off.
+
 **Packages:** maluos-desktop-branding (power override, favorites),
-maluos-desktop-session (the three new pages and launchers, catalogue
-refresh on heartbeat, the reveal polkit action), maluos-tools (new),
-maluos-desk (the `apps` endpoint in the contract), maluos-vault (nothing
-new unless a page needs a listing the API lacks), maluos-meta
+maluos-desktop-session (the four new pages and launchers, catalogue
+refresh on heartbeat, the reveal and configure polkit actions),
+maluos-tools (new), maluos-desk (the `apps` endpoint in the contract),
+maluos-firstboot (`maluctl update auto`, the status line), maluos-vault
+(nothing new unless a page needs a listing the API lacks), maluos-meta
 (maluos-desktop depends on maluos-tools). The slice's test adds the
 checks above to `tests/qcow2-boot-test.sh`.
 
