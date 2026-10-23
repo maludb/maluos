@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Download MaluOS</title>
-<meta name="description" content="Download MaluOS 26.04.20261022: server and desktop installer ISOs, cloud images, signed checksums, requirements and install guide.">
+<meta name="description" content="Download MaluOS 26.04.20261023: server and desktop installer ISOs, cloud images, signed checksums, requirements and install guide.">
 <style>
 :root{--bg:#ffffff;--fg:#1a1a1a;--muted:#5b6470;--line:#e3e6ea;--code:#f3f5f7;--accent:#0b5fff;--btn:#0b5fff;--btnfg:#fff}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f1115;--fg:#e8eaed;--muted:#9aa3ad;--line:#262a31;--code:#171a20;--accent:#7aa7ff;--btn:#2f6bff;--btnfg:#fff}}
@@ -29,31 +29,31 @@ ol li,ul li{margin:.3rem 0}
 <body>
 <main>
 <h1>Download MaluOS</h1>
-<p class="muted">MaluOS 26.04.20261022 · server and desktop · released 2026-10-22 · free edition</p>
+<p class="muted">MaluOS 26.04.20261023 · server and desktop · released 2026-10-23 · free edition</p>
 
 <p>MaluOS is an operating system built around MaluDB: the database, its API, the credential vault, the model gateway and the agent runtime install and provision themselves on first boot. The free edition is the full system. No account or licence is needed. It comes as a server and as a desktop.</p>
 
 <div class="dl">
-  <a class="btn primary" href="https://download.maluos.com/26.04.20261022/maluos-26.04.20261022-server-amd64.iso">Server installer ISO <small>4.7 GB · amd64 · BIOS and UEFI</small></a>
-  <a class="btn primary" href="https://download.maluos.com/26.04.20261022/maluos-26.04.20261022-desktop-amd64.iso">Desktop installer ISO <small>4.8 GB · amd64 · GNOME</small></a>
-  <a class="btn" href="https://download.maluos.com/26.04.20261022/maluos-26.04.20261022-server-amd64.qcow2">Server cloud image (qcow2) <small>1.7 GB · cloud-init</small></a>
-  <a class="btn" href="https://download.maluos.com/26.04.20261022/maluos-26.04.20261022-desktop-amd64.qcow2">Desktop image (qcow2) <small>1.7 GB · cloud-init</small></a>
-  <a class="btn" href="https://download.maluos.com/26.04.20261022/SHA256SUMS">SHA256SUMS <small>and <a href="https://download.maluos.com/26.04.20261022/SHA256SUMS.gpg">signature</a></small></a>
-  <a class="btn" href="https://download.maluos.com/26.04.20261022/RELEASE-NOTES.md">Release notes</a>
+  <a class="btn primary" href="https://download.maluos.com/26.04.20261023/maluos-26.04.20261023-server-amd64.iso">Server installer ISO <small>4.9 GB · amd64 · BIOS and UEFI</small></a>
+  <a class="btn primary" href="https://download.maluos.com/26.04.20261023/maluos-26.04.20261023-desktop-amd64.iso">Desktop installer ISO <small>5.0 GB · amd64 · GNOME</small></a>
+  <a class="btn" href="https://download.maluos.com/26.04.20261023/maluos-26.04.20261023-server-amd64.qcow2">Server cloud image (qcow2) <small>1.7 GB · cloud-init</small></a>
+  <a class="btn" href="https://download.maluos.com/26.04.20261023/maluos-26.04.20261023-desktop-amd64.qcow2">Desktop image (qcow2) <small>1.9 GB · cloud-init</small></a>
+  <a class="btn" href="https://download.maluos.com/26.04.20261023/SHA256SUMS">SHA256SUMS <small>and <a href="https://download.maluos.com/26.04.20261023/SHA256SUMS.gpg">signature</a></small></a>
+  <a class="btn" href="https://download.maluos.com/26.04.20261023/RELEASE-NOTES.md">Release notes</a>
 </div>
 
-<p class="muted">Releases are dated: 26.04 is the package base, 20261022 the build date. The current release number is always at <a href="https://download.maluos.com/LATEST">download.maluos.com/LATEST</a>. Each release is also on <a href="https://github.com/maludb/maluos/releases/tag/v26.04.20261022">GitHub</a> with the cloud images and checksums attached.</p>
+<p class="muted">Releases are dated: 26.04 is the package base, 20261023 the build date. The current release number is always at <a href="https://download.maluos.com/LATEST">download.maluos.com/LATEST</a>. Each release is also on <a href="https://github.com/maludb/maluos/releases/tag/v26.04.20261023">GitHub</a> with the cloud images and checksums attached.</p>
 
 <h2>The desktop</h2>
 <p>MaluOS Desktop is the server with a GNOME 50 workstation on top: the same database, vault, model gateway and agent runtime run on the machine, so agents on your desk have local memory and credentials while it is on. The MaluOS session adds an indicator to the top panel that shows the agents on the host and lets you start and stop them, the gateway and its backends, your model budget, your vault secrets and delegations, and the latest alerts; changes arrive as desktop notifications. There are no snaps; the browser is Firefox from Mozilla's own apt repository, GNOME Software installs debs only, and security and MaluOS updates install themselves through apt (<code>maluctl update status</code> shows what is pending).</p>
-<p class="muted">The desktop is the second desktop release: it adds agent ownership, vault grant requests answered from a notification, the MaluOS Desk window and the MaluOS logo, and it fixes the installer crash of 26.04.20261020 with the default LVM layout. It is tested in virtual machines (BIOS and UEFI) and installed on a laptop and on Proxmox; the graphics stack and the boot splash have not yet been seen on a range of real hardware. The desktop needs at least 4 GB of memory and 40 GB of disk; 8 GB or more is recommended, plus the memory of any local model you run.</p>
+<p class="muted">The desktop is the fourth desktop release. It adds desk enrolment: <code>sudo maluctl office enroll URL --code CODE</code> joins the desk to a MaluOS Business OS office, with the person's desk token in the vault, the office's model endpoint as a gateway rung, presence heartbeats from the session and the office on the Desk page; the server images carry the office half of the same contract. It is tested in virtual machines (BIOS and UEFI) and installed on a laptop and on Proxmox; the graphics stack and the boot splash have not yet been seen on a range of real hardware. The desktop needs at least 4 GB of memory and 40 GB of disk; 8 GB or more is recommended, plus the memory of any local model you run.</p>
 
 <h2>Verify the download</h2>
 <p>Every release is signed with the MaluOS archive signing key:</p>
 <pre><code>MaluOS Archive Signing Key (2026) &lt;apt@maluos.com&gt;
 Fingerprint: 6387 5A4A 5397 B902 E9C5  CFF8 731A DA39 4135 B9FF</code></pre>
 <p>Fetch the key from the package repository, check the signature on the checksum file, then check the file you downloaded:</p>
-<pre><code>V=26.04.20261022
+<pre><code>V=26.04.20261023
 curl -fsSLO https://download.maluos.com/$V/SHA256SUMS
 curl -fsSLO https://download.maluos.com/$V/SHA256SUMS.gpg
 curl -fsSL  https://apt.maluos.com/bootstrap/maluos-archive-keyring.gpg -o maluos-archive-keyring.gpg
@@ -97,7 +97,7 @@ users:
 UD
 echo 'instance-id: maluos-1' &gt; meta-data
 cloud-localds seed.iso user-data meta-data
-qemu-img create -f qcow2 -b maluos-26.04.20261022-server-amd64.qcow2 -F qcow2 disk.qcow2 40G
+qemu-img create -f qcow2 -b maluos-26.04.20261023-server-amd64.qcow2 -F qcow2 disk.qcow2 40G
 qemu-system-x86_64 -enable-kvm -m 4096 -smp 2 -drive file=disk.qcow2,if=virtio \
   -drive file=seed.iso,if=virtio,format=raw -nic user,hostfwd=tcp::2222-:22
 ssh -p 2222 maluos@127.0.0.1 maluctl status</code></pre>

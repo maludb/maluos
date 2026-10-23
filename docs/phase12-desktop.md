@@ -548,6 +548,7 @@ built 2026-10-22 and released in 26.04.20261022; slice 6 built
 | Images | desktop rootfs, qcow2 and ISO rebuilt 2026-10-22 and copied to the internal share (ISO sha 1482191d…, qcow2 3f2edc6b…, rebuilt again 2026-10-22 22:16 with maluos-desk 0.1.1; UEFI boot test 186 ok); server rootfs, qcow2 and ISO rebuilt 2026-10-22 with the re-vendored kernel (ISO sha 91345a…, qcow2 91da5c…) |
 | Tests | desktop UEFI boot test 186 ok / 0 FAIL (all 27 slice 6 checks pass against the mock office: enrolment, the vault token, the office rung with the vault's use row, the delegated agent, the agent's MCP call, the session's presence and notifications, the Desk, retirement, leave); server UEFI boot test 122 ok / 0 FAIL, including the office half against the real kernel (enrol through Apache with a wrong code refused, a code minted with `bin/mint_desk_code.php`, heartbeat, `me`, leave answering 410, the presence job in www-data's crontab); ISO apt check PASS for both |
 | Kernel half | approved, built and committed in maludb-os-core 2026-10-22 (33c6343: db/187, the endpoints, Settings → Desks, the sweep; proof 39 checks); re-vendored here as maludb-os-core 2026.10.22maluos1 and in the server images above |
+| Released | committed 235c291; release 26.04.20261023 (tag b7902ba) with both image sets on download.maluos.com and GitHub; apt.maluos.com publish of the slice 6 set pending |
 
 ### Slice 5 status (2026-10-22)
 
