@@ -15,8 +15,8 @@ tooling as it is: S under half a day, M a day, L several days.
 
 | | |
 |---|---|
-| Latest release | 26.04.20261024, shipped 2026-10-24 00:37 UTC with Phase 12 slices 7 and 8 (one release per UTC day) |
-| Phase 12 (desktop) | slices 1 to 6 released; slice 7 built, boot-tested, committed c9ccdbf, desktop ISO rebuilt; slice 8 coded, packaged, image chain running |
+| Latest release | 26.04.20261024, shipped 2026-10-24 00:37 UTC with Phase 12 slices 7 and 8; 26.04.20261025 (slice 9) built and boot-tested 2026-10-24, release after 00:00 UTC |
+| Phase 12 (desktop) | slices 1 to 8 released (26.04.20261024); slice 9 built and boot-tested 2026-10-24 (desktop UEFI 252 ok, server UEFI 140 ok), on the share for the 26.04.20261025 release |
 | Phase 13 (estate) | planned 2026-10-23, nothing built; the Agents app's task interface (slice 8) is its first protocol |
 | Phase 11 (installer) | proposed only |
 | Phases 7 and 9 | partly done; the rest waits (components catalogue, editions) |
@@ -49,12 +49,12 @@ leftovers, all in this repository (docs/phase12-desktop.md "Slice 9").
 
 | # | Task | Status | Effort | Depends on | Notes |
 |---|---|---|---|---|---|
-| B1 | Grant requests decided with level, expiry and budget; "Choose…" opens the Credential Manager | planned | S | nothing | session, Desk, Credential Manager |
-| B2 | A grant request carries the model call that caused it | planned | M | nothing | vault request rows, gateway, session |
-| B3 | Agents' budget alerts reach their owners | planned | S | nothing | gateway alerts, session |
-| B4 | Re-authentication (polkit auth_self) before a reveal, a rotation and a backup | planned | M | nothing | the one design in the slice; ledger detail reauth |
-| B5 | Agents app: streaming answers, the office page with the desk's identity, timers | planned | M | nothing | maluos-agent task progress, maluos-agents, mock office |
-| B6 | The public MaluApps catalogue signed and verified | planned | S | a key decision (F2) | release key by default |
+| B1 | Grant requests decided with level, expiry and budget; "Choose…" opens the Credential Manager | built 2026-10-24 | S | nothing | session, Desk, Credential Manager: Decide… (level, expiry, budget), Choose… on the notification |
+| B2 | A grant request carries the model call that caused it | built 2026-10-24 | M | nothing | vault request rows carry `cause`, the gateway passes the call, the session and the windows show it |
+| B3 | Agents' budget alerts reach their owners | built 2026-10-24 | S | nothing | the alert names the agent and carries its owner; the owner is notified by name |
+| B4 | Re-authentication (polkit auth_self) before a reveal, a rotation and a backup | built 2026-10-24 | M | nothing | the check lives in the vault (pkcheck on the caller, polkit action com.maluos.vault.reveal, auth_self); ledger detail reauth |
+| B5 | Agents app: streaming answers, the office page with the desk's identity, timers | built 2026-10-24 | M | nothing | task progress + Client.stream, Talk draws the answer as it grows, the office page with the desk token, timers |
+| B6 | The public MaluApps catalogue signed and verified | built 2026-10-24 | S | F2 taken by default (release key) | catalog.json.asc by the release key, verified with the archive keyring; scripts/publish-catalog.sh |
 | B7 | Not in slice 9: desktop-background icons (F1), DEP-11 and the upgrade path, branding on hardware | deferred | | | their own slices later |
 
 ## C. Kernel-side work (maludb-os-core repository)
@@ -99,7 +99,7 @@ owner. Each slice ends with its test on the three-machine proof.
 | # | Decision | Where it is written | Blocks |
 |---|---|---|---|
 | F1 | Agent icons on the desktop background: live with the grid folder, or ship our own shell extension | docs/phase12-desktop.md, slice 8 status | B7 |
-| F2 | Which key signs the public apps catalogue (the release key is proposed) | docs/phase12-desktop.md, slice 9 | B6 |
+| F2 | Which key signs the public apps catalogue: the release key, taken by default in slice 9 (a separate key would need maluos-keyring to ship it) | docs/phase12-desktop.md, slice 9 status | nothing now |
 | F3 | Lid switch behaviour with the new power defaults | docs/phase12-desktop.md, slice 7 | nothing yet |
 | F4 | Office catalogue location in the kernel (which table decides what desks see) | docs/desk-enrolment.md | C1 |
 | F5 | Edition boundary for estate features | docs/phase13-estate.md, open questions | E4 |

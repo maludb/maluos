@@ -61,3 +61,7 @@ td.ts { white-space: nowrap; color: var(--muted); font-family: var(--mono); font
 .kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 8px 0 16px; }
 .kv dt { color: var(--muted); } .kv dd { margin: 0; word-break: break-word; }
 .chip { display: inline-block; padding: 1px 8px; border-radius: 999px; background: rgba(127,127,127,.15); font-size: 12px; margin: 0 4px 4px 0; }
+
+/* slice 9: a streaming answer */
+.msg.working .cursor { display: inline-block; margin-left: 2px; animation: blink 1s steps(2) infinite; }
+@keyframes blink { to { visibility: hidden; } }

@@ -177,7 +177,7 @@ class Gateway:
         self.catalog = None
         self.backends, self.schedulers = {}, {}
         self.session = None
-        self.principal_cache, self.token_cache, self.spend_cache = {}, {}, {}
+        self.principal_cache, self.token_cache, self.spend_cache, self.owner_cache = {}, {}, {}, {}
         self.routes = collections.deque(maxlen=200)
         self.started = time.time()
         self.tasks = []
@@ -405,8 +405,11 @@ class Gateway:
         except ImportError:
             return None, "vault_unavailable"
         v = Vault(self.cfg.get("vault_socket"), on_behalf_of=caller.ref)
+        # Slice 9: the refusal's grant request carries what asked (this call), so the owner's desk can say so.
+        cause = {"call": call.id, "model": call.requested, "backend": backend.name, "class": call.cls, "task": call.task, "kind": call.kind,
+                 "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
         try:
-            r = await asyncio.to_thread(v.use, ref, f"{call.id} {backend.name}")
+            r = await asyncio.to_thread(v.use, ref, f"{call.id} {backend.name}", cause)
             return r["value"], None
         except VaultError as e:
             return None, {"no_secret": "no_credential", "forbidden": "no_credential", "use_requires_broker": "not_a_broker",
@@ -543,6 +546,23 @@ class Gateway:
         self.spend_cache[key] = (v, time.time())
         return v
 
+    async def owner_of(self, ref):
+        """The owner principal of an agent (maluos_agent, written by maluctl agent; Phase 12 slice 3), cached a minute.
+        None for people, system agents and when the registry is not readable."""
+        if not ref.startswith("agent:"):
+            return None
+        ent = self.owner_cache.get(ref)
+        if ent and ent[1] > time.time() - 60:
+            return ent[0]
+        owner = None
+        try:
+            row = await self.db.fetchone("SELECT owner_principal_ref FROM maluos_agent WHERE principal_ref=%s AND removed_at IS NULL", (ref,))
+            owner = row["owner_principal_ref"] if row else None
+        except Exception as e:
+            log(f"agent owner lookup: {e.__class__.__name__}: {str(e)[:100]}")
+        self.owner_cache[ref] = (owner, time.time())
+        return owner
+
     async def check_budget(self, call, policy, needs):
         est_in, est_out = needs.get("tokens_in_est") or 0, needs.get("tokens_out_est") or 1024
         call.cost_est, call.currency = self.cost(call.backend, call.model, est_in, est_out)
@@ -555,18 +575,24 @@ class Gateway:
             if limit is None:
                 continue
             spent = await self.spent(call.caller.ref, period)
+            if spent + call.cost_est <= warn_at * float(limit):
+                continue
+            # Slice 9: an agent's budget alert names the agent and carries its owner, so the owner's desk is told.
+            who, ref = call.caller.ref, call.caller.ref
+            owner = await self.owner_of(ref)
+            agent = ref[6:] if ref.startswith("agent:") else None
+            if agent:
+                who = f"agent {agent}"
+            tag = {"principal": ref, "agent": agent, "owner": owner, "period": period, "spent": spent, "limit": limit}
             if spent + call.cost_est > float(limit):
                 await self.ledger_denied(call, "budget_exceeded", f"{period}: spent {spent:.4f} + est {call.cost_est:.4f} > {limit}")
-                await self.alerts.fire("budget_exceeded", f"{call.caller.ref} exhausted the {period} budget ({spent:.4f}/{limit} {call.currency})",
-                                       {"principal": call.caller.ref, "period": period, "spent": spent, "limit": limit},
-                                       once_key=f"budget_exceeded:{call.caller.ref}:{period}", cooldown_s=3600)
+                await self.alerts.fire("budget_exceeded", f"{who} exhausted the {period} budget ({spent:.4f}/{limit} {call.currency})", tag,
+                                       once_key=f"budget_exceeded:{ref}:{period}", cooldown_s=3600)
                 raise ApiError(403, "budget_exceeded", f"{period} budget of {limit} {call.currency} exhausted (spent {spent:.4f}, this call ~{call.cost_est:.4f})",
                                period=period, spent=spent, limit=limit)
-            if spent + call.cost_est > warn_at * float(limit):
-                call.warnings.append(f"{period} budget {spent + call.cost_est:.4f}/{limit} {call.currency}")
-                await self.alerts.fire("budget", f"{call.caller.ref} is at {spent + call.cost_est:.4f}/{limit} {call.currency} of the {period} budget",
-                                       {"principal": call.caller.ref, "period": period, "spent": spent, "estimate": call.cost_est, "limit": limit},
-                                       once_key=f"budget:{call.caller.ref}:{period}", cooldown_s=3600)
+            call.warnings.append(f"{period} budget {spent + call.cost_est:.4f}/{limit} {call.currency}")
+            await self.alerts.fire("budget", f"{who} is at {spent + call.cost_est:.4f}/{limit} {call.currency} of the {period} budget", dict(tag, estimate=call.cost_est),
+                                   once_key=f"budget:{ref}:{period}", cooldown_s=3600)
 
     # -- admission and ledger
     async def admit(self, call):

@@ -75,3 +75,19 @@ Not yet: polkit rules for agents that need to touch the system beyond the
 sockets, bubblewrap or nspawn sandboxes for agents that run untrusted code,
 and agent-specific resource limits. The unit template is the place for all
 three.
+
+## The task interface (Phase 12 slices 8 and 9)
+
+An agent that imports `maluos_agent_tasks` (`/usr/lib/maluos`) and calls
+`serve(handle, card=...)` answers tasks on `/run/maluos/agents/NAME/tasks.sock`:
+JSON-RPC shaped like A2A (`agent/card`, `tasks/send`, `tasks/get`,
+`tasks/list`), admitting its owner, root and itself by peer credentials.
+`handle(task)` gets `{"id", "text", "parts", "ts", "progress"}` and returns
+the answer (a string, or `{"text", "artifacts"}`). While it works it may
+call `task["progress"](text)`: the partial text rides in the task's
+`output.text` (with `partial: true`) until the return value replaces it,
+so a long task reads like a conversation. Clients: `Client.local(NAME)`
+or `Client(url, token)` for an office agent; `send()` waits, `stream(text,
+on_text)` sends without waiting and polls `tasks/get`. `maluctl agent
+send NAME TEXT` prints the answer as it grows; the Agents app's Talk page
+draws it. The demo agent (`maluos-agent-demo.py`) shows the pattern.

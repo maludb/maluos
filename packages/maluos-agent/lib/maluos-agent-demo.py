@@ -28,7 +28,11 @@ print(f"demo agent {os.environ.get('MALUOS_AGENT')} as {os.environ.get('MALUOS_P
 try:
     sys.path.insert(0, "/usr/lib/maluos")
     import maluos_agent_tasks
-    if maluos_agent_tasks.serve(lambda t: ask(t["text"]), card={"description": "the demonstration agent: answers each task through the gateway", "capabilities": ["chat"]}):
+    def handle(t):
+        # Slice 9: partial text first (the client shows it while the gateway answers), then the answer.
+        t["progress"](f"working on: {t['text'][:80]}\n")
+        return ask(t["text"])
+    if maluos_agent_tasks.serve(handle, card={"description": "the demonstration agent: answers each task through the gateway", "capabilities": ["chat"]}):
         print(f"tasks: serving {maluos_agent_tasks.socket_path()}", flush=True)
 except Exception as e:
     print(f"tasks: not served ({e.__class__.__name__}: {str(e)[:120]})", flush=True)

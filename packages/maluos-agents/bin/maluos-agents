@@ -15,6 +15,12 @@ sockets, the vault, the office, notifications and the icons.
   maluos-agents --agent ID        open it on an agent (local:NAME or office:ID, as the icons do)
   maluos-agents --sync            write the agent icons (launchers, the Agents folder in the grid, ~/Desktop/Agents) and exit
   maluos-agents --self-test       build the window from the live state, print a summary, exit
+
+Slice 9: answers stream (tasks/send returns at once, the UI polls tasks/get
+while the task works and draws the answer as it grows); the office's page for
+an agent loads with the desk's identity (the desk token as the Bearer header
+on its first request, so the office can answer with a session cookie); the
+Control and Activity pages re-read on a timer while they are visible.
 """
 import json, os, subprocess, sys, threading, time, urllib.parse
 
@@ -130,7 +136,11 @@ class Bridge:
         text = (p.get("text") or "").strip()
         if not text:
             raise ValueError("nothing to send")
-        return self.client(self.find(p["id"])).send(text, timeout=float(p.get("timeout") or 180))
+        # Slice 9: no waiting; the UI polls agent_task while the task works and shows the answer as it grows.
+        return self.client(self.find(p["id"])).send(text, wait=bool(p.get("wait", False)), timeout=float(p.get("timeout") or 180))
+
+    def m_agent_task(self, p):
+        return self.client(self.find(p["id"])).get(p["task"])
 
     def m_agent_tasks(self, p):
         return {"tasks": self.client(self.find(p["id"])).list(int(p.get("limit") or 50))}
@@ -215,7 +225,12 @@ class Bridge:
         a = self.find(p["id"])
         if not a.get("page"):
             raise ValueError("the office publishes no page for this agent")
-        self.app.win.show_page(a["page"], a["name"])
+        token = None
+        try:
+            token = self.office_token()           # slice 9: the page loads with the desk's identity
+        except Exception as e:
+            log(f"office page without the desk token: {str(e)[:120]}")
+        GLib_idle(self.app.win.show_page, a["page"], a["name"], token)
         return {"ok": True}
 
     def m_sync(self, p):
@@ -227,6 +242,11 @@ class Bridge:
         if not fn:
             raise ValueError(f"unknown method {method}")
         return fn(params or {})
+
+
+def GLib_idle(fn, *args):
+    from gi.repository import GLib
+    GLib.idle_add(lambda: fn(*args) or False)
 
 
 def run_gui(argv, selected, self_test):
@@ -277,8 +297,13 @@ def run_gui(argv, selected, self_test):
                     return True
             return False
 
-        def show_page(self, url, name):
-            self.page.load_uri(url); self.stack.set_visible_child_name("page"); self.back.set_visible(True); self.set_title(f"{name} · office page")
+        def show_page(self, url, name, token=None):
+            # Slice 9: the first request carries the desk token as the Bearer header (WebKit lets the native side set
+            # it on a URIRequest); the office may answer with a session cookie for the pages that follow.
+            req = WebKit.URIRequest.new(url)
+            if token:
+                req.get_http_headers().append("Authorization", f"Bearer {token}")
+            self.page.load_request(req); self.stack.set_visible_child_name("page"); self.back.set_visible(True); self.set_title(f"{name} · office page")
 
         def show_ui(self):
             self.stack.set_visible_child_name("ui"); self.back.set_visible(False); self.set_title("Agents")

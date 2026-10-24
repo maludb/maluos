@@ -18,7 +18,8 @@ window renders and forwards.
   maluos-desk --window tools    open the Tools Installer (slice 7): the tools under /usr/share/maluos-tools
                                 (maluos-tools) with their state; Install runs `maluctl tools install` in a terminal
   maluos-desk --window vault    open the Credential Manager (slice 7): your secrets, delegations, requests,
-                                compartments and backup, over the vault client `maluctl secret` uses
+                                compartments and backup, over the vault client `maluctl secret` uses;
+                                --request ID opens it on that grant request's decision (slice 9)
   maluos-desk --window apps     open MaluApps (slice 7): the office's and the public catalogue (maluctl office apps)
   maluos-desk --self-test       build the window from the live state (or an empty one), print a summary, exit
 """
@@ -72,6 +73,17 @@ def terminal(argv):
         subprocess.Popen(["xdg-terminal-exec", *argv])
     except OSError:
         pass
+
+
+def cause_text(c):
+    """One line for a grant request's cause (slice 9): the model call the gateway was refused a credential for."""
+    if not isinstance(c, dict):
+        return ""
+    when = (c.get("ts") or "")[11:16]
+    return f"for --model {c.get('model') or '?'} ({c.get('backend') or '?'}{', ' + c['class'] if c.get('class') else ''})" + (f" at {when}" if when else "") + (f": {c['task']}" if c.get("task") else "")
+
+
+EXPIRIES = (("a day", "1d"), ("a week", "7d"), ("a month", "30d"), ("until revoked", ""))
 
 
 class Window(Adw.ApplicationWindow):
@@ -179,6 +191,36 @@ class Window(Adw.ApplicationWindow):
             self.state = None
         self.render()
 
+    def decide_dialog(self, req, on_ok):
+        """Slice 9: the decision with its parameters. REQ has secret, requester, level, purpose, cause;
+        on_ok({"level", "expires", "budget"}) with budget None or {"usd_per_day": n}."""
+        who = req.get("requester") or "?"
+        body = f"{who} asked for {req.get('level')} access to {req.get('secret')}." + (f" {cause_text(req.get('cause'))}." if req.get("cause") else "") \
+            + (f" Purpose: {req['purpose']}." if req.get("purpose") else "") + " Use lets the gateway apply the key for them; read lets them see it."
+        dlg = Adw.AlertDialog(heading=f"Allow {who}?", body=body)
+        box = Gtk.ListBox(css_classes=["boxed-list"])
+        level = Adw.ComboRow(title="Level", model=Gtk.StringList.new(["use (the gateway applies it)", "read (they see the value)"]))
+        level.set_selected(1 if req.get("level") == "read" else 0)
+        expiry = Adw.ComboRow(title="For", model=Gtk.StringList.new([e[0] for e in EXPIRIES])); expiry.set_selected(1)
+        budget = Adw.EntryRow(title="Budget, USD per day (optional, spend credentials)")
+        for w in (level, expiry, budget):
+            box.append(w)
+        dlg.set_extra_child(box)
+        dlg.add_response("cancel", "Cancel"); dlg.add_response("ok", "Allow")
+        dlg.set_response_appearance("ok", Adw.ResponseAppearance.SUGGESTED); dlg.set_default_response("ok"); dlg.set_close_response("cancel")
+        def on_resp(_d, resp):
+            if resp != "ok":
+                return
+            b = budget.get_text().strip(); bd = None
+            if b:
+                try:
+                    bd = {"usd_per_day": float(b)}
+                except ValueError:
+                    self.toast("Budget is dollars per day, a number"); return
+            on_ok({"level": "read" if level.get_selected() == 1 else "use", "expires": EXPIRIES[expiry.get_selected()][1] or None, "budget": bd})
+        dlg.connect("response", on_resp)
+        dlg.present(self)
+
 
 class Desk(Window):
     TITLE = "MaluOS Desk"
@@ -246,6 +288,14 @@ class Desk(Window):
             for c in recent:
                 grp.add(row(f"{hhmm(c.get('ts'))}  {c.get('requested') or '?'} → {c.get('backend') or '-'}/{c.get('model') or '-'}",
                             f"{c.get('status') or ''}{' · ' + c['reason'] if c.get('reason') else ''}{' · class ' + c['class'] if c.get('class') else ''}"))
+        asked = [r for r in (s.get("vault") or {}).get("requests") or [] if r.get("mine_to_decide") and r.get("cause")]
+        if asked:
+            grp = self.group("models", "Calls that asked for a credential", "The gateway was refused a key of yours for these calls and filed a grant request (the Vault page decides it).")
+            for r in asked:
+                c = r["cause"]
+                grp.add(row(f"{(c.get('ts') or '')[11:16]}  {c.get('model') or '?'} → {c.get('backend') or '-'} · {r.get('requester')}",
+                            f"request #{r['id']} for {r.get('secret')}" + (f" · class {c['class']}" if c.get("class") else "") + (f" · task {c['task']}" if c.get("task") else "") + (f" · call {c['call']}" if c.get("call") else ""),
+                            "dialog-question-symbolic"))
 
     def render_vault(self, s):
         v = s.get("vault") or {}
@@ -255,13 +305,17 @@ class Desk(Window):
             self.group("vault", "Vault", "You are not enrolled as a principal."); return
         asks = [r for r in v.get("requests") or [] if r.get("mine_to_decide")]
         if asks:
-            grp = self.group("vault", "Requests for your secrets", "An agent or a person was refused one of your secrets and asks for a grant.")
+            grp = self.group("vault", "Requests for your secrets", "An agent or a person was refused one of your secrets and asks for a grant. Allow for a week with the level asked, choose the level, the time and a budget with Decide…, or deny.")
             for r in asks:
                 who = r.get("requester") or "?"
-                rr = row(f"{who} asks for {r.get('secret')}", f"{r.get('level')} access{' · ' + r['purpose'] if r.get('purpose') else ''}"
+                cause = cause_text(r.get("cause"))
+                rr = row(f"{who} asks for {r.get('secret')}", (f"{cause} · " if cause else "") + f"{r.get('level')} access{' · ' + r['purpose'] if r.get('purpose') else ''}"
                          + (f" · asked {r['asked_count']} times" if (r.get("asked_count") or 1) > 1 else "") + (f" · {r['process']}" if r.get("process") else ""), "dialog-question-symbolic")
                 rr.add_suffix(button("Allow for a week", lambda i=r["id"]: self.decide(i, "approve", "7d"), "suggested-action"))
+                rr.add_suffix(button("Decide…", lambda q=r: self.decide_dialog(q, lambda o, i=q["id"]: self.decide(i, "approve", json.dumps(o)))))
                 rr.add_suffix(button("Deny", lambda i=r["id"]: self.decide(i, "deny", ""), "destructive-action"))
+                if r.get("cause"):
+                    rr.add_suffix(button("The call", lambda: self.stack.set_visible_child_name("models")))
                 grp.add(rr)
         grp = self.group("vault", "Your vault", f"{v.get('principal')} · {v.get('secrets', 0)} secrets · maluctl secret list")
         for c in v.get("compartments") or []:
@@ -281,9 +335,14 @@ class Desk(Window):
         alerts = s.get("alerts") or []
         if not alerts:
             self.group("alerts", "Alerts", "Nothing recent."); return
-        grp = self.group("alerts", "Alerts", "From the ledger: budgets, backends, anomalies, restarts.")
+        by_agent = {}
         for a in alerts[:30]:
-            grp.add(row(f"{(a.get('ts') or '')[11:16]}  {a.get('kind')}", a.get("title") or "", "dialog-warning-symbolic"))
+            by_agent.setdefault(a.get("agent") or "", []).append(a)
+        for agent in sorted(by_agent, key=lambda k: (k != "", k)):
+            rows_ = by_agent[agent]
+            grp = self.group("alerts", f"Agent {agent}" if agent else "Alerts", "Its budget, as the gateway reported it to you, its owner." if agent else "From the ledger: budgets, backends, anomalies, restarts.")
+            for a in rows_:
+                grp.add(row(f"{(a.get('ts') or '')[11:16]}  {a.get('kind')}" + (f" ({a['period']})" if a.get("period") else ""), a.get("title") or "", "dialog-warning-symbolic"))
 
     def render_system(self, s):
         h = s.get("host") or {}; u = s.get("updates") or {}
@@ -567,8 +626,9 @@ class CredentialManager(Window):
              ("requests", "Requests", "dialog-question-symbolic"), ("compartments", "Compartments", "folder-symbolic"),
              ("backup", "Backup", "drive-harddisk-symbolic"))
 
-    def __init__(self, app, proxy):
+    def __init__(self, app, proxy, request=None):
         self.vault = None; self.data = None; self.loading = False; self.error = None
+        self.open_request = request           # slice 9: --request ID opens the decision for that request once
         super().__init__(app, proxy)
         GLib.timeout_add_seconds(30, self.poll)
 
@@ -619,6 +679,14 @@ class CredentialManager(Window):
         if not who.get("enrolled"):
             self.group("secrets", "Vault", "You are not enrolled as a principal in this desk's vault; an operator enrols you (maluctl secret whoami)."); return
         self.render_secrets(who); self.render_delegations(); self.render_requests(); self.render_compartments(); self.render_backup()
+        if self.open_request:
+            rid, self.open_request = self.open_request, None
+            req = next((r for r in self.data["requests"] if str(r.get("request_id") or r.get("id")) == str(rid) and r.get("owner") == who.get("principal")), None)
+            self.stack.set_visible_child_name("requests")
+            if req:
+                GLib.idle_add(lambda: self.decide_dialog(req, lambda o, i=rid: self.approve(i, o)) or False)
+            else:
+                self.toast(f"Request #{rid} is not waiting for you (decided already, or not yours)")
 
     def render_secrets(self, who):
         secs = self.data["secrets"]
@@ -661,12 +729,13 @@ class CredentialManager(Window):
         me = (self.data["who"] or {}).get("principal")
         asks = [r for r in reqs if r.get("owner") == me]
         mine = [r for r in reqs if r.get("requester") == me]
-        grp = self.group("requests", "Requests for your secrets", "An agent or a person was refused one of your secrets and asks for a grant. Approve for a week, a day, or deny. maluctl secret requests")
+        grp = self.group("requests", "Requests for your secrets", "An agent or a person was refused one of your secrets and asks for a grant. Allow for a week with the level asked, choose the level, the time and a budget with Decide…, or deny. maluctl secret requests | approve | deny")
         for r in asks:
             rid = r.get("request_id") or r.get("id")
-            rr = row(f"{r.get('requester') or '?'} asks for {r.get('secret')}", f"{r.get('level')} access{' · ' + r['purpose'] if r.get('purpose') else ''}" + (f" · {r['process']}" if r.get("process") else "") + (f" · asked {r['asked_count']} times" if (r.get("asked_count") or 1) > 1 else ""), "dialog-question-symbolic")
+            cause = cause_text(r.get("cause"))
+            rr = row(f"{r.get('requester') or '?'} asks for {r.get('secret')}", (f"{cause} · " if cause else "") + f"{r.get('level')} access{' · ' + r['purpose'] if r.get('purpose') else ''}" + (f" · {r['process']}" if r.get("process") else "") + (f" · asked {r['asked_count']} times" if (r.get("asked_count") or 1) > 1 else ""), "dialog-question-symbolic")
             rr.add_suffix(button("Allow for a week", lambda i=rid: self.act("approve", lambda v: v.approve(i, expires_at="7d"), f"request #{i} allowed for a week"), "suggested-action"))
-            rr.add_suffix(button("Allow for a day", lambda i=rid: self.act("approve", lambda v: v.approve(i, expires_at="1d"), f"request #{i} allowed for a day")))
+            rr.add_suffix(button("Decide…", lambda q=r, i=rid: self.decide_dialog(q, lambda o: self.approve(i, o))))
             rr.add_suffix(button("Deny", lambda i=rid: self.act("deny", lambda v: v.deny_request(i), f"request #{i} denied"), "destructive-action"))
             grp.add(rr)
         if not asks:
@@ -685,13 +754,29 @@ class CredentialManager(Window):
             grp.add(row("No compartments visible", ""))
 
     def render_backup(self):
-        grp = self.group("backup", "Backup", "Export your vault to a passphrase-protected file, or import one. Both run maluctl secret in a terminal, which asks for the passphrase (never typed into this window).")
+        grp = self.group("backup", "Backup", "Export your vault to a passphrase-protected file, or import one. Both ask for your password first (the vault asks polkit), then run maluctl secret in a terminal, which asks for the file's passphrase (never typed into this window).")
         r = row("Export", "maluctl secret export ~/vault-DATE.bin", "document-save-symbolic")
-        r.add_suffix(button("Export…", lambda: terminal(["sh", "-c", "f=$HOME/vault-$(date +%Y-%m-%d).bin; maluctl secret export \"$f\" && echo \"written $f\"; echo; echo '--- press Enter to close'; read _"])))
+        r.add_suffix(button("Export…", lambda: self.reauth("export", lambda: terminal(["sh", "-c", "f=$HOME/vault-$(date +%Y-%m-%d).bin; maluctl secret export \"$f\" && echo \"written $f\"; echo; echo '--- press Enter to close'; read _"]))))
         grp.add(r)
         r = row("Import", "maluctl secret import FILE (you type the path in the terminal)", "document-open-symbolic")
-        r.add_suffix(button("Import…", lambda: terminal(["sh", "-c", "printf 'file to import: '; read f; maluctl secret import \"$f\"; echo; echo '--- press Enter to close'; read _"])))
+        r.add_suffix(button("Import…", lambda: self.reauth("import", lambda: terminal(["sh", "-c", "printf 'file to import: '; read f; maluctl secret import \"$f\"; echo; echo '--- press Enter to close'; read _"]))))
         grp.add(r)
+
+    def reauth(self, what, then):
+        """Slice 9: the person's own password before WHAT, asked by the vault (POST /v1/reauth: polkit
+        com.maluos.vault.reveal, auth_self, the vault daemon being the action's owner; ledgered); then() on success."""
+        def run():
+            try:
+                self.client().reauth(purpose=f"Credential Manager {what}")
+            except Exception as e:
+                GLib.idle_add(lambda: self.toast(f"{what}: not done ({getattr(e, 'message', None) or str(e)[:100]})") or False); return
+            GLib.idle_add(lambda: then() or False)
+        threading.Thread(target=run, daemon=True).start()
+
+    def approve(self, rid, opts):
+        """Approve with the decision's parameters (slice 9): level, expiry, budget."""
+        what = f"{opts.get('level') or 'use'}" + (f" for {opts['expires']}" if opts.get("expires") else " until revoked") + (f", {opts['budget']['usd_per_day']} USD/day" if opts.get("budget") else "")
+        self.act("approve", lambda v: v.approve(rid, level=opts.get("level"), expires_at=opts.get("expires"), budget=opts.get("budget")), f"request #{rid} allowed: {what}")
 
     # -- actions, each one CLI verb
     def act(self, what, fn, done_text):
@@ -734,15 +819,15 @@ class CredentialManager(Window):
                    ("env", "Environment variable (optional)", "", False), ("expires", "Expires (optional, e.g. 90d)", "", False), ("value", "Value", "", True)], ok, "Add")
 
     def show_dialog(self, ref):
-        def ok(_f):
-            def run():
-                try:
-                    val = self.client().value(ref, "read", purpose="Credential Manager show")["value"]
-                except Exception as e:
-                    GLib.idle_add(lambda: self.toast(f"show failed: {getattr(e, 'message', None) or str(e)[:120]}") or False); return
-                GLib.idle_add(self.show_value, ref, val)
-            threading.Thread(target=run, daemon=True).start()
-        self.form("Show the value?", f"{ref} is read from the vault and shown here; the read is in the ledger. Copy puts it on the clipboard for 30 seconds.", [], ok, "Show")
+        # Slice 9: the vault asks polkit for the person's password (reauth=polkit) before the value leaves it;
+        # the read is ledgered with reauth: polkit. No confirmation dialog of our own: the prompt is the confirmation.
+        def run():
+            try:
+                val = self.client().value(ref, "read", purpose="Credential Manager show", reauth="polkit")["value"]
+            except Exception as e:
+                GLib.idle_add(lambda: self.toast(f"show: {getattr(e, 'message', None) or str(e)[:120]}") or False); return
+            GLib.idle_add(self.show_value, ref, val)
+        threading.Thread(target=run, daemon=True).start()
 
     def show_value(self, ref, val):
         dlg = Adw.AlertDialog(heading=ref, body="")
@@ -768,8 +853,8 @@ class CredentialManager(Window):
                     hours = int(grace[:-1]) * (24 if grace.endswith("d") else 1) if grace[-1] in "dh" else int(grace)
                 except ValueError:
                     self.toast("Grace is hours (e.g. 24h) or days (e.g. 2d)"); return
-            self.act("rotate", lambda v: v.rotate(ref, f["value"], grace_hours=hours), f"rotated {ref}")
-        self.form(f"Rotate {ref}", "The new value replaces the old one; with a grace period the old one stays valid that long.", [("value", "New value", "", True), ("grace", "Grace (optional, e.g. 24h)", "", False)], ok, "Rotate")
+            self.act("rotate", lambda v: v.rotate(ref, f["value"], grace_hours=hours, reauth="polkit"), f"rotated {ref}")
+        self.form(f"Rotate {ref}", "The new value replaces the old one; with a grace period the old one stays valid that long. Your password is asked first.", [("value", "New value", "", True), ("grace", "Grace (optional, e.g. 24h)", "", False)], ok, "Rotate")
 
     def delete_dialog(self, ref):
         def run():
@@ -877,10 +962,11 @@ WINDOWS = {"desk": ("com.maluos.Desk", Desk), "updates": ("com.maluos.UpgradeMan
 
 
 class App(Adw.Application):
-    def __init__(self, window="desk", self_test=False):
+    def __init__(self, window="desk", self_test=False, request=None):
         app_id, self.window_class = WINDOWS[window]
-        super().__init__(application_id=app_id, flags=Gio.ApplicationFlags.NON_UNIQUE if self_test else Gio.ApplicationFlags.DEFAULT_FLAGS)
+        super().__init__(application_id=app_id, flags=Gio.ApplicationFlags.NON_UNIQUE if (self_test or request) else Gio.ApplicationFlags.DEFAULT_FLAGS)
         self.self_test = self_test
+        self.request = request
         self.proxy = None
         self.win = None
 
@@ -893,7 +979,7 @@ class App(Adw.Application):
             self.proxy.connect("g-signal", lambda _p, _s, sig, params: sig == "StateChanged" and self.win and self.win.set_state(params.unpack()[0]))
         except Exception as e:
             print(f"maluos-desk: no session bus or service: {e}", file=sys.stderr); self.proxy = None
-        self.win = self.window_class(self, self.proxy)
+        self.win = self.window_class(self, self.proxy, request=self.request) if (self.request and self.window_class is CredentialManager) else self.window_class(self, self.proxy)
         if self.proxy:
             try:
                 self.win.set_state(self.proxy.call_sync("GetState", None, 0, 10000, None).unpack()[0])
@@ -921,8 +1007,13 @@ def main(argv):
         window = argv[argv.index("--window") + 1]
         if window not in WINDOWS:
             print(f"maluos-desk: --window takes {', '.join(WINDOWS)}", file=sys.stderr); return 2
-    app = App(window=window, self_test="--self-test" in argv)
-    return app.run([a for a in argv if a not in ("--self-test", "--window", window)])
+    request = None
+    if "--request" in argv:
+        request = argv[argv.index("--request") + 1]
+        if not request.isdigit():
+            print("maluos-desk: --request takes a request id", file=sys.stderr); return 2
+    app = App(window=window, self_test="--self-test" in argv, request=request)
+    return app.run([a for a in argv if a not in ("--self-test", "--window", window, "--request", request)])
 
 
 if __name__ == "__main__":

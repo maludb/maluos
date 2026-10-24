@@ -50,9 +50,15 @@ print("  schema + grants applied")
 PY
 
 echo "== daemon"
-( cd "$W" && CREDENTIALS_DIRECTORY=$W/cred MALUOS_VAULT_CONFIG=$W/vault.yaml MALUOS_VAULT_DEBUG=1 \
+# slice 9: a polkit action of its own for the harness, owned by the user the daemon runs as (polkit lets only
+# root or an action's owner ask with user interaction); the real one is owned by maluos-vault
+POLTEST=/usr/share/polkit-1/actions/com.maluos.vault-test.policy
+if [ -d /usr/share/polkit-1/actions ]; then
+    sed -e 's/com.maluos.vault.reveal/com.maluos.vault.test-reveal/' -e "s/unix-user:maluos-vault/unix-user:$ME/" "$ROOT/packages/maluos-vault/polkit/com.maluos.vault.policy" | sudo -n tee "$POLTEST" >/dev/null
+fi
+( cd "$W" && CREDENTIALS_DIRECTORY=$W/cred MALUOS_VAULT_CONFIG=$W/vault.yaml MALUOS_VAULT_DEBUG=1 MALUOS_VAULT_REAUTH_ACTION=com.maluos.vault.test-reveal \
     python3 "$W/lib/maluos_vault.py" --socket "$W/vault.sock" >"$W/daemon.log" 2>&1 & echo $! > "$W/daemon.pid" )
-trap 'kill $(cat $W/daemon.pid) 2>/dev/null' EXIT
+trap 'kill $(cat $W/daemon.pid) 2>/dev/null; sudo -n rm -f $POLTEST' EXIT
 for i in $(seq 1 20); do [ -S "$W/vault.sock" ] && break; sleep 0.25; done
 ENV="PYTHONPATH=$W/lib MALUCTL_PLUGIN_DIR=$W/lib/maluctl.d MALUOS_VAULT_SOCKET=$W/vault.sock"
 me()     { env $ENV python3 "$W/lib/maluctl" secret "$@"; }
@@ -144,6 +150,23 @@ check "request events in the ledger" "me usage --raw | grep -q 'request.approve 
 check "agent rows hidden before ownership" "! me usage --raw | grep -q 'agent:bot'"
 sudo -n -u postgres psql -Atqd $DB -c "set role $T; insert into $T.maluos_agent (name, principal_ref, owner_principal_ref) values ('bot', 'agent:bot', 'user:$ME')" >/dev/null
 check "the owner sees their agent's ledger rows" "me usage --raw | grep -q 'secret.read .*ok .*agent:bot'"
+echo "== slice 9: a request's cause, re-authentication before a reveal"
+echo cause-value | me add causekey --stdin >/dev/null
+check "a broker's refusal files the request with its cause (the model call)" "sudo -n -u nobody env $ENV python3 -c \"import maluos_vault_client as c
+try: c.Vault().value('user:$ME/causekey', 'read', purpose='gateway', cause={'call': 'c1', 'model': 'office', 'backend': 'office', 'class': 'agent', 'ts': '2026-10-24T01:02:03Z'})
+except c.VaultError as e: print(e.code, e.message)\" | grep -q 'grant request #' && me requests | grep -E 'user:$ME/causekey +user:nobody +read .* office@office 01:02' >/dev/null"
+check "the cause rides in the request (JSON)" "env $ENV python3 -c \"import maluos_vault_client as c; r=[x for x in c.Vault().requests() if x['requester']=='user:nobody' and x['secret']=='user:$ME/causekey'][0]; assert r['cause']['model']=='office' and r['cause']['call']=='c1' and r['cause']['class']=='agent', r\""
+cur=$(me show openai)
+check "a reveal with --reauth from a shell without a polkit agent is refused" "me show openai --reauth 2>&1 | grep -q 're-authentication refused'"
+check "the refusal is a denied secret.read with reason reauth_required" "me usage --raw | grep -q 'secret.read .*denied .*reauth_required'"
+check "a plain show still reads it" "[ \"\$(me show openai)\" = \"$cur\" ]"
+check "a rotation with --reauth without an agent is refused" "echo sk-A-999 | me rotate openai --stdin --reauth 2>&1 | grep -q 're-authentication refused' && [ \"\$(me show openai)\" = \"$cur\" ]"
+check "POST /v1/reauth (the windows' backup) is refused without an agent and ledgered" "env $ENV python3 -c \"import maluos_vault_client as c
+try: c.Vault().reauth('export'); print('allowed')
+except c.VaultError as e: print(e.code)\" | grep -q reauth_required && me usage --raw | grep -q 'vault.reauth .*denied .*reauth_required'"
+if [ -f "$POLTEST" ]; then
+check "a reveal with --reauth as root passes polkit (uid 0 is authorised) and is ledgered reauth: polkit" "[ \"\$(root show user:$ME/openai --reauth)\" = \"$cur\" ] && sudo -n -u postgres psql -Atd $DB -c \"select count(*) from $T.maluos_ledger where event='secret.read' and secret_name='openai' and linux_uid=0 and detail->>'reauth'='polkit'\" | grep -qE '^[1-9]'"
+else echo "  (no polkit on this host: the allowed path is checked in the desktop boot test)"; fi
 check "nobody still does not" "! nobody usage --raw | grep -q 'agent:bot'"
 
 echo "== ledger"

@@ -64,9 +64,13 @@ class Vault:
                                                     "provider": provider, "env_var": env_var, "expires_at": expires_at,
                                                     "upsert": upsert, "grace_hours": grace_hours})
     def get(self, ref):           return self.request("GET", f"/v1/secrets/{q(ref)}")
-    def value(self, ref, mode="read", purpose=None, previous=False):
-        return self.request("GET", f"/v1/secrets/{q(ref)}/value", query={"mode": mode, "purpose": purpose, "previous": "1" if previous else None})
-    def use(self, ref, purpose=None): return self.value(ref, "use", purpose)
+    def value(self, ref, mode="read", purpose=None, previous=False, reauth=None, cause=None):
+        """The value. REAUTH="polkit" (slice 9) has the vault ask the person for their password first through
+        polkit (auth_self; the session's agent prompts) and ledgers the read with detail.reauth. CAUSE is what a
+        broker was doing (the gateway's model call), kept on the grant request a refusal files."""
+        return self.request("GET", f"/v1/secrets/{q(ref)}/value", query={"mode": mode, "purpose": purpose, "previous": "1" if previous else None,
+                                                                          "reauth": reauth, "cause": json.dumps(cause) if cause else None})
+    def use(self, ref, purpose=None, cause=None): return self.value(ref, "use", purpose, cause=cause)
     def rotate(self, ref, value, grace_hours=0, **meta):
         return self.request("POST", f"/v1/secrets/{q(ref)}/rotate", dict(meta, value=value, grace_hours=grace_hours))
     def delete(self, ref):        return self.request("DELETE", f"/v1/secrets/{q(ref)}")
@@ -89,6 +93,7 @@ class Vault:
         return self.request("POST", f"/v1/requests/{int(request_id)}/approve", {"level": level, "expires_at": expires_at, "budget": budget})
     def deny_request(self, request_id, reason=None):
         return self.request("POST", f"/v1/requests/{int(request_id)}/deny", {"reason": reason})
+    def reauth(self, purpose=None):   return self.request("POST", "/v1/reauth", {"purpose": purpose})   # the person's password through polkit (slice 9)
     def export(self, compartment=None): return self.request("GET", "/v1/export", query={"compartment": compartment})
     def import_bundle(self, bundle):  return self.request("POST", "/v1/import", {"bundle": bundle})
 

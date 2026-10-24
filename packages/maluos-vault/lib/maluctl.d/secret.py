@@ -5,10 +5,10 @@
   maluctl secret add NAME [--compartment C] [--kind api_key|token|password|generic]
                     [--provider P] [--env VAR] [--expires 90d|ISO] [--value-file F | --stdin]
                                                 value from a file, stdin, or a hidden prompt
-  maluctl secret show NAME [--previous]         print the value (a logged read)
+  maluctl secret show NAME [--previous] [--reauth]   print the value (a logged read; --reauth asks for your password through polkit first)
   maluctl secret info NAME                      metadata and grants, no value
   maluctl secret exec NAME [NAME...] -- CMD...  run CMD with each secret in its env var (a logged read)
-  maluctl secret rotate NAME [--grace 24h] [--value-file F | --stdin]
+  maluctl secret rotate NAME [--grace 24h] [--value-file F | --stdin] [--reauth]
   maluctl secret delete NAME
   maluctl secret grant NAME (--to PRINCIPAL | --scope SCOPE) [--level use|read] [--expires 30d]
   maluctl secret revoke NAME (--to PRINCIPAL | --scope SCOPE)
@@ -106,8 +106,8 @@ def run(v, a):
         r = v.add(name, value, compartment=comp, kind=kind, provider=prov, env_var=env, expires_at=exp, upsert=upsert)
         print(f"stored {r['ref']} ({r['kind']}{', ' + r['provider'] if r.get('provider') else ''})"); return 0
     if cmd == "show":
-        name = a.pop(0); prev = opt(a, "--previous", flag=True)
-        print(v.value(name, "read", purpose=opt(a, "--purpose", "maluctl show"), previous=prev)["value"]); return 0
+        name = a.pop(0); prev = opt(a, "--previous", flag=True); reauth = "polkit" if opt(a, "--reauth", flag=True) else None
+        print(v.value(name, "read", purpose=opt(a, "--purpose", "maluctl show"), previous=prev, reauth=reauth)["value"]); return 0
     if cmd == "info":
         r = v.get(a.pop(0))
         for k in ("ref", "kind", "provider", "env_var", "created_by", "created_at", "rotated_at", "expires_at", "grace_until"):
@@ -139,7 +139,7 @@ def run(v, a):
         name = a.pop(0); grace = opt(a, "--grace")
         hours = parse_hours(grace) if grace else 0
         value = read_value(a, f"new value for {name}: ")
-        r = v.rotate(name, value, grace_hours=hours)
+        r = v.rotate(name, value, grace_hours=hours, **({"reauth": "polkit"} if opt(a, "--reauth", flag=True) else {}))
         print(f"rotated {r['ref']}" + (f" (previous value valid until {r['grace_until'][:19]})" if r.get("grace_until") else "")); return 0
     if cmd == "delete":
         print("deleted", v.delete(a.pop(0))["deleted"]); return 0
@@ -237,7 +237,9 @@ def run(v, a):
         for r in rows:
             r["id"] = r["request_id"]; r["asked"] = (r.get("last_asked_at") or "")[:16]; r["times"] = r.get("asked_count")
             r["purpose"] = (r.get("purpose") or "-")[:40]; r["decided"] = f"{r['status']} by {r['decided_by']}" if r.get("decided_by") else r["status"]
-        fmt_table(rows, ["id", "secret", "requester", "level", "purpose", "times", "asked", "decided"]); return 0
+            c = r.get("cause") or {}
+            r["cause"] = (f"{c.get('model') or '?'}@{c.get('backend') or '?'} {(c.get('ts') or '')[11:16]}" + (f" {c['task']}" if c.get("task") else "")) if c else "-"
+        fmt_table(rows, ["id", "secret", "requester", "level", "purpose", "cause", "times", "asked", "decided"]); return 0
     if cmd == "request":
         name = a.pop(0) if a and not a[0].startswith("--") else sys.exit("request NAME ...")
         r = v.ask(name, level=opt(a, "--level", "use"), purpose=opt(a, "--purpose"))

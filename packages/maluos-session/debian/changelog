@@ -1,3 +1,24 @@
+maluos-session (0.7.0) resolute; urgency=medium
+
+  * Phase 12 slice 9. Grant requests decided with their parameters:
+    RequestDecide's third argument may be JSON {expires, level, budget};
+    the Desk's and the Credential Manager's request rows gain Decide…
+    (level use|read, a day, a week, a month or until revoked, a budget);
+    the notification gains Choose…, which opens the Credential Manager on
+    that request (maluos-desk --window vault --request ID).
+  * A request filed by the gateway's refused credential lookup carries its
+    cause; the notification and the rows say "for --model … (backend) at
+    HH:MM: task"; the Desk's Models page lists the calls that asked.
+  * An agent's budget alert reaches its owner by name ("Agent research:
+    budget nearly used (day)"); the Desk's Alerts page lists it under the
+    agent.
+  * The Credential Manager asks for the person's password (polkit
+    com.maluos.vault.reveal, auth_self) before Show and Rotate (the vault
+    checks it: reauth=polkit, ledgered) and before Export and Import
+    (checked by the window over the system bus).
+
+ -- Edward Honour <ed@maludb.org>  Sat, 24 Oct 2026 01:06:51 +0000
+
 maluos-session (0.6.1) resolute; urgency=medium
 
   * The MaluApps catalogue is re-read after each successful heartbeat

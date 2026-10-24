@@ -1,3 +1,15 @@
+maluos-gateway (0.3.4) resolute; urgency=medium
+
+  * Phase 12 slice 9. A refused credential lookup files its grant request
+    with the cause (the call's id, model, backend, class, task and time),
+    so the owner's desk can say what asked.
+  * Budget alerts for an agent name the agent ("agent research is at …")
+    and carry its owner (maluos_agent.owner_principal_ref, read through a
+    grant the component adds), so the owner's session can tell them;
+    detail gains agent, owner and period.
+
+ -- Edward Honour <ed@maludb.org>  Sat, 24 Oct 2026 01:06:51 +0000
+
 maluos-gateway (0.3.3) resolute; urgency=medium
 
   * A request that finds the database but not yet the tenant schema (first

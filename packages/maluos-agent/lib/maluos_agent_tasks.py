@@ -12,24 +12,28 @@ delegation envelope on it.
 Server, in an agent:
 
     import maluos_agent_tasks as tasks
-    def handle(task):                      # task = {"id", "text", "parts": [...], "ts"}
+    def handle(task):                      # task = {"id", "text", "parts": [...], "ts", "progress"}
+        task["progress"]("thinking…")      # partial text, shown while the task works (slice 9)
         return "the answer"                # or {"text": ..., "artifacts": [...]}
     tasks.serve(handle, card={"name": "Research", "description": "...", "capabilities": ["research"]})
 
 serve() returns at once (a daemon thread); tasks run one at a time in order.
 A task is {"id", "state": submitted|working|completed|failed, "ts", "input": {"text"},
-"output": {"text", "artifacts"}, "error", "done_ts"}.
+"output": {"text", "artifacts"}, "error", "done_ts"}. While it works, output.text
+is whatever the handler reported through progress() so far (slice 9: answers
+stream); the final return value replaces it.
 
 Client:
 
     c = tasks.Client.local("research")     # or tasks.Client(url, token) for an office agent
     c.card(); c.send("summarise ..."); c.get(id); c.list()
+    c.stream("summarise ...", on_text)     # send without waiting, poll tasks/get, on_text(text) as it grows
 """
 import http.client, json, os, pwd, socket, struct, sys, threading, time, urllib.parse, uuid
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import UnixStreamServer
 
-VERSION = "0.1"
+VERSION = "0.2"
 SOCKET_DIR = "/run/maluos/agents"
 
 
@@ -149,8 +153,12 @@ class Agent:
                 if not nxt:
                     break
                 nxt["state"] = "working"
+
+                def progress(text, t=nxt):
+                    """Partial output while the task works; replaced by the handler's return value."""
+                    t["output"] = {"text": "" if text is None else str(text), "artifacts": [], "partial": True}
                 try:
-                    out = self.handle(dict(nxt["input"], id=nxt["id"], ts=nxt["ts"]))
+                    out = self.handle(dict(nxt["input"], id=nxt["id"], ts=nxt["ts"], progress=progress))
                     if isinstance(out, dict):
                         nxt["output"] = {"text": out.get("text", ""), "artifacts": out.get("artifacts") or []}
                     else:
@@ -236,4 +244,21 @@ class Client:
     def send(self, text, wait=True, timeout=180):
         return self.call("tasks/send", {"message": {"role": "user", "parts": [{"type": "text", "text": text}]}, "wait": wait, "timeout": timeout})
     def get(self, tid):      return self.call("tasks/get", {"id": tid})
+
+    def stream(self, text, on_text=None, timeout=180, every=0.5):
+        """Send without waiting, then poll tasks/get until the task is done, calling on_text(text) whenever
+        the (partial) answer grows; returns the final task. An office that answers at once needs no polling."""
+        t = self.send(text, wait=False, timeout=timeout)
+        shown = ""
+        deadline = time.time() + float(timeout)
+        while True:
+            txt = (t.get("output") or {}).get("text") or ""
+            if txt != shown and on_text:
+                on_text(txt); shown = txt
+            if t.get("state") not in ("submitted", "working"):
+                return t
+            if time.time() > deadline:
+                t = dict(t, state="failed", error=f"no answer within {timeout:.0f} s (task {t.get('id')} still {t.get('state')})"); return t
+            time.sleep(every)
+            t = self.get(t["id"])
     def list(self, limit=50): return self.call("tasks/list", {"limit": limit})["tasks"]

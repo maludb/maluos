@@ -2,7 +2,7 @@
 // posts a JSON-RPC request to the WebKit message handler; the native side answers with window.maluos._reply and
 // pushes state with window.maluos._event({type: "state"}).
 "use strict";
-const VERSION = "0.1.0";
+const VERSION = "0.2.0";
 const pending = new Map();
 let seq = 0;
 window.maluos = {
@@ -28,8 +28,9 @@ const toast = (text) => { try { window.webkit.messageHandlers.maluos.postMessage
 let state = {agents: [], office: {enrolled: false}, service: false, selected: null};
 let selected = null;
 let page = "talk";
-const chats = {};         // agent id -> [{who, text, ts}]
+const chats = {};         // agent id -> [{who, text, ts, working}]
 const loaded = {};        // agent id -> {policy, memory, activity, logs, card}
+const working = {};       // agent id -> task id being polled (slice 9: streaming answers)
 
 function setState(s) {
   state = s;
@@ -105,8 +106,8 @@ function renderTalk() {
     }).catch(() => {});
   }
   for (const m of rows) {
-    const el = document.createElement("div"); el.className = "msg " + m.who;
-    el.innerHTML = esc(m.text) + (m.ts ? `<span class="when">${esc(when(m.ts))}</span>` : ""); chat.appendChild(el);
+    const el = document.createElement("div"); el.className = "msg " + m.who + (m.working ? " working" : "");
+    el.innerHTML = esc(m.text) + (m.working ? `<span class="cursor">▌</span>` : "") + (m.ts ? `<span class="when">${esc(when(m.ts))}</span>` : ""); chat.appendChild(el);
   }
   chat.scrollTop = chat.scrollHeight;
   const can = a.tasks;
@@ -123,11 +124,29 @@ $("#compose").onsubmit = (ev) => {
   $("#text").value = "";
   (chats[a.id] = chats[a.id] || []).push({who: "me", text, ts: new Date().toISOString()}); renderTalk();
   $("#send").disabled = true;
+  // Slice 9: the task comes back at once; the answer is drawn as it grows (tasks/get once a second while it works).
+  const reply = {who: "them", text: "", ts: null, working: true};
+  chats[a.id].push(reply);
+  const settle = (t) => {
+    reply.working = false; working[a.id] = null;
+    if (t.state === "completed") { reply.text = t.output.text; reply.ts = t.done_ts; }
+    else { reply.who = "err"; reply.text = `${t.state}: ${t.error || "no answer (tasks/get " + t.id + ")"}`; reply.ts = t.done_ts || new Date().toISOString(); }
+    if (selected === a.id && page === "talk") renderTalk();
+  };
+  const poll = (tid) => {
+    if (working[a.id] !== tid) return;
+    window.maluos.call("agent_task", {id: a.id, task: tid}).then((t) => {
+      if (t.state === "submitted" || t.state === "working") {
+        const txt = (t.output && t.output.text) || "";
+        if (txt !== reply.text) { reply.text = txt; if (selected === a.id && page === "talk") renderTalk(); }
+        setTimeout(() => poll(tid), 1000);
+      } else settle(t);
+    }).catch((e) => settle({state: "failed", error: e.message, id: tid}));
+  };
   window.maluos.call("agent_send", {id: a.id, text}).then((t) => {
-    if (t.state === "completed") chats[a.id].push({who: "them", text: t.output.text, ts: t.done_ts});
-    else chats[a.id].push({who: "err", text: `${t.state}: ${t.error || "no answer yet (tasks/get " + t.id + ")"}`, ts: t.done_ts});
-  }).catch((e) => chats[a.id].push({who: "err", text: e.message, ts: new Date().toISOString()}))
-    .finally(() => { if (selected === a.id && page === "talk") renderTalk(); });
+    if (t.state === "submitted" || t.state === "working") { working[a.id] = t.id; reply.text = (t.output && t.output.text) || ""; if (selected === a.id && page === "talk") renderTalk(); setTimeout(() => poll(t.id), 700); }
+    else settle(t);
+  }).catch((e) => settle({state: "failed", error: e.message}));
 };
 $("#text").onkeydown = (ev) => { if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); $("#compose").requestSubmit(); } };
 
@@ -225,6 +244,18 @@ function renderActivity() {
 $("#activity-refresh").onclick = renderActivity;
 
 document.querySelectorAll(".tab").forEach((t) => t.onclick = () => { page = t.dataset.page; renderDetail(); });
+
+// -- timers (slice 9): the Control and Activity pages re-read while they are visible; logs every 5 s while the unit is active
+let tick = 0;
+setInterval(() => {
+  tick += 5;
+  const a = agent(); if (!a || document.hidden) return;
+  if (page === "control" && a.kind === "local" && a.active === "active") loadLogs();
+  if (tick % 30 === 0) {
+    if (page === "activity") renderActivity();
+    else if (page === "control") renderControl();
+  }
+}, 5000);
 
 // -- start
 try { window.webkit.messageHandlers.maluos.postMessage(JSON.stringify({method: "ready", params: {version: VERSION}})); }

@@ -13,7 +13,9 @@ shows the desk and whether it is online.
   maluctl office status [--json] [--live]          the configuration and the last heartbeat; --live asks the office
   maluctl office heartbeat [--presence online|offline] [--json]       as the desk's owner
   maluctl office apps [--json] [--refresh]         the MaluApps catalogue: the office's (endpoints.apps) over the
-                                                   public one (download.maluos.com/apps/catalog.json), cached per user
+                                                   public one (download.maluos.com/apps/catalog.json, signed by the
+                                                   MaluOS release key: catalog.json.asc, verified with the archive
+                                                   keyring; refused unsigned), cached per user
   maluctl office apps install|remove|open ID       a web app becomes a launcher opening it in Firefox's own window;
                                                    a deb app installs from apt.maluos.com (pkexec apt-get)
   maluctl office agents [--json] [--refresh]       the office's agents this desk may use (endpoints.agents; Phase 12 slice 8)
@@ -30,7 +32,7 @@ and read the token for the office's MCP servers with
 import json, os, pwd, socket, subprocess, sys, time, urllib.error, urllib.request
 sys.path.insert(0, "/usr/lib/maluos")
 
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 SURFACE = 1
 CONF = os.environ.get("MALUOS_OFFICE_CONF", "/etc/maluos/office.yaml")
 ENVF = os.environ.get("MALUOS_OFFICE_ENV", "/etc/maluos/office.env")
@@ -215,7 +217,49 @@ def token_for_me():
 
 # -- MaluApps (Phase 12 slice 7): the catalogue and its installs
 PUBLIC_CATALOG = os.environ.get("MALUOS_APPS_PUBLIC_URL", "https://download.maluos.com/apps/catalog.json")
+PUBLIC_KEYRING = os.environ.get("MALUOS_APPS_KEYRING", "/usr/share/keyrings/maluos-archive-keyring.gpg")
 APP_KINDS = ("web", "deb", "script")
+
+
+def fetch_public_catalog(timeout=10):
+    """The public catalogue, verified (slice 9): catalog.json and its detached signature catalog.json.asc, made by
+    the release key, checked with gpgv against the archive keyring maluos-keyring ships. (apps, None) when it
+    verifies; (None, reason) otherwise: the public half is refused unsigned, the office's is trusted by the desk token."""
+    import tempfile
+    def fetch(url):
+        req = urllib.request.Request(url); req.add_header("User-Agent", f"maluos-desk/{VERSION}")
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.read()
+    try:
+        data = fetch(PUBLIC_CATALOG)
+    except urllib.error.HTTPError as e:
+        return None, f"HTTP {e.code}"
+    try:
+        sig = fetch(PUBLIC_CATALOG + ".asc")
+    except urllib.error.HTTPError as e:
+        return None, f"unsigned (HTTP {e.code} for catalog.json.asc); refused"
+    if not os.path.exists(PUBLIC_KEYRING):
+        return None, f"no keyring {PUBLIC_KEYRING}; refused"
+    with tempfile.TemporaryDirectory(prefix="maluos-apps-") as d:
+        dp, sp = os.path.join(d, "catalog.json"), os.path.join(d, "catalog.json.asc")
+        with open(dp, "wb") as fh:
+            fh.write(data)
+        with open(sp, "wb") as fh:
+            fh.write(sig)
+        try:
+            r = subprocess.run(["gpgv", "--keyring", PUBLIC_KEYRING, sp, dp], capture_output=True, text=True, timeout=30)
+        except (OSError, subprocess.SubprocessError) as e:
+            return None, f"gpgv: {e.__class__.__name__}; refused"
+        if r.returncode != 0:
+            why = next((l for l in (r.stderr or "").splitlines() if "BAD" in l or "No public key" in l or "not" in l.lower()), "bad signature")
+            return None, f"signature invalid ({why.strip()[:80]}); refused"
+    try:
+        cat = _flat(json.loads(data))
+    except ValueError:
+        return None, "not JSON; refused"
+    if not isinstance(cat.get("apps"), list):
+        return None, "no apps list; refused"
+    return cat["apps"], None
 
 
 def apps_cache_path():
@@ -255,13 +299,13 @@ def fetch_apps(refresh=False):
     office_url = conf.get("url")
     out, errors = {}, []
     try:
-        st, r = http("GET", PUBLIC_CATALOG, timeout=10)
-        if st == 200 and isinstance(r.get("apps"), list):
-            for a in r["apps"]:
+        apps_, why = fetch_public_catalog()
+        if apps_ is not None:
+            for a in apps_:
                 if a.get("id"):
                     out[a["id"]] = _norm_app(a, "public", office_url)
         else:
-            errors.append(f"public catalogue: HTTP {st}")
+            errors.append(f"public catalogue: {why}")
     except Exception as e:
         errors.append(f"public catalogue: {e.__class__.__name__}")
     ep = (conf.get("endpoints") or {}).get("apps") if conf else None
@@ -486,11 +530,19 @@ def agent(a):
             print(f"{d.get('name')}: {d.get('description') or ''}\ncapabilities: {', '.join(d.get('capabilities') or []) or '-'}\nprotocol:     {d.get('protocol')}"); return 0
         if sub == "send":
             text = " ".join(a).strip() or sys.exit("send TEXT")
-            t = c.send(text)
             if as_json:
+                t = c.send(text)
                 print(json.dumps(t, indent=1)); return 0 if t.get("state") == "completed" else 1
+            shown = [""]
+            def on_text(txt):          # the answer as it grows (slice 9); an office that answers at once prints once
+                sys.stdout.write(txt[len(shown[0]):] if txt.startswith(shown[0]) else "\n" + txt); sys.stdout.flush(); shown[0] = txt
+            t = c.stream(text, on_text=on_text)
             if t.get("state") == "completed":
-                print(t["output"]["text"]); return 0
+                if t["output"]["text"] != shown[0]:
+                    on_text(t["output"]["text"])
+                if not shown[0].endswith("\n"):
+                    print()
+                return 0
             print(f"task {t['id']} {t['state']}: {t.get('error') or ''}", file=sys.stderr); return 1
         if sub == "tasks":
             rows = c.list()
@@ -550,7 +602,9 @@ def enroll(a):
     if models and models.get("url") and not no_gw:
         mlist = [m for m in (models.get("models") or []) if m]
         try:
-            gateway(["backend", "add", "office", "--kind", "openai_compat", "--endpoint", models["url"].rstrip("/"), "--secret", SECRET]
+            # The rung names the owner's token explicitly (slice 9): a principal without a grant is refused by the
+            # vault and asks the owner (a grant request with the call as its cause), instead of "no such secret".
+            gateway(["backend", "add", "office", "--kind", "openai_compat", "--endpoint", models["url"].rstrip("/"), "--secret", f"{principal}/{SECRET}"]
                     + (["--models", ",".join(mlist)] if mlist else []))
             gateway(["tier", "add", "office", "--description", "the office's models, through the desk token"])
             if mlist:
@@ -558,7 +612,7 @@ def enroll(a):
             conf["gateway"] = {"backend": "office", "tier": "office", "alias": "office" if mlist else None, "models": mlist}
             gw_note = f"maluctl gateway chat ... --model office  ({', '.join(mlist) or 'models as the office lists them'})"
         except Exception as e:
-            gw_note = f"gateway rung not made: {str(e)[:160]} (maluctl gateway backend add office --kind openai_compat --endpoint {models['url']} --secret {SECRET})"
+            gw_note = f"gateway rung not made: {str(e)[:160]} (maluctl gateway backend add office --kind openai_compat --endpoint {models['url']} --secret {principal}/{SECRET})"
     elif no_gw:
         gw_note = "no gateway rung (--no-gateway)"
     write_conf(conf); write_env(conf)

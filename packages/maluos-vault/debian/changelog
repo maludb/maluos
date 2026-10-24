@@ -1,3 +1,22 @@
+maluos-vault (0.4.0) resolute; urgency=medium
+
+  * Phase 12 slice 9. A grant request carries its cause: a broker (the
+    gateway) passes what it was doing when the vault refused it (the model
+    call: {call, model, backend, class, task, ts}; GET …/value?cause=JSON)
+    and the request row keeps it (column maluos_secret_request.cause,
+    detected at run time: hosts provisioned before 0.4.0 work without it).
+    `maluctl secret requests` shows it.
+  * Re-authentication before a reveal: GET …/value?reauth=polkit and
+    POST …/rotate {"reauth": "polkit"} have the vault ask polkit whether
+    the calling process may com.maluos.vault.reveal (auth_self: the
+    person's own password through the session's agent; nothing is
+    remembered). Refused: 401 reauth_required, ledgered; allowed: the
+    ledger row carries detail.reauth = polkit. The polkit action file is
+    shipped; without polkit (servers) the check refuses.
+    `maluctl secret show|rotate --reauth`.
+
+ -- Edward Honour <ed@maludb.org>  Sat, 24 Oct 2026 01:06:51 +0000
+
 maluos-vault (0.3.0) resolute; urgency=medium
 
   * Grant requests (Phase 12 slice 3): a refusal files a pending request

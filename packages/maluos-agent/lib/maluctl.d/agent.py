@@ -16,7 +16,7 @@ environment.
   maluctl agent start|stop|restart|status|logs NAME
   maluctl agent run NAME -- CMD...            run a command as the agent (its identity, its environment)
   maluctl agent card NAME [--json]            what the agent says about itself (its task interface, Phase 12 slice 8)
-  maluctl agent send NAME TEXT [--json]       give the agent a task and wait for its answer (as its owner, root or itself)
+  maluctl agent send NAME TEXT [--json]       give the agent a task and print its answer as it grows (as its owner, root or itself)
   maluctl agent tasks NAME [--json]           the agent's recent tasks
   maluctl agent remove NAME [--purge]         stop the unit, disable the principal; --purge also deletes the user and its files
 
@@ -141,6 +141,24 @@ def yaml_update(path, fn):
     os.chmod(path, 0o644)
 
 
+def _grow():
+    """Print a growing answer: what each poll adds to what is on the terminal already (slice 9: streaming).
+    When the final text does not extend the partial one (the handler replaced it), it is printed on its own line."""
+    st = {"shown": ""}
+    def on_text(text):
+        if text.startswith(st["shown"]):
+            sys.stdout.write(text[len(st["shown"]):]); sys.stdout.flush(); st["shown"] = text
+        else:
+            sys.stdout.write(("\n" if st["shown"] and not st["shown"].endswith("\n") else "") + text); sys.stdout.flush(); st["shown"] = text
+    def finish(final):
+        if final is not None and final != st["shown"]:
+            on_text(final)
+        if st["shown"] and not st["shown"].endswith("\n"):
+            sys.stdout.write("\n"); sys.stdout.flush()
+    _grow.finish = finish
+    return on_text
+
+
 def tasks_mod():
     import maluos_agent_tasks
     return maluos_agent_tasks
@@ -192,11 +210,13 @@ def run(a):
                 return 0
             if cmd == "send":
                 text = " ".join(a).strip() or sys.exit("send NAME TEXT")
-                t = c.send(text)
                 if as_json:
+                    t = c.send(text)
                     print(json.dumps(t, indent=1)); return 0 if t.get("state") == "completed" else 1
+                t = c.stream(text, on_text=_grow())
                 if t.get("state") == "completed":
-                    print(t["output"]["text"]); return 0
+                    _grow.finish(t["output"]["text"]); return 0
+                _grow.finish(None)
                 print(f"task {t['id']} {t['state']}: {t.get('error') or ''}", file=sys.stderr); return 1
             rows = c.list()
             if as_json:

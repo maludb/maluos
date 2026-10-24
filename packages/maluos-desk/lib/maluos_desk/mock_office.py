@@ -9,7 +9,9 @@ inspection hooks. Stdlib only; deterministic replies.
   GET  /api/v1/desks/agents                the office's agents this desk may use (Phase 12 slice 8); per agent:
   GET  /api/v1/desks/agents/ID/activity    its recent activity, and
   POST /api/v1/desks/agents/ID/tasks       its task interface (JSON-RPC agent/card, tasks/send, tasks/get, tasks/list)
-  GET  /agents/ID                          the office's own page for the agent (HTML; the Agents app shows it)
+  GET  /agents/ID                          the office's own page for the agent (HTML; the Agents app shows it): with the desk
+                                           token as a Bearer header it says "signed in as EMAIL" and sets a session cookie
+                                           that signs the following page loads in (slice 9)
   POST /api/v1/desks/enroll                the contract
   POST /api/v1/desks/heartbeat, GET /api/v1/desks/me, POST /api/v1/desks/leave   (Bearer desk token)
   GET  /desk-models/                       200 (the gateway's reachability probe)
@@ -36,6 +38,7 @@ class Office:
         self.desks = {}         # id -> desk
         self.tokens = {}        # token -> desk id
         self.heartbeats, self.chats, self.mcp = [], [], []
+        self.sessions = {}      # page session cookie -> desk id (slice 9: the office page with the desk's identity)
         self.next_id = 41
         self.lock = threading.Lock()
         self.tasks = {a["id"]: [] for a in self.AGENTS}      # agent id -> tasks (Phase 12 slice 8)
@@ -188,10 +191,30 @@ class Handler(BaseHTTPRequestHandler):
             a = next((x for x in o.AGENTS if x["id"] == aid), None)
             if not a:
                 return self.err(404, "not_found", f"no agent {aid}")
+            # Slice 9: the desk token on the first request signs the page in; a session cookie keeps it signed in.
+            desk, cookie = None, None
+            if (self.headers.get("Authorization") or "").lower().startswith("bearer "):
+                desk, _e = self.desk_from_bearer()
+                if desk:
+                    cookie = secrets.token_hex(12)
+                    with o.lock:
+                        o.sessions[cookie] = desk["id"]
+            if not desk:
+                for part in (self.headers.get("Cookie") or "").split(";"):
+                    k, _, v = part.strip().partition("=")
+                    if k == "office_session":
+                        with o.lock:
+                            did = o.sessions.get(v)
+                        desk = o.desks.get(did) if did else None
+            who = (f"<p>signed in as {desk['owner']['email']} at desk #{desk['id']} ({desk['name']})</p>" if desk
+                   else "<p>not signed in (open this page from the Agents app on an enrolled desk)</p>")
             html = (f"<!doctype html><html><head><meta charset='utf-8'><title>{a['name']} · {o.name}</title></head>"
-                    f"<body style='font-family:sans-serif;margin:2em'><h1>{a['name']}</h1><p>{a['description']}</p>"
+                    f"<body style='font-family:sans-serif;margin:2em'><h1>{a['name']}</h1><p>{a['description']}</p>{who}"
                     f"<p>This is {o.name}'s page for agent <code>{aid}</code> (mock). Capabilities: {', '.join(a['capabilities'])}.</p></body></html>").encode()
-            self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.send_header("Content-Length", str(len(html))); self.end_headers()
+            self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.send_header("Content-Length", str(len(html)))
+            if cookie:
+                self.send_header("Set-Cookie", f"office_session={cookie}; Path=/; HttpOnly; SameSite=Lax")
+            self.end_headers()
             self.wfile.write(html); return
         if p in ("/desk-models", "/desk-models/"):
             return self.send(200, {"ok": True, "office": o.name})

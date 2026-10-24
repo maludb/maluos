@@ -12,6 +12,10 @@
 # The server ISO and image are required; the desktop pair is released too
 # when present (build both with -p desktop).
 # Optional: MALUOS_DOWNLOAD_RSYNC=user@host:/srv/download/maluos for the ISO.
+# Run it as `source ~/.config/maluos/publish.env && scripts/release.sh`: without MALUOS_DOWNLOAD_S3 the
+# tag and the GitHub Release are made but nothing reaches download.maluos.com (it says so at the end).
+# The public MaluApps catalogue (docs/site/apps/catalog.json) is signed and published too (apps/);
+# scripts/publish-catalog.sh does only that, between releases.
 set -euo pipefail
 ROOT_DIR=$(cd "$(dirname "$0")/.." && pwd)
 drop_caches_loop() { while :; do sleep 15; sync; sudo -n sh -c 'echo 1 > /proc/sys/vm/drop_caches' 2>/dev/null || true; done; }
@@ -67,6 +71,13 @@ echo "== checksums (reads every file once, 100 MB/s)"
 if [ $DRY = 0 ]; then
     ( cd "$OUT" && gpg --yes --clearsign -u "$MALUOS_PUBLIC_SIGNING_UID" -o SHA256SUMS.gpg SHA256SUMS )   # production key: asks for the passphrase
     gpg --batch --verify "$OUT/SHA256SUMS.gpg" >/dev/null 2>&1 || { echo "SHA256SUMS.gpg did not verify" >&2; exit 1; }
+    # The public MaluApps catalogue (Phase 12 slice 9): signed by the same key; maluctl office apps verifies it
+    # with the archive keyring and refuses it unsigned. Staged beside the images, published under apps/.
+    mkdir -p "$OUT/apps"; cp docs/site/apps/catalog.json "$OUT/apps/catalog.json"
+    gpg --yes --batch --armor --detach-sign -u "$MALUOS_PUBLIC_SIGNING_UID" -o "$OUT/apps/catalog.json.asc" "$OUT/apps/catalog.json"
+    gpgv --keyring packages/maluos-keyring/build/maluos-archive-keyring.gpg "$OUT/apps/catalog.json.asc" "$OUT/apps/catalog.json" >/dev/null 2>&1 \
+        || gpg --batch --verify "$OUT/apps/catalog.json.asc" "$OUT/apps/catalog.json" >/dev/null 2>&1 || { echo "catalog.json.asc did not verify" >&2; exit 1; }
+    echo "== apps catalogue signed ($OUT/apps/catalog.json.asc)"
 fi
 LAST=$(git describe --tags --abbrev=0 2>/dev/null || true)
 {
@@ -99,9 +110,13 @@ if [ $UPLOAD = 1 ]; then
     fi
     if [ -n "${MALUOS_DOWNLOAD_S3:-}" ]; then
         ep=(); [ -n "${MALUOS_S3_ENDPOINT:-}" ] && ep=(--endpoint-url "$MALUOS_S3_ENDPOINT")
-        aws "${ep[@]}" s3 sync "$OUT/" "$MALUOS_DOWNLOAD_S3/$VERSION/" --cache-control "max-age=86400"
+        aws "${ep[@]}" s3 sync "$OUT/" "$MALUOS_DOWNLOAD_S3/$VERSION/" --cache-control "max-age=86400" --exclude "apps/*"
         printf '%s\n' "$VERSION" > "$OUT/LATEST" && aws "${ep[@]}" s3 cp "$OUT/LATEST" "$MALUOS_DOWNLOAD_S3/LATEST" --cache-control "max-age=300"
         echo "== artefacts on the download bucket under $VERSION/ (LATEST updated)"
+        for f in catalog.json catalog.json.asc; do
+            aws "${ep[@]}" s3 cp "$OUT/apps/$f" "$MALUOS_DOWNLOAD_S3/apps/$f" --cache-control "max-age=300" --content-type "$([ "$f" = catalog.json ] && echo application/json || echo text/plain)"
+        done
+        echo "== apps catalogue and its signature on the download bucket under apps/"
     elif [ -n "${MALUOS_DOWNLOAD_RSYNC:-}" ]; then
         rsync -az --info=stats1 "$OUT/" "$MALUOS_DOWNLOAD_RSYNC/$VERSION/"
         echo "== artefacts on the download host under $VERSION/"

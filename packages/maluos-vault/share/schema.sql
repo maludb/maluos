@@ -94,6 +94,9 @@ CREATE TABLE IF NOT EXISTS maluos_secret_request (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS maluos_secret_request_pending_uq
     ON maluos_secret_request (secret_id, requester_principal_ref) WHERE status = 'pending';
+-- Slice 9: what the broker was doing when it was refused (the gateway's model call:
+-- {call, model, backend, class, task, ts}), so the owner's desk can say what asked.
+ALTER TABLE maluos_secret_request ADD COLUMN IF NOT EXISTS cause jsonb;
 
 -- The ledger: one row per secret event now, per model call from slice 2.
 CREATE TABLE IF NOT EXISTS maluos_ledger (

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN" "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <vendor>MaluOS</vendor>
+  <vendor_url>https://maluos.com</vendor_url>
+  <!-- Phase 12 slice 9: a reveal, a rotation or a backup of a vault secret asks the person for
+       their own password first (auth_self, no administrator) and remembers nothing: every one asks.
+       The vault daemon checks it (pkcheck with the caller's pid) when a client passes reauth=polkit. -->
+  <action id="com.maluos.vault.reveal">
+    <description>Reveal, rotate or back up a secret in your MaluOS vault</description>
+    <message>Authentication is required to reveal, rotate or back up a vault secret</message>
+    <defaults>
+      <allow_any>auth_self</allow_any>
+      <allow_inactive>auth_self</allow_inactive>
+      <allow_active>auth_self</allow_active>
+    </defaults>
+    <!-- polkit lets only root or an action's owner ask with AllowUserInteraction: the vault daemon asks. -->
+    <annotate key="org.freedesktop.policykit.owner">unix-user:maluos-vault</annotate>
+  </action>
+</policyconfig>

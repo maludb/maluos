@@ -17,7 +17,8 @@ anything else on the session bus.
 
 D-Bus: com.maluos.Session at /com/maluos/Session, interface com.maluos.Session1:
   GetState() -> s (JSON)   Refresh()   AgentAction(name, start|stop|restart)
-  RequestDecide(id, approve|deny, expires) -> s (JSON)      answer a vault grant request (as the owner)
+  RequestDecide(id, approve|deny, options) -> s (JSON)      answer a vault grant request (as the owner); options is an
+                                                            expiry ("7d") or JSON {"expires": "30d", "level": "use", "budget": {"usd_per_day": 10}}
   UpdateAction(open|restart|refresh|apply|apply-all|auto:...)  the updates page, restart, re-read, install now (a terminal), the switches (pkexec)
   signal StateChanged(s)   property Version
 
@@ -53,10 +54,19 @@ service runs `maluos-agents --sync`, which keeps one launcher per agent in
 is re-read after each successful heartbeat too, so the MaluApps window
 and its launchers follow the office without waiting for the window's own
 timer; a summary rides in the state as office.apps.
+
+Slice 9: a grant request is decided with its parameters (level, expiry,
+budget: RequestDecide's third argument may be JSON), and its notification
+gains "Choose…", which opens the Credential Manager on that request. A
+request filed by the gateway's refused credential lookup carries its cause
+(the model call: vault.requests[].cause) and the notification says so. A
+budget alert for an agent names the agent and reaches its owner's desk
+("Agent research: budget nearly used (day)"); the Desk's Alerts page lists
+it under the agent.
 """
 import http.client, json, os, pwd, re, socket, subprocess, sys, threading, time, urllib.parse
 
-VERSION = "0.6.1"
+VERSION = "0.7.0"
 BUS_NAME, OBJ, IFACE = "com.maluos.Session", "/com/maluos/Session", "com.maluos.Session1"
 GW = os.environ.get("MALUOS_GATEWAY_SOCKET", "/run/maluos/gateway.sock")
 VAULT = os.environ.get("MALUOS_VAULT_SOCKET", "/run/maluos/vault.sock")
@@ -234,7 +244,8 @@ def vault_state():
                                "expires_at": d.get("expires_at")} for d in dels],
               "requests": [{"id": r.get("request_id"), "secret": r.get("secret"), "requester": r.get("requester"), "requester_kind": r.get("requester_kind"),
                             "level": r.get("level"), "purpose": r.get("purpose"), "process": r.get("process"), "asked_count": r.get("asked_count"),
-                            "last_asked_at": r.get("last_asked_at"), "mine_to_decide": r.get("owner") == who.get("principal")} for r in reqs]})
+                            "last_asked_at": r.get("last_asked_at"), "mine_to_decide": r.get("owner") == who.get("principal"),
+                            "cause": r.get("cause") if isinstance(r.get("cause"), dict) else None} for r in reqs]})
     return v
 
 
@@ -244,8 +255,10 @@ def alerts_state(since=None):
     rows = ok(VAULT, "/v1/ledger", {"event_like": "alert.%", "limit": 20, "since": since}, default={}) or {}
     out = []
     for r in rows.get("events") or []:
+        d = r.get("detail") if isinstance(r.get("detail"), dict) else {}
         out.append({"id": r.get("ledger_id"), "ts": str(r.get("ts") or "")[:19], "kind": (r.get("event") or "")[6:],
-                    "title": r.get("reason"), "principal": r.get("principal_ref"), "detail": r.get("detail")})
+                    "title": r.get("reason"), "principal": r.get("principal_ref"), "detail": r.get("detail"),
+                    "agent": d.get("agent"), "owner": d.get("owner"), "period": d.get("period")})
     return out
 
 
@@ -289,6 +302,14 @@ def _marks():
         except OSError:
             out.append(None)
     return out
+
+
+def cause_text(c):
+    """One line for a request's cause (slice 9): the model call that was refused a credential."""
+    if not isinstance(c, dict):
+        return ""
+    when = (c.get("ts") or "")[11:16]
+    return f"for --model {c.get('model') or '?'} ({c.get('backend') or '?'})" + (f" at {when}" if when else "") + (f": {c['task']}" if c.get("task") else "")
 
 
 def office_conf():
@@ -694,15 +715,23 @@ class Service:
             kind = "Agent" if r.get("requester_kind") == "agent" else "Principal"
             name = who.split(":", 1)[1] if ":" in who else who
             times = f" (asked {r['asked_count']} times)" if (r.get("asked_count") or 1) > 1 else ""
-            self.notify(f"{kind} {name} asks for {r['secret']}", (f"{r['purpose']} · " if r.get("purpose") else "") + f"{r['level']} access{times}",
-                        urgency=1, actions=[("approve", "Allow for a week"), ("deny", "Deny")], request_id=r["id"])
+            cause = cause_text(r.get("cause"))
+            self.notify(f"{kind} {name} asks for {r['secret']}", (f"{cause} · " if cause else "") + (f"{r['purpose']} · " if r.get("purpose") else "") + f"{r['level']} access{times}",
+                        urgency=1, actions=[("approve", "Allow for a week"), ("choose", "Choose…"), ("deny", "Deny")], request_id=r["id"])
         for rid in [k for k in self.request_notified if k not in seen]:
             self.request_notified.pop(rid, None)
         # new alert rows for me in the ledger
+        me = new["vault"].get("principal") or (new.get("me") or {}).get("principal")
         for a in sorted(new["alerts"], key=lambda a: a.get("id") or 0):
             if a.get("id") and (self.alert_floor is None or a["id"] > self.alert_floor):
                 self.alert_floor = a["id"]
-                self.notify(f"Alert: {a['kind']}", a.get("title") or "", urgency=1)
+                if a.get("agent") and a["kind"] in ("budget", "budget_exceeded"):
+                    # slice 9: the agent's budget alert, told to its owner by name
+                    whose = "your agent" if a.get("owner") and a["owner"] == me else "agent"
+                    self.notify(f"Agent {a['agent']}: budget {'exhausted' if a['kind'] == 'budget_exceeded' else 'nearly used'}" + (f" ({a['period']})" if a.get("period") else ""),
+                                f"{whose} {a['agent']}: {a.get('title') or ''}", urgency=2 if a["kind"] == "budget_exceeded" else 1)
+                else:
+                    self.notify(f"Alert: {a['kind']}", a.get("title") or "", urgency=1)
         # software updates (slice 5): the ones that wait for the user, once per set; a pending restart, once
         ou, nu = old.get("updates") or {}, new.get("updates") or {}
         if nu.get("available"):
@@ -780,6 +809,10 @@ class Service:
                     except Exception as e:
                         self.notify(f"Request #{rid}: {key} failed", str(e)[:120], urgency=2)
                     self.refresh_soon(0.5)
+                elif ctx[:1] == ("request",) and key == "choose":
+                    rid = ctx[1]
+                    log(f"request #{rid}: Choose… opens the Credential Manager")
+                    subprocess.Popen(["maluos-desk", "--window", "vault", "--request", str(rid)], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 elif key == "install":
                     log("updates: Install from the notification"); self.update_action("open")
                 elif key == "restart":
@@ -791,10 +824,26 @@ class Service:
             log(f"notification signal: {e.__class__.__name__}: {str(e)[:120]}")
 
     def request_decide(self, rid, decision, expires=""):
-        """Answer a vault grant request as the session user (the vault checks that the user owns the secret)."""
+        """Answer a vault grant request as the session user (the vault checks that the user owns the secret).
+        EXPIRES is a duration ("7d", "" for none) or, since slice 9, JSON with the decision's parameters:
+        {"expires": "30d"|null, "level": "use"|"read", "budget": {"usd_per_day": 10}|null}."""
         if decision not in ("approve", "deny"):
             raise ValueError("decision must be approve or deny")
-        body = {"expires_at": expires or None} if decision == "approve" else {}
+        body = {}
+        if decision == "approve":
+            opts = {}
+            if expires and expires.strip().startswith("{"):
+                opts = json.loads(expires)
+                if not isinstance(opts, dict):
+                    raise ValueError("options must be a JSON object")
+            else:
+                opts = {"expires": expires or None}
+            if opts.get("level") not in (None, "use", "read"):
+                raise ValueError("level must be use or read")
+            budget = opts.get("budget")
+            if budget is not None and not (isinstance(budget, dict) and all(isinstance(v, (int, float)) for v in budget.values())):
+                raise ValueError("budget must be an object of numbers (usd_per_day, …)")
+            body = {"expires_at": opts.get("expires") or None, "level": opts.get("level"), "budget": budget}
         st, obj = post(VAULT, f"/v1/requests/{int(rid)}/{decision}", body)
         if st >= 400:
             raise RuntimeError(obj.get("message") or obj.get("error") or f"HTTP {st}")

@@ -142,6 +142,11 @@ def ensure_schema(psql, exists, qi, ql, db, tenant, role=ROLE, schema=SCHEMA):
              GRANT SELECT, INSERT ON {t}.maluos_ledger TO {rl};
              GRANT USAGE, SELECT ON {', '.join(f'{t}.{s}' for s in SEQUENCES)} TO {rl};
              GRANT EXECUTE ON FUNCTION {t}.maluos_record_episode(text, text, text, jsonb, text) TO {rl};""", db)
+    # Slice 9: an agent's budget alert names its owner; the registry is the vault's (component 40 runs first).
+    try:
+        psql(f"SET ROLE {t}; GRANT SELECT ON {t}.maluos_agent TO {rl};", db)
+    except Exception as e:
+        print(f"maluos-gateway: no grant on maluos_agent ({e.__class__.__name__}): agent alerts carry no owner", file=sys.stderr)
     os.makedirs("/etc/maluos/alert-hooks.d", exist_ok=True)
 
 

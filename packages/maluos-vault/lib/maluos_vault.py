@@ -11,14 +11,14 @@ master key that systemd hands the service as an encrypted credential
 
 Wire protocol: HTTP/1.1 + JSON over the socket (see docs/phase6-slice1-vault.md).
 """
-import datetime, http.server, json, os, pwd, re, secrets, socket, socketserver, struct, sys, threading, time, urllib.parse
+import datetime, http.server, json, os, pwd, re, secrets, socket, socketserver, struct, subprocess, sys, threading, time, urllib.parse
 import psycopg
 from psycopg import sql as pgsql
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives import hashes
 
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 CONFIG = os.environ.get("MALUOS_VAULT_CONFIG", "/etc/maluos/vault.yaml")
 DEFAULTS = {
     "socket": "/run/maluos/vault.sock",
@@ -202,6 +202,53 @@ def process_ref(pid):
     return comm or unit or None
 
 
+# ---------------------------------------------------------------- re-authentication (Phase 12 slice 9)
+REAUTH_ACTION = os.environ.get("MALUOS_VAULT_REAUTH_ACTION", "com.maluos.vault.reveal")   # the test harness names its own
+
+
+def polkit_check(pid, action=REAUTH_ACTION, timeout=180):
+    """(ok, why): ask polkit whether the calling process may do ACTION, letting the person's session
+    agent (GNOME Shell's) ask for their password. The action is auth_self and keeps nothing, so every
+    reveal asks. pkcheck talks to polkitd over the system bus; the subject is pid + start time, so a
+    reused pid cannot pass. Without polkit on the host (servers), nothing is authorised."""
+    try:
+        with open(f"/proc/{pid}/stat") as f:
+            start = f.read().rsplit(")", 1)[1].split()[19]
+    except (OSError, IndexError):
+        return False, "the calling process is gone"
+    if not os.path.exists("/usr/bin/pkcheck"):
+        return False, "polkit is not installed on this host"
+    try:
+        r = subprocess.run(["/usr/bin/pkcheck", "--action-id", action, "--process", f"{pid},{start}", "--allow-user-interaction"],
+                           capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
+    except subprocess.TimeoutExpired:
+        return False, "no answer from the authentication prompt"
+    except OSError as e:
+        return False, f"pkcheck: {e.__class__.__name__}"
+    if r.returncode == 0:
+        return True, "polkit"
+    why = ((r.stderr or r.stdout).strip().splitlines() or ["not authorised"])[-1][:160]
+    return False, why
+
+
+_has_cause = None
+
+
+def request_has_cause():
+    """Whether maluos_secret_request has the `cause` column (slice 9); hosts provisioned before it keep working without it."""
+    global _has_cause
+    if _has_cause is None:
+        try:
+            with connect() as conn:
+                row = conn.execute("SELECT 1 FROM information_schema.columns WHERE table_name='maluos_secret_request' AND column_name='cause'").fetchone()
+            _has_cause = bool(row)
+            if not _has_cause:
+                log("maluos_secret_request has no `cause` column (schema from before 0.4.0): requests carry no cause until the vault component is re-applied")
+        except Exception as e:
+            log(f"cause column check: {e.__class__.__name__}"); return False
+    return _has_cause
+
+
 # ---------------------------------------------------------------- vault logic
 class Vault:
     def __init__(self, store):
@@ -221,6 +268,18 @@ class Vault:
     def deny(self, cur, event, caller, code, message, status=403, extra=None, **kw):
         self.ledger(cur, event, caller, "denied", reason=code, **kw)
         raise ApiError(status, code, message, extra)
+
+    def reauth(self, cur, caller, purpose=None):
+        """Slice 9: ask polkit for the person's password on behalf of a client that is about to do something the
+        vault does not see (the Credential Manager's backup runs `maluctl secret export|import` in a terminal).
+        Ledgered as vault.reauth, ok or denied. The windows cannot ask polkit themselves: only root or the
+        action's owner (this daemon) may ask with user interaction."""
+        okk, why = polkit_check(caller.pid)
+        if not okk:
+            self.deny(cur, "vault.reauth", caller, "reauth_required", f"re-authentication refused: {why}", status=401, purpose=purpose,
+                      detail={"reauth": "polkit", "refused": why})
+        self.ledger(cur, "vault.reauth", caller, "ok", purpose=purpose, detail={"reauth": "polkit"})
+        return {"reauth": "polkit", "purpose": purpose}
 
     # -- compartments
     def compartment(self, cur, name, create=False, caller=None):
@@ -481,7 +540,7 @@ class Vault:
         secret, _ = self.resolve(cur, caller, f"{cname}/{name}")
         return self.public(secret)
 
-    def value(self, cur, caller, secret, comp, mode, purpose, previous=False):
+    def value(self, cur, caller, secret, comp, mode, purpose, previous=False, cause=None, reauth=None):
         event = "secret.use" if mode == "use" else "secret.read"
         if mode == "use" and not (caller.broker_ref or caller.operator or caller.broker):
             # `use` is the broker's verb: the value goes to the gateway, never to the caller (FR-14).
@@ -490,13 +549,24 @@ class Vault:
         need = "use" if mode == "use" else "read"
         if level is None or (need == "read" and level != "read"):
             # The refusal itself asks the owner: a pending request the owner's desk can answer (slice 3).
-            req = self.file_request(cur, caller, secret, comp, need, purpose)
+            req = self.file_request(cur, caller, secret, comp, need, purpose, cause=cause)
             msg = f"no {need} access to {secret['ref']}" + (f"; grant request #{req} is pending for its owner" if req else "")
             self.deny(cur, event, caller, "forbidden", msg, secret=secret, comp=comp, level=level, extra={"request_id": req} if req else None)
         if comp["locked"]:
             self.deny(cur, event, caller, "locked", f"compartment {comp['name']} is locked", status=423, secret=secret, comp=comp, level=level)
         if secret["expires_at"] and parse_ts(secret["expires_at"]) <= utcnow():
             self.deny(cur, event, caller, "expired", f"{secret['ref']} expired at {secret['expires_at']}", status=410, secret=secret, comp=comp, level=level)
+        detail = {}
+        if reauth:
+            # Slice 9: a reveal from the desk asks the person for their password first (polkit auth_self);
+            # the ledger row says so. Only `polkit` exists; anything else is refused.
+            if reauth != "polkit":
+                raise ApiError(400, "bad_reauth", "reauth must be polkit")
+            okk, why = polkit_check(caller.pid)
+            if not okk:
+                self.deny(cur, event, caller, "reauth_required", f"re-authentication refused: {why}", status=401, secret=secret, comp=comp, level=level,
+                          purpose=purpose, detail={"reauth": "polkit", "refused": why})
+            detail["reauth"] = "polkit"
         ref = secret["cred_ref"]
         if previous:
             if not secret["previous_cred_ref"] or not secret["grace_until"] or parse_ts(secret["grace_until"]) <= utcnow():
@@ -507,8 +577,9 @@ class Vault:
         except Exception as e:
             self.ledger(cur, event, caller, "error", reason="store_error", secret=secret, comp=comp, level=level, purpose=purpose)
             raise ApiError(500, "store_error", f"cannot open secret value: {e.__class__.__name__}")
-        self.ledger(cur, event, caller, "ok", reason=why, secret=secret, comp=comp, level=level, purpose=purpose,
-                    detail={"previous": previous} if previous else None)
+        if previous:
+            detail["previous"] = True
+        self.ledger(cur, event, caller, "ok", reason=why, secret=secret, comp=comp, level=level, purpose=purpose, detail=detail or None)
         if previous:
             self.alert(cur, "retired_key", f"retired value of {secret['ref']} presented by {caller.ref or caller.user}",
                        {"principal": caller.ref, "user": caller.user, "process": caller.process_ref, "secret": secret["ref"], "grace_until": secret["grace_until"]})
@@ -520,6 +591,15 @@ class Vault:
             self.deny(cur, "secret.rotate", caller, "forbidden", f"only the owner or an operator may rotate {secret['ref']}", secret=secret, comp=comp)
         if not isinstance(value, str) or value == "":
             raise ApiError(400, "no_value", "value is required")
+        detail = {}
+        if meta and meta.get("reauth"):
+            if meta["reauth"] != "polkit":
+                raise ApiError(400, "bad_reauth", "reauth must be polkit")
+            okk, why = polkit_check(caller.pid)
+            if not okk:
+                self.deny(cur, "secret.rotate", caller, "reauth_required", f"re-authentication refused: {why}", status=401, secret=secret, comp=comp,
+                          detail={"reauth": "polkit", "refused": why})
+            detail["reauth"] = "polkit"
         try:
             same = self.store.get(secret["cred_ref"]).decode() == value
         except Exception:
@@ -540,7 +620,7 @@ class Vault:
             sets.append("expires_at=%s"); args.append(parse_ts(meta.get("expires_at")))
         args.append(secret["secret_id"])
         cur.execute(f"UPDATE maluos_secret SET {', '.join(sets)} WHERE secret_id=%s", args)
-        self.ledger(cur, "secret.rotate", caller, "ok", secret=secret, comp=comp, detail={"grace_hours": grace})
+        self.ledger(cur, "secret.rotate", caller, "ok", secret=secret, comp=comp, detail=dict(detail, grace_hours=grace))
         s, _ = self.resolve(cur, caller, secret["ref"])
         return self.public(s)
 
@@ -586,9 +666,11 @@ class Vault:
         return {"revoked": n}
 
     # -- grant requests (Phase 12 slice 3): a refused principal asks, the owner's desk answers
-    def file_request(self, cur, caller, secret, comp, level="use", purpose=None, explicit=False):
+    def file_request(self, cur, caller, secret, comp, level="use", purpose=None, explicit=False, cause=None):
         """Create or bump the pending request of caller for secret. None when it makes no sense:
-        unenrolled callers, operators, the owner asking for their own secret."""
+        unenrolled callers, operators, the owner asking for their own secret. CAUSE (slice 9) is what
+        the broker was doing when it was refused: the gateway's model call ({call, model, backend,
+        class, task, ts}), kept on the row so the owner's desk can say what asked."""
         if not caller.principal or caller.operator or comp["owner"] == caller.ref:
             return None
         if level not in LEVELS:
@@ -599,27 +681,43 @@ class Vault:
                              AND decided_at > now() - interval '1 day' LIMIT 1""", (secret["secret_id"], caller.ref))
             if cur.fetchone():
                 return None
-        cur.execute("""INSERT INTO maluos_secret_request (secret_id, requester_principal_ref, owner_principal_ref, level, purpose, process_ref)
-                       VALUES (%s,%s,%s,%s,%s,%s)
-                       ON CONFLICT (secret_id, requester_principal_ref) WHERE status = 'pending'
-                       DO UPDATE SET last_asked_at = now(), asked_count = maluos_secret_request.asked_count + 1,
-                                     purpose = coalesce(EXCLUDED.purpose, maluos_secret_request.purpose),
-                                     level = CASE WHEN EXCLUDED.level = 'read' THEN 'read' ELSE maluos_secret_request.level END
-                       RETURNING request_id, asked_count""",
-                    (secret["secret_id"], caller.ref, comp["owner"], level, purpose, caller.process_ref))
+        if isinstance(cause, dict) and request_has_cause():
+            cause = {k: cause[k] for k in ("call", "model", "backend", "class", "task", "ts", "kind", "title") if cause.get(k) is not None}
+            cur.execute("""INSERT INTO maluos_secret_request (secret_id, requester_principal_ref, owner_principal_ref, level, purpose, process_ref, cause)
+                           VALUES (%s,%s,%s,%s,%s,%s,%s)
+                           ON CONFLICT (secret_id, requester_principal_ref) WHERE status = 'pending'
+                           DO UPDATE SET last_asked_at = now(), asked_count = maluos_secret_request.asked_count + 1,
+                                         purpose = coalesce(EXCLUDED.purpose, maluos_secret_request.purpose),
+                                         level = CASE WHEN EXCLUDED.level = 'read' THEN 'read' ELSE maluos_secret_request.level END,
+                                         cause = coalesce(EXCLUDED.cause, maluos_secret_request.cause)
+                           RETURNING request_id, asked_count""",
+                        (secret["secret_id"], caller.ref, comp["owner"], level, purpose, caller.process_ref, json.dumps(cause)))
+        else:
+            cur.execute("""INSERT INTO maluos_secret_request (secret_id, requester_principal_ref, owner_principal_ref, level, purpose, process_ref)
+                           VALUES (%s,%s,%s,%s,%s,%s)
+                           ON CONFLICT (secret_id, requester_principal_ref) WHERE status = 'pending'
+                           DO UPDATE SET last_asked_at = now(), asked_count = maluos_secret_request.asked_count + 1,
+                                         purpose = coalesce(EXCLUDED.purpose, maluos_secret_request.purpose),
+                                         level = CASE WHEN EXCLUDED.level = 'read' THEN 'read' ELSE maluos_secret_request.level END
+                           RETURNING request_id, asked_count""",
+                        (secret["secret_id"], caller.ref, comp["owner"], level, purpose, caller.process_ref))
         rid, n = cur.fetchone()
         self.ledger(cur, "request.add", caller, "ok" if n == 1 else "noop", reason="asked" if explicit else "refused", secret=secret, comp=comp, level=level,
-                    purpose=purpose, detail={"request_id": rid, "asked_count": n, "owner": comp["owner"]})
+                    purpose=purpose, detail={"request_id": rid, "asked_count": n, "owner": comp["owner"], "cause": cause if isinstance(cause, dict) else None})
         return rid
 
     REQ_COLS = """r.request_id, r.secret_id, s.name, c.name, r.requester_principal_ref, r.owner_principal_ref, r.level, r.purpose, r.process_ref,
                   r.status, r.created_at, r.last_asked_at, r.asked_count, r.decided_at, r.decided_by, r.grant_id, r.expires_at, p.principal_kind"""
 
+    def req_cols(self):
+        return self.REQ_COLS + (", r.cause" if request_has_cause() else ", NULL")
+
     def _request(self, r):
         return {"request_id": r[0], "secret_id": r[1], "secret": f"{r[3]}/{r[2]}", "compartment": r[3], "requester": r[4], "owner": r[5], "level": r[6],
                 "purpose": r[7], "process": r[8], "status": r[9], "created_at": r[10].isoformat() if r[10] else None,
                 "last_asked_at": r[11].isoformat() if r[11] else None, "asked_count": r[12], "decided_at": r[13].isoformat() if r[13] else None,
-                "decided_by": r[14], "grant_id": r[15], "expires_at": r[16].isoformat() if r[16] else None, "requester_kind": r[17]}
+                "decided_by": r[14], "grant_id": r[15], "expires_at": r[16].isoformat() if r[16] else None, "requester_kind": r[17],
+                "cause": r[18] if len(r) > 18 and isinstance(r[18], dict) else None}
 
     def requests(self, cur, caller, status="pending"):
         """What the caller may see: operators everything; otherwise requests they made or must decide."""
@@ -630,14 +728,14 @@ class Vault:
             if not caller.principal:
                 return []
             where.append("(r.requester_principal_ref=%s OR r.owner_principal_ref=%s)"); args += [caller.ref, caller.ref]
-        cur.execute(f"""SELECT {self.REQ_COLS} FROM maluos_secret_request r JOIN maluos_secret s USING (secret_id)
+        cur.execute(f"""SELECT {self.req_cols()} FROM maluos_secret_request r JOIN maluos_secret s USING (secret_id)
                         JOIN maluos_compartment c ON c.compartment_id = s.compartment_id
                         LEFT JOIN maludb_principal p ON p.principal_ref = r.requester_principal_ref
                         {'WHERE ' + ' AND '.join(where) if where else ''} ORDER BY r.request_id DESC LIMIT 200""", args)
         return [self._request(r) for r in cur.fetchall()]
 
     def request_by_id(self, cur, rid):
-        cur.execute(f"""SELECT {self.REQ_COLS} FROM maluos_secret_request r JOIN maluos_secret s USING (secret_id)
+        cur.execute(f"""SELECT {self.req_cols()} FROM maluos_secret_request r JOIN maluos_secret s USING (secret_id)
                         JOIN maluos_compartment c ON c.compartment_id = s.compartment_id
                         LEFT JOIN maludb_principal p ON p.principal_ref = r.requester_principal_ref WHERE r.request_id=%s""", (rid,))
         r = cur.fetchone()
@@ -867,7 +965,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not rest and method == "DELETE":
                 return 200, v.delete(cur, caller, secret, comp)
             if rest == ["value"] and method == "GET":
-                return 200, v.value(cur, caller, secret, comp, q.get("mode", "read"), q.get("purpose"), q.get("previous") in ("1", "true"))
+                cause = None
+                if q.get("cause"):
+                    try:
+                        cause = json.loads(q["cause"])
+                    except ValueError:
+                        raise ApiError(400, "bad_cause", "cause must be JSON")
+                return 200, v.value(cur, caller, secret, comp, q.get("mode", "read"), q.get("purpose"), q.get("previous") in ("1", "true"),
+                                    cause=cause, reauth=q.get("reauth"))
             if rest == ["rotate"] and method == "POST":
                 return 200, v.rotate(cur, caller, secret, comp, body.get("value"), body.get("grace_hours", 0), meta=body)
             if rest == ["grants"] and method == "GET":
@@ -900,6 +1005,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return 201, v.delegate(cur, caller, body)
         if p == ["delegations", "revoke"] and method == "POST":
             return 200, v.undelegate(cur, caller, body)
+        if p == ["reauth"] and method == "POST":
+            return 200, v.reauth(cur, caller, body.get("purpose"))
         if p == ["export"] and method == "GET":
             return 200, v.export(cur, caller, q.get("compartment"))
         if p == ["import"] and method == "POST":

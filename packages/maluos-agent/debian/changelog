@@ -1,3 +1,13 @@
+maluos-agent (0.4.0) resolute; urgency=medium
+
+  * Phase 12 slice 9: answers stream. A task handler gets
+    task["progress"](text) and the partial text rides in the task's
+    output while it works; Client.stream() sends without waiting and
+    polls tasks/get; `maluctl agent send` prints the answer as it grows.
+    The demo agent reports "working on: …" before it asks the gateway.
+
+ -- Edward Honour <ed@maludb.org>  Sat, 24 Oct 2026 01:06:51 +0000
+
 maluos-agent (0.3.0) resolute; urgency=medium
 
   * The task interface (Phase 12 slice 8): maluos_agent_tasks, JSON-RPC

@@ -246,6 +246,14 @@ the desk token; `activity` answers `{"activity": [{"ts", "kind", "actor",
 "summary"}]}`; `page` is the office's own page for the agent, which the
 Agents app loads beside it. Any of the three may be absent. Start, stop
 and restart of an office agent, and its logs, wait for the delegation
-envelope of Phase 13 slice 2. The mock office serves two agents; the
+envelope of Phase 13 slice 2.
+
+The Agents app requests `page` with the desk token as the Bearer header
+on its first load (slice 9), so the office knows which desk and person
+is looking; the office may answer with a session cookie that signs the
+loads that follow in (the view keeps cookies for the window's life). A
+page that ignores the header still works, with the office's own login.
+The mock office answers "signed in as EMAIL at desk #ID" and sets
+`office_session`. The mock office serves two agents; the
 kernel's `desks/agents` endpoint is specified here for the kernel
 repository (Agent HR decides what an office's desks see).
