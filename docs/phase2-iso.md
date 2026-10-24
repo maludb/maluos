@@ -1,5 +1,10 @@
 # Phase 2: the first bootable MaluOS ISO (remaster)
 
+> Replaced by Phase 11 (2026-10-24): the medium is now assembled from scratch by
+> iso/build-live-iso.sh around our own live environment (docs/phase11-slice1-live.md);
+> this script and its base ISO keep releasing beside it until Phase 11 slice 4.
+
+
 MaluOS 26.04.1 Server is the stock Ubuntu Server 26.04.1 ISO with a MaluOS
 layer added and the boot menu replaced. The kernel, installer (subiquity),
 squashfs and Ubuntu boot images are untouched, so the ISO boots on BIOS and

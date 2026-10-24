@@ -1,0 +1,13 @@
+maluos-installer (0.0.1) resolute; urgency=medium
+
+  * Phase 11 slice 1: the live medium's stub. maluos-install prints the
+    banner and the medium's facts (--check-media: the medium, the live and
+    target images with the target's SHA256 verified, the kernel, casper and
+    the plymouth theme in the initrd, the firmware and Secure Boot state,
+    the network) and leaves a root shell on tty1; with maluos.test=1 on the
+    kernel command line it reports to the console and powers off. The live
+    user maluos (casper.conf), the installer and rescue units on tty1, an
+    autologin serial getty, the on-media apt source, the MaluOS splash in
+    the spinner theme, the medium check and apt timers masked.
+
+ -- Edward Honour <ed@maludb.org>  Sat, 24 Oct 2026 01:23:52 +0000

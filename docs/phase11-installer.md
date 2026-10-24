@@ -126,6 +126,8 @@ Debian package in 26.04, nor is debian-installer. The engine is ours.
 
 ### Slice 1: the live environment and the ISO we assemble
 
+Specified in docs/phase11-slice1-live.md and built 2026-10-24 (its status section).
+
 Specified in docs/phase11-slice1-live.md (2026-10-23): the live seed,
 the media layout, the boot chain, the stub installer package, the
 assembly script and the test.

@@ -1,0 +1,11 @@
+#!/bin/sh
+set -e
+case "$1" in
+    install|upgrade)
+        # plymouth-theme-spinner's watermark is Ubuntu's logo; the live splash shows ours.
+        dpkg-divert --package maluos-installer --add --rename \
+            --divert /usr/share/plymouth/themes/spinner/watermark.png.ubuntu /usr/share/plymouth/themes/spinner/watermark.png
+        ;;
+esac
+#DEBHELPER#
+exit 0

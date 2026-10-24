@@ -1,0 +1,33 @@
+set timeout=@TIMEOUT@
+set default=@DEFAULT@
+@SERIAL@
+
+loadfont unicode
+
+set menu_color_normal=white/black
+set menu_color_highlight=black/light-gray
+
+menuentry "Start the MaluOS @VARIANT@ installer" {
+    set gfxpayload=keep
+    linux  /casper/vmlinuz boot=casper layerfs-path=maluos-live.squashfs fsck.mode=skip quiet splash ---
+    initrd /casper/initrd
+}
+menuentry "Start the installer with the serial console" {
+    set gfxpayload=text
+    linux  /casper/vmlinuz boot=casper layerfs-path=maluos-live.squashfs fsck.mode=skip console=ttyS0,115200n8 @EXTRA_ARGS@---
+    initrd /casper/initrd
+}
+menuentry "Rescue shell" {
+    set gfxpayload=text
+    linux  /casper/vmlinuz boot=casper layerfs-path=maluos-live.squashfs fsck.mode=skip maluos.rescue=1 ---
+    initrd /casper/initrd
+}
+grub_platform
+if [ "$grub_platform" = "efi" ]; then
+menuentry 'Boot from next volume' {
+    exit 1
+}
+menuentry 'UEFI Firmware Settings' {
+    fwsetup
+}
+fi

@@ -1,9 +1,9 @@
 # Phase 11 slice 1: the live environment and the ISO we assemble
 
 Specified 2026-10-23 from docs/phase11-installer.md (decisions 1, 6, 8;
-the owner's answers 2 and 5). Nothing here is built. It is sequenced in
-docs/roadmap.md (E1) after Phase 12 slice 9; the subiquity ISO keeps
-being built and released beside it until slice 4.
+the owner's answers 2 and 5); built 2026-10-24 (the status at the end of
+this document). The subiquity ISO keeps being built and released beside it
+until slice 4.
 
 ## What the slice delivers
 
@@ -46,7 +46,7 @@ tests/live-iso-boot-test.sh [--uefi] -p server     # boots it under QEMU to the 
    branding, curl, gnupg, jq, sudo, openssh-server, which casper leaves
    disabled), casper, maluos-installer, network-manager (the desktop's
    choice, and `nmcli` beats hand-written netplan on a live console),
-   iproute2, iputils-ping, ethtool, wireless-tools and wpasupplicant,
+   iproute2, iputils-ping, ethtool, iw and wpasupplicant,
    console-setup, kbd, locales, tzdata, less, vim-tiny, parted, gdisk,
    dosfstools, e2fsprogs, lvm2, cryptsetup, squashfs-tools, efibootmgr,
    pciutils, usbutils, dmidecode, lshw, smartmontools, nvme-cli,
@@ -290,3 +290,40 @@ one-line check before the first full build:
 Smaller than Phase 12 slice 7; two or three build rounds on the dev VM
 (a live rootfs build is a few minutes; an ISO assembly is seconds once
 the images exist).
+
+## Status (2026-10-24)
+
+Built the same day as Phase 12 slice 9, in one build round of the live
+rootfs and three of the medium. What the archive and the first boots
+decided, against the spec above:
+
+| Item | Where | Notes |
+|---|---|---|
+| The live rootfs | seeds/live.seed (maluos-live in maluos-meta 0.2.8), image/profiles/live.pkgs | A metapackage, as the other variants: the seed is the list of decision 2 with `iw` for wireless-tools (gone from 26.04) and `zstd` for the initrd; the profile adds ubuntu-minimal, linux-generic, linux-firmware, the grub and shim packages. casper depends on initramfs-tools, so the live rootfs uses it, not dracut (the installed images use dracut). 1.1 GB squashfs, 86 MB initrd, six minutes to build. image/build-rootfs.sh needed no change: `-p live` already works, and the kernel, initrd and boot assets are taken out of the squashfs by the ISO script. unattended-upgrades comes with maluos-base; its units and apt's timers are masked by the installer package instead of excluded. |
+| maluos-installer 0.0.1 | packages/maluos-installer | The stub as specified, plus: casper owns /etc/casper.conf as a conffile, so the package ships its copy under /usr/share and copies it into place in postinst (as the branding does with /etc/issue); the server branding carries no watermark (only the desktop branding does), so the package ships a copy of the logo and diverts plymouth-theme-spinner's; the medium check (casper-md5check), apt-daily and unattended-upgrades are masked in postinst. The stub waits up to 45 s for a DHCP lease before it reports the network, since NetworkManager is still asking when the console unit starts. |
+| The medium | iso/build-live-iso.sh, iso/grub-live.cfg.in | Assembled from scratch with Ubuntu's own xorriso recipe (read off their ISO with `-report_el_torito as_mkisofs`): the hybrid MBR and the El Torito image are grub-pc-bin's prebuilt `boot_hybrid.img` and `eltorito.img` (no grub-mkimage), the ESP holds shim, `gcdx64.efi.signed` as grubx64.efi and mmx64.efi (the CD build of the signed grub finds the medium by `/.disk/info` itself and loads /boot/grub/grub.cfg; a stub grub.cfg sits in EFI/boot as well), made with mkfs.vfat and mtools (mtools is a new build dependency). Every boot asset comes out of the live squashfs, so the host needs only xorriso, squashfs-tools, dosfstools and mtools. 3.2 GB for the server medium (the live image, the target image, the repository), 36 s to assemble once the images exist. `.disk/info` and the volume id carry the base version from os-release (26.04); the dated release version is slice 4's. 26.04's sha256sum is uutils and has no `-L`: the script resolves the symlinks itself. |
+| The menu | iso/grub-live.cfg.in | As decision 8. The `--test` variant mirrors the menu to the serial line (`terminal_output serial console`) and adds `noprompt`, without which casper's shutdown waits for ENTER ("remove the medium") and the test VM never powers off; the grub colours stay in the template for now (the branding's shared colours file is deferred). |
+| The test | tests/live-iso-boot-test.sh; ci/in-container-build.sh (`LIVE=1`), the images workflow (`live` input) | The checks of the spec, read off the serial log. casper's own update-notifier script complains about Ubuntu's release-upgrader paths on a verbose console; those lines are excluded from the "no Ubuntu" check, as the kernel's version string is. Results: see the table below. |
+
+| Run (2026-10-24, TCG on the dev VM) | Result |
+|---|---|
+| server BIOS | PASS, 12 checks, powered off after 499 s |
+| server UEFI | PASS, 12 checks, 522 s |
+| desktop BIOS | PASS, 12 checks, 521 s |
+| desktop UEFI | PASS, 12 checks, 539 s (OVMF's "Ubuntu distribution of EDK II" banner is excluded from the console check) |
+
+The live round took three attempts: wireless-tools is gone from 26.04 (iw),
+casper owns /etc/casper.conf, the server branding has no watermark, the
+network needs the netplan file, casper's shutdown prompt needs `noprompt`.
+The server medium (not the test variant) is on the dev host's share for the
+owner's Secure Boot check on a real machine: a USB stick written with dd,
+Secure Boot on; the test is that the menu appears and the live console
+reports the medium.
+
+Verified from the "to verify" list: casper 26.04.2 honours `layerfs-path=`
+for a plain name and mounts only that layer chain; the signed grub needs no
+stub (it is the CD build); `fsck.mode=skip` does not disable
+casper-md5check (its unit has no condition), so the unit is masked; the
+plymouth theme lands in the initrd when the watermark is in place before
+the kernel's trigger runs (it is: the installer package is configured
+before the triggers).

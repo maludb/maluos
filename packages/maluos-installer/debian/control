@@ -1,0 +1,20 @@
+Source: maluos-installer
+Section: admin
+Priority: optional
+Maintainer: Edward Honour <ed@maludb.org>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.7.0
+Homepage: https://maluos.com
+
+Package: maluos-installer
+Architecture: all
+Depends: ${misc:Depends}, python3 (>= 3.12), casper, initramfs-tools, plymouth, plymouth-theme-spinner, maluos-branding (>= 0.4.0), mokutil, iproute2, squashfs-tools
+Description: MaluOS installer (the live medium's own)
+ The installer the MaluOS medium boots into (Phase 11). This version is
+ the live environment's stub: it owns the console, prints the banner and
+ the medium's facts (the images, their checksums, the kernel and initrd,
+ the firmware, the network) and leaves a shell; the engine, the unattended
+ plan and the screens come in the next slices under the same name. The
+ package also carries the live configuration: casper.conf (the live user
+ maluos), the console units, the on-media apt source. It is never
+ installed on a target.

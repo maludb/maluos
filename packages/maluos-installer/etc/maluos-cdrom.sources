@@ -1,0 +1,7 @@
+# The medium's own package repository (Phase 11 slice 1): apt install works
+# offline in the live shell. The MaluOS keyring verifies it.
+Types: deb
+URIs: file:///cdrom/maluos/apt
+Suites: resolute
+Components: main
+Signed-By: /usr/share/keyrings/maluos-archive-keyring.gpg

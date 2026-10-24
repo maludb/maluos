@@ -1,0 +1,16 @@
+# Packages installed into the MaluOS live root filesystem (Phase 11 slice 1),
+# on top of the Ubuntu bootstrap: the live environment the installer medium
+# boots into. The kernel and its initrd are built here, with casper's hooks
+# and the plymouth theme inside, and copied out onto the medium by
+# iso/build-live-iso.sh; the bootloaders (BIOS and the signed UEFI chain) are
+# taken from this rootfs by the same script. No database, no cloud-init.
+ubuntu-minimal
+maluos-live
+linux-generic
+linux-firmware
+grub-pc-bin
+grub-efi-amd64-signed
+grub-efi-amd64-bin
+shim-signed
+grub2-common
+zstd

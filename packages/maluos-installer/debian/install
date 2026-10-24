@@ -1,0 +1,8 @@
+bin/maluos-install                                   usr/bin
+systemd/maluos-installer.service                     usr/lib/systemd/system
+systemd/maluos-rescue.service                        usr/lib/systemd/system
+systemd/serial-getty@.service.d/maluos-live.conf     usr/lib/systemd/system/serial-getty@.service.d
+etc/casper.conf                                      usr/share/maluos-installer
+etc/maluos-cdrom.sources                             etc/apt/sources.list.d
+files/maluos-watermark.png                           usr/share/maluos-installer
+etc/netplan/01-maluos-live.yaml                      etc/netplan

@@ -5,6 +5,7 @@
 # when the base ISO is present at $BASE_ISO.
 # usage: ci/in-container-build.sh [packages|images|iso|all]   (default all)
 #   PROFILES="server desktop" builds both image profiles (default: server)
+#   LIVE=1 also builds the live rootfs and the live medium for each profile (Phase 11 slice 1)
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd); cd "$ROOT"
 STEP=${1:-all}; PROFILES=${PROFILES:-server}
@@ -12,7 +13,7 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
 apt-get install -y -q --no-install-recommends \
     build-essential devscripts debhelper dh-python lintian dpkg-dev gnupg python3 python3-yaml ca-certificates curl \
-    mmdebstrap squashfs-tools xorriso qemu-utils dosfstools gdisk rsync fdisk e2fsprogs \
+    mmdebstrap squashfs-tools xorriso qemu-utils dosfstools mtools gdisk rsync fdisk e2fsprogs \
     util-linux mount grub-common \
     composer php-cli php-pgsql nodejs npm python3-venv python3-pip >/dev/null
 export PATH=/usr/sbin:/sbin:$PATH
@@ -31,6 +32,14 @@ for profile in $PROFILES; do
     image/build-qcow2.sh -p "$profile"
     rm -rf "build/image/maluos-$profile.rootfs"      # the squashfs and the qcow2 are what CI keeps; the tree is disk
 done
+if [ "${LIVE:-0}" = 1 ]; then
+    # Phase 11 slice 1: the live environment, then the medium for each profile (the repo on it is the flat CI one)
+    REPO_URL=http://127.0.0.1:8089 REPO_FLAT=1 image/build-rootfs.sh -p live
+    rm -rf build/image/maluos-live.rootfs
+    for profile in $PROFILES; do
+        iso/build-live-iso.sh -p "$profile"
+    done
+fi
 if [ "$STEP" = iso ] || [ "$STEP" = all ]; then
     if [ -f "${BASE_ISO:-/nonexistent}" ]; then
         for profile in $PROFILES; do

@@ -1,0 +1,7 @@
+# The live environment (Phase 11 slice 1): NetworkManager manages every interface.
+# Ubuntu's network-manager leaves wired interfaces unmanaged unless netplan names
+# it as the renderer (10-globally-managed-devices.conf); this file does, so the
+# live console gets a DHCP lease and nmcli works.
+network:
+  version: 2
+  renderer: NetworkManager

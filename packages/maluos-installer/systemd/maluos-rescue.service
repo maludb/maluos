@@ -1,0 +1,22 @@
+[Unit]
+Description=MaluOS rescue shell (maluos.rescue on the kernel command line)
+ConditionKernelCommandLine=maluos.rescue
+After=systemd-user-sessions.service plymouth-quit-wait.service getty-pre.target
+Conflicts=getty@tty1.service
+Before=getty.target
+
+[Service]
+Type=simple
+ExecStart=/bin/sh -c 'cat /etc/issue; echo "MaluOS rescue shell (root). The medium is at /cdrom; nmcli for the network."; exec /bin/bash -l'
+StandardInput=tty
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+Environment=TERM=linux HOME=/root
+Restart=always
+RestartSec=1
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,25 @@
+[Unit]
+Description=MaluOS installer (the live medium's console)
+Documentation=https://github.com/maludb/maluos
+ConditionKernelCommandLine=!maluos.rescue
+ConditionPathExists=/cdrom/.disk/info
+After=systemd-user-sessions.service plymouth-quit-wait.service getty-pre.target network.target
+Conflicts=getty@tty1.service
+Before=getty.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/maluos-install
+StandardInput=tty
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+Environment=TERM=linux HOME=/root
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

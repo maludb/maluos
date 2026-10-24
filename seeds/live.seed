@@ -1,0 +1,43 @@
+# maluos-live: the live environment of the MaluOS installer medium (Phase 11
+# slice 1). A server-minimal MaluOS plus what an installer needs: the live boot,
+# the installer, networking on a console, the disk and hardware tools. Never
+# installed on a target. The kernel, firmware and bootloaders come from the
+# image profile (image/profiles/live.pkgs), not from here.
+maluos-base
+casper
+maluos-installer
+network-manager
+iproute2
+iputils-ping
+ethtool
+iw
+wpasupplicant
+console-setup
+kbd
+locales
+tzdata
+less
+vim-tiny
+parted
+gdisk
+dosfstools
+e2fsprogs
+xfsprogs
+lvm2
+cryptsetup
+squashfs-tools
+efibootmgr
+mokutil
+pciutils
+usbutils
+dmidecode
+lshw
+smartmontools
+nvme-cli
+openssh-client
+rsync
+tmux
+python3-urwid
+plymouth
+plymouth-theme-spinner
+plymouth-label

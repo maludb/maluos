@@ -1,0 +1,183 @@
+#!/usr/bin/python3
+"""maluos-install: the MaluOS installer (Phase 11). Slice 1: the live medium's stub.
+
+  maluos-install                 the banner, the medium's facts, then a root shell (the installer's console unit)
+  maluos-install --check-media   the facts only: the medium, the images and the target's checksum, the kernel
+                                 and initrd, the firmware, the network; exit 0 when the medium is sound
+  maluos-install --version
+
+With maluos.test=1 on the kernel command line the console unit prints the
+facts to /dev/console (the serial line of a test) and powers the machine off.
+The engine, the plan and the screens come in the next slices under this name.
+"""
+import hashlib, json, os, re, subprocess, sys
+
+VERSION = "0.0.1"
+CDROM = "/cdrom"
+
+
+def os_release():
+    d = {}
+    try:
+        for line in open("/etc/os-release"):
+            if "=" in line:
+                k, v = line.rstrip("\n").split("=", 1); d[k] = v.strip('"')
+    except OSError:
+        pass
+    return d
+
+
+def cmdline():
+    try:
+        return open("/proc/cmdline").read().split()
+    except OSError:
+        return []
+
+
+def sh(*argv, timeout=60):
+    try:
+        return subprocess.run(argv, capture_output=True, text=True, timeout=timeout).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def mb(path):
+    try:
+        return os.path.getsize(path) / 1e6
+    except OSError:
+        return 0.0
+
+
+def sha256(path, out=None):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        while True:
+            b = f.read(4 << 20)
+            if not b:
+                break
+            h.update(b)
+    return h.hexdigest()
+
+
+def banner(out):
+    osr = os_release()
+    info = ""
+    try:
+        info = open(f"{CDROM}/.disk/info").read().strip()
+    except OSError:
+        pass
+    out(f"\n  {osr.get('PRETTY_NAME') or 'MaluOS'} installer {VERSION}" + (f"  ·  {info}" if info else "") + "\n")
+
+
+def check_media(out):
+    """The facts, one line each; returns True when the medium is sound."""
+    ok = True
+    # the medium
+    mnt = sh("findmnt", "-rn", "-o", "SOURCE,FSTYPE,LABEL", CDROM).split()
+    info = ""
+    try:
+        info = open(f"{CDROM}/.disk/info").read().strip()
+    except OSError:
+        pass
+    if mnt and info:
+        out(f"medium: {CDROM} ({mnt[2] if len(mnt) > 2 and mnt[2] else mnt[0]}) · {info}")
+    else:
+        out(f"medium: {CDROM} not mounted or no .disk/info"); ok = False
+    # the live image
+    live = f"{CDROM}/casper/maluos-live.squashfs"
+    out(f"live: maluos-live.squashfs {mb(live):.0f} MB" if os.path.exists(live) else "live: maluos-live.squashfs missing")
+    # the targets and their checksums
+    sums = {}
+    try:
+        for line in open(f"{CDROM}/maluos/SHA256SUMS"):
+            parts = line.split()
+            if len(parts) == 2:
+                sums[parts[1].lstrip("*")] = parts[0]
+    except OSError:
+        out("checksums: /maluos/SHA256SUMS missing"); ok = False
+    imgdir = f"{CDROM}/maluos/images"
+    targets = sorted(f for f in (os.listdir(imgdir) if os.path.isdir(imgdir) else []) if f.endswith(".squashfs"))
+    if not targets:
+        out("target: no image under /maluos/images"); ok = False
+    for t in targets:
+        path = f"{imgdir}/{t}"
+        want = sums.get(f"images/{t}")
+        if want:
+            got = sha256(path)
+            good = got == want
+            out(f"target: {t} {mb(path):.0f} MB sha256 {'ok' if good else 'MISMATCH'}")
+            ok = ok and good
+        else:
+            out(f"target: {t} {mb(path):.0f} MB sha256 not listed"); ok = False
+    # the kernel and the initrd
+    out(f"kernel: {os.uname().release}")
+    initrd = f"{CDROM}/casper/initrd"
+    if os.path.exists(initrd):
+        names = sh("lsinitramfs", initrd, timeout=180)
+        casper = "scripts/casper" in names or "/casper" in names
+        theme = "plymouth/themes/spinner/watermark.png" in names or "themes/spinner/spinner.plymouth" in names
+        out(f"initrd: casper {'ok' if casper else 'MISSING'}, plymouth theme spinner {'ok' if theme else 'MISSING'}")
+        ok = ok and casper
+    else:
+        out("initrd: /casper/initrd missing"); ok = False
+    # the firmware
+    if os.path.isdir("/sys/firmware/efi"):
+        sb = sh("mokutil", "--sb-state").strip().replace("SecureBoot ", "Secure Boot ") or "Secure Boot state unknown"
+        out(f"firmware: UEFI, {sb.splitlines()[0] if sb else sb}")
+    else:
+        out("firmware: BIOS")
+    # the network: NetworkManager is still asking for a lease when the console unit starts; wait a little for one
+    import time
+    deadline = time.time() + 45
+    while True:
+        try:
+            links = json.loads(sh("ip", "-j", "addr") or "[]")
+        except ValueError:
+            links = []
+        nets, addressed = [], False
+        for l in links:
+            if l.get("ifname") == "lo":
+                continue
+            a4 = [a["local"] for a in l.get("addr_info") or [] if a.get("family") == "inet"]
+            addressed = addressed or bool(a4)
+            nets.append(f"{l.get('ifname')} {' '.join(a4) if a4 else '(no address)'}")
+        if addressed or time.time() > deadline:
+            break
+        time.sleep(2)
+    out("network: " + (", ".join(nets) if nets else "no interfaces"))
+    return ok
+
+
+def main(argv):
+    if "-h" in argv or "--help" in argv:
+        print(__doc__); return 0
+    if "--version" in argv:
+        print(f"maluos-install {VERSION}"); return 0
+    if "--check-media" in argv:
+        return 0 if check_media(print) else 1
+    # the console unit
+    test = "maluos.test=1" in cmdline()
+    con = None
+    if test:
+        try:
+            con = open("/dev/console", "w")
+        except OSError:
+            con = None
+    def out(line):
+        print(line, flush=True)
+        if con:
+            con.write(line + "\n"); con.flush()
+    banner(out)
+    ok = check_media(out)
+    out("")
+    if test:
+        out(f"check-media: {'ok' if ok else 'FAILED'}; powering off (maluos.test=1)")
+        subprocess.run(["systemctl", "poweroff"])
+        return 0
+    out("The MaluOS installer is not on this medium yet (slice 2). You have a shell;")
+    out("nmcli for the network, lsblk for the disks, maluos-install --check-media to read this again.\n")
+    os.execvp("/bin/bash", ["/bin/bash", "-l"])
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

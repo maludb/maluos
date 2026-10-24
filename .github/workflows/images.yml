@@ -16,6 +16,10 @@ on:
         description: also build and boot-test the desktop image (adds about 30 minutes)
         type: boolean
         default: false
+      live:
+        description: also build the live environment and boot-test the installer medium on BIOS and UEFI (Phase 11; adds about 15 minutes)
+        type: boolean
+        default: false
 concurrency:
   group: images-${{ github.ref }}
   cancel-in-progress: true
@@ -45,6 +49,7 @@ jobs:
           docker run --rm --privileged -v "$PWD:/work" -w /work \
             -e BASE_ISO=/work/iso-cache/ubuntu-26.04.1-live-server-amd64.iso \
             -e PROFILES="${{ inputs.desktop && 'server desktop' || 'server' }}" \
+            -e LIVE="${{ inputs.live && '1' || '0' }}" \
             ubuntu:26.04 ci/in-container-build.sh ${{ inputs.iso && 'all' || 'images' }}
           sudo chown -R "$(id -u):$(id -g)" build
       - name: Enable KVM for the runner user
@@ -61,6 +66,17 @@ jobs:
       - name: Boot test (desktop, BIOS)
         if: ${{ inputs.desktop }}
         run: WORK=$PWD/build/test-desktop SSHPORT=2225 tests/qcow2-boot-test.sh build/image/maluos-desktop-26.04-amd64.qcow2
+      - name: Live medium boot test (server, BIOS and UEFI)
+        if: ${{ inputs.live }}
+        run: |
+          sudo apt-get install -y -q mtools >/dev/null
+          WORK=$PWD/build/test-live tests/live-iso-boot-test.sh -p server
+          WORK=$PWD/build/test-live tests/live-iso-boot-test.sh -p server --uefi
+      - name: Live medium boot test (desktop, BIOS and UEFI)
+        if: ${{ inputs.live && inputs.desktop }}
+        run: |
+          WORK=$PWD/build/test-live tests/live-iso-boot-test.sh -p desktop
+          WORK=$PWD/build/test-live tests/live-iso-boot-test.sh -p desktop --uefi
       - name: Upload image and logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -72,6 +88,7 @@ jobs:
             build/SHA256SUMS
             build/test-*/boot-serial.log
             build/test-*/verify.log
+            build/test-live/*.log
             build/image/*.log
           retention-days: 7
           compression-level: 0

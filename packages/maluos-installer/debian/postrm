@@ -1,0 +1,10 @@
+#!/bin/sh
+set -e
+case "$1" in
+    remove|abort-install|disappear)
+        dpkg-divert --package maluos-installer --remove --rename \
+            --divert /usr/share/plymouth/themes/spinner/watermark.png.ubuntu /usr/share/plymouth/themes/spinner/watermark.png
+        ;;
+esac
+#DEBHELPER#
+exit 0

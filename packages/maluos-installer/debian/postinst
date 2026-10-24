@@ -1,0 +1,24 @@
+#!/bin/sh
+set -e
+case "$1" in
+    configure)
+        # casper owns /etc/casper.conf as a conffile: overwritten here (a local modification), not shipped.
+        cp /usr/share/maluos-installer/casper.conf /etc/casper.conf
+        # The boot splash: the spinner theme with the MaluOS watermark (the branding ships it;
+        # the desktop branding does the same). The initramfs is built after this by the kernel's trigger.
+        # The server branding carries no watermark (the desktop branding does); this package ships a copy.
+        mkdir -p /usr/share/plymouth/themes/spinner
+        wm=/usr/share/maluos-branding/maluos-watermark.png; [ -f "$wm" ] || wm=/usr/share/maluos-installer/maluos-watermark.png
+        install -m 0644 "$wm" /usr/share/plymouth/themes/spinner/watermark.png
+        if command -v plymouth-set-default-theme >/dev/null 2>&1; then
+            plymouth-set-default-theme spinner >/dev/null 2>&1 || true
+        fi
+        # A live medium: no medium check (the installer verifies the target image itself),
+        # no unattended upgrades, no apt timers.
+        for u in casper-md5check.service apt-daily.timer apt-daily-upgrade.timer unattended-upgrades.service; do
+            systemctl mask --quiet "$u" 2>/dev/null || true
+        done
+        ;;
+esac
+#DEBHELPER#
+exit 0
