@@ -15,7 +15,7 @@ tooling as it is: S under half a day, M a day, L several days.
 
 | | |
 |---|---|
-| Latest release | 26.04.20261024 is tomorrow's; 26.04.20261023 shipped with Phase 12 slice 6 (one release per UTC day) |
+| Latest release | 26.04.20261024, shipped 2026-10-24 00:37 UTC with Phase 12 slices 7 and 8 (one release per UTC day) |
 | Phase 12 (desktop) | slices 1 to 6 released; slice 7 built, boot-tested, committed c9ccdbf, desktop ISO rebuilt; slice 8 coded, packaged, image chain running |
 | Phase 13 (estate) | planned 2026-10-23, nothing built; the Agents app's task interface (slice 8) is its first protocol |
 | Phase 11 (installer) | proposed only |
@@ -40,7 +40,7 @@ before it is green by about 20:00 UTC.
 | A8 | Filler: remove packages/maluos-meta/debian/docs/claude-log/ from the repo | done 2ba9fc7 (and `**/claude-log/` ignored) | S | nothing | |
 | A9 | Filler: anything the owner wants changed in the Agents app after seeing it | idea | S to M | A1 | |
 | A10 | Freeze 22:00 UTC: fixes only | | | A4, A5 | |
-| A11 | Release 26.04.20261024: scripts/release.sh in tmux (the owner types the passphrase), then verify GitHub, R2, apt.maluos.com, publish the download page, start the CI run | planned | 1 h wall | A10, 00:00 UTC | the release holds slices 7 and 8 |
+| A11 | Release 26.04.20261024: scripts/release.sh in tmux (the owner types the passphrase), then verify GitHub, R2, apt.maluos.com, publish the download page, start the CI run | done 2026-10-24 00:37 UTC (tag at 27eb819; apt republished 00:45; download page 00:49; release CI run 40045853008) | 1 h wall | A10, 00:00 UTC | the release holds slices 7 and 8; release.sh needs `source ~/.config/maluos/publish.env` first, else the R2 upload is skipped (it was, and was run by hand) |
 
 ## B. Slice 9 (Phase 12), planned 2026-10-23
 
