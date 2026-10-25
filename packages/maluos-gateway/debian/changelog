@@ -1,3 +1,28 @@
+maluos-gateway (0.4.0) resolute; urgency=medium
+
+  * Phase 13, shared GPUs, slice G2 (docs/inference-node-api.md, surface 1;
+    docs/phase13-shared-gpus.md): the node API /node/v1 (status, health,
+    queue with cancel, priority and pause/resume per lane, runs with
+    since_seq from the ledger, models, keys), opened by a node key or an
+    operator on the socket. Keys as principals (key:<name>, a policy and a
+    token of kind inference or node): `maluctl gateway key issue|list|
+    revoke|set`. Async jobs on every face (X-Node-Mode: async or the body
+    object node, 202 with a job id, /v1/jobs). The Anthropic Messages face
+    (/v1/messages, non-stream and the event stream, tools, errors in
+    Anthropic's shape). The node headers on every answer. The `remote`
+    backend kind: a paired MaluOS GPU host reached with the pairing key the
+    gateway holds in the vault (system/remote-NAME), governed by the policy
+    field remote_allowed and the sensitivity gate, no forwarding chains,
+    both ledgers joined by the call ids. `maluctl gateway backend add NAME
+    URL --key KEY`, `maluctl gateway expose|unexpose` (the TCP listener
+    applied live on reload; refuses without a key), `maluctl gateway node
+    ...` and `jobs`. The sharing switch is enforced: with share off an
+    inference key's call over the network is refused 503 not_shared. The
+    gateway's own principal user:maluos-gateway for the pairing keys. The
+    daemon reports version 0.4.0.
+
+ -- Edward Honour <ed@maludb.org>  Sun, 25 Oct 2026 21:30:00 +0000
+
 maluos-gateway (0.3.5) resolute; urgency=medium
 
   * Phase 13, shared GPUs, slice G1: the GPU sharing switch. gateway.yaml

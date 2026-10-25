@@ -35,12 +35,12 @@ class Catalog:
             b = self.backends.get(name)
             if b and b["enabled"] and (requested in models or requested + ":latest" in models):
                 out.append((name, requested, "direct"))
-        # local backends first, then cloud, as a stable default ladder for bare model names
+        # local backends first, then remote nodes, then cloud, as a stable default ladder for bare model names
         cloud = ("anthropic", "openai", "openai_compat", "ollama_cloud")
-        return sorted(out, key=lambda c: (self.backends[c[0]]["kind"] in cloud, c[0]))
+        return sorted(out, key=lambda c: (self.backends[c[0]]["kind"] in cloud, self.backends[c[0]]["kind"] == "remote", c[0]))
 
     def policy_for(self, principal_ref, scopes=()):
-        merged = {"allowed_tiers": None, "allowed_backends": None, "cloud_allowed": True, "default_class": None,
+        merged = {"allowed_tiers": None, "allowed_backends": None, "cloud_allowed": True, "remote_allowed": True, "default_class": None,
                   "max_egress_sensitivity": None, "ladder": None, "budget": None}
         layers = [p for p in self.policies if p["subject_kind"] == "default"]
         layers += [p for p in self.policies if p["subject_kind"] == "scope" and p["subject_ref"] in set(scopes)]
@@ -127,7 +127,7 @@ class Database:
 
     async def token_lookup(self, token):
         h = hashlib.sha256(token.encode()).hexdigest()
-        row = await self.fetchone("""SELECT token_id, principal_ref, name FROM maluos_token
+        row = await self.fetchone("""SELECT token_id, principal_ref, name, kind, limits FROM maluos_token
                                      WHERE token_hash=%s AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now())""", (h,))
         if row:
             await self.execute("UPDATE maluos_token SET last_used_at=now() WHERE token_id=%s", (row["token_id"],))

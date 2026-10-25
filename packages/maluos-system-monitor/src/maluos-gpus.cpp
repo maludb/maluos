@@ -49,7 +49,9 @@ struct _GsmMaluosGpusView
   gboolean      updating_switch;
   gboolean      self_test;
   guint         self_test_timeout;
+  gint64        self_test_deadline;   /* monotonic µs */
   char         *summary;
+  char         *last_error;
 };
 
 G_DEFINE_FINAL_TYPE (GsmMaluosGpusView, gsm_maluos_gpus_view, GTK_TYPE_WIDGET)
@@ -418,7 +420,8 @@ self_test_done (GsmMaluosGpusView *self, gboolean ok)
   if (ok)
     g_print ("self-test ok: GPUs: session reachable, %s\n", self->summary ? self->summary : "no summary");
   else
-    g_print ("self-test FAIL: GPUs: the MaluOS session service did not answer\n");
+    g_print ("self-test FAIL: GPUs: the MaluOS session service did not answer%s%s\n",
+             self->last_error ? ": " : "", self->last_error ? self->last_error : "");
   fflush (stdout);
   exit (ok ? 0 : 1);
 }
@@ -439,10 +442,13 @@ on_state (GObject *source, GAsyncResult *res, gpointer data)
   if (!ret)
     {
       g_debug ("maluos gpus: GetState: %s", error ? error->message : "?");
+      g_free (self->last_error);
+      self->last_error = g_strdup (error ? error->message : "GetState failed");
       g_clear_error (&error);
       adw_banner_set_revealed (ADW_BANNER (self->banner), self->answered_once);
       if (!self->answered_once)
         set_available (self, FALSE);
+      self_test_done (self, FALSE);   /* a self-test ends on the first refused call (no service: ServiceUnknown) */
       return;
     }
 
@@ -481,8 +487,11 @@ on_proxy (GObject *, GAsyncResult *res, gpointer data)
   if (!proxy)
     {
       g_debug ("maluos gpus: no session proxy: %s", error ? error->message : "?");
+      g_free (self->last_error);
+      self->last_error = g_strdup_printf ("no session bus: %s", error ? error->message : "?");
       g_clear_error (&error);
       self->in_flight = FALSE;
+      self_test_done (self, FALSE);
       return;
     }
   self->proxy = proxy;
@@ -502,7 +511,7 @@ maluos_gpus_update (GsmMaluosGpusView *self)
                                 SESSION_NAME, SESSION_PATH, SESSION_IFACE, self->cancellable, on_proxy, self);
       return;
     }
-  g_dbus_proxy_call (self->proxy, "GetState", NULL, G_DBUS_CALL_FLAGS_NONE, 15000, self->cancellable, on_state, self);
+  g_dbus_proxy_call (self->proxy, "GetState", NULL, G_DBUS_CALL_FLAGS_NONE, 30000, self->cancellable, on_state, self);
 }
 
 static gboolean
@@ -537,11 +546,23 @@ gsm_maluos_gpus_view_get_available (GsmMaluosGpusView *self)
   return self->available;
 }
 
+/* The self-test runs on slow machines (the boot test under TCG): the window's first paint can hold the main
+ * loop for longer than any sensible deadline, and when the loop resumes the timer and the D-Bus reply are
+ * both ready.  So the timer never fails a call that is still in flight (the call's own 30 s timeout ends it
+ * with an error, which fails the test with its message); it only fails when nothing is pending past the
+ * deadline. */
 static gboolean
 cb_self_test_timeout (gpointer data)
 {
   GsmMaluosGpusView *self = (GsmMaluosGpusView *) data;
   self->self_test_timeout = 0;
+  if (!self->self_test)
+    return G_SOURCE_REMOVE;
+  if (self->in_flight || g_get_monotonic_time () < self->self_test_deadline)
+    {
+      self->self_test_timeout = g_timeout_add_seconds (5, cb_self_test_timeout, self);
+      return G_SOURCE_REMOVE;
+    }
   self_test_done (self, FALSE);
   return G_SOURCE_REMOVE;
 }
@@ -550,6 +571,7 @@ void
 gsm_maluos_gpus_view_self_test (GsmMaluosGpusView *self)
 {
   self->self_test = TRUE;
+  self->self_test_deadline = g_get_monotonic_time () + 60 * G_USEC_PER_SEC;
   self->self_test_timeout = g_timeout_add_seconds (20, cb_self_test_timeout, self);
   maluos_gpus_update (self);
 }
@@ -628,6 +650,7 @@ gsm_maluos_gpus_view_dispose (GObject *object)
       g_clear_object (&self->cancellable);
     }
   g_clear_object (&self->proxy);
+  g_clear_pointer (&self->last_error, g_free);
   if (self->rows)
     {
       g_ptr_array_free (self->rows, TRUE);

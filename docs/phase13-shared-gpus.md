@@ -258,3 +258,33 @@ next step):
   estate report's `gpus` (with D1, which is not built), translations of the
   tab's strings, the laptop idle detection (G4 decides what "idle" means:
   no session input for a threshold, on mains power).
+
+**G2 built 2026-10-25** (docs/inference-node-api.md is surface 1; the
+gateway's local test covers every route; the image boot test checks keys,
+the node API and `expose` on both profiles):
+
+- maluos-gateway 0.4.0: the node API `/node/v1` (status with the machine,
+  the GPUs and the lanes; health; the queue with cancel, priority and
+  pause/resume per lane; runs from the ledger with `since_seq`; models with
+  a catalogue sequence; keys), opened by a node key or an operator on the
+  socket. Keys are principals: `key:<name>`, a principal policy (class,
+  cloud, remote, tiers) and a token of kind `inference` or `node`, minted by
+  `maluctl gateway key issue` or `POST /node/v1/keys`, shown once. Async
+  jobs on every face (`X-Node-Mode: async` or the body object `node`,
+  202 with a job id, `/v1/jobs`). The Anthropic Messages face
+  (`/v1/messages`, the event stream, tools, errors in Anthropic's shape).
+  The node headers on every answer. The `remote` backend kind (a paired
+  MaluOS host, its pairing key in the vault as `system/remote-<name>` for
+  the gateway's own principal `user:maluos-gateway`, `remote_allowed` in
+  the policy, the sensitivity gate, no forwarding chains, both ledgers
+  joined by the call ids). `maluctl gateway backend add NAME URL --key`,
+  `expose|unexpose` (the TCP listener applied live on reload, refused
+  without a key), `node status|queue|runs|models|cancel|priority|pause|
+  resume`, `jobs`. The sharing switch is enforced on the serving side: with
+  share off an inference key's call over the network is refused
+  `not_shared`.
+- Not in G2: the node events stream, `/usage`, `/settings`, a job's event
+  replay, webhooks, idempotency keys, `max_wait` turning sync into async
+  (all listed as later in the API document); the laptop idle detection
+  (G4); the estate's directory replacing pairing by hand (G4); the node
+  service's side of the same API (G3, the other repository).

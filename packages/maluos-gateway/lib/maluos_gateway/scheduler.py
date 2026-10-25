@@ -53,6 +53,8 @@ class Scheduler:
         self.stats = {}
         self.last_served, self._seq = {}, 0
         self.totals = {"admitted": 0, "rejected": 0, "cancelled": 0, "completed": 0}
+        self.paused = False               # G2: an operator paused this lane (running jobs finish, queued ones wait)
+        self.principal_limits = {}        # G2: per-principal caps on jobs in flight (an inference key's max_concurrent)
 
     # -- configuration
     def configure(self, max_concurrent=None, classes=None, affinity=None, principal_limit=None):
@@ -105,7 +107,7 @@ class Scheduler:
             self.totals["rejected"] += 1
             raise AdmissionError("principal_queue_full", f"{job.principal} already has {mine} requests queued", ew)
         limit = max_wait if max_wait is not None else cls.get("max_wait_s")
-        if limit is not None and ew > float(limit) and not (len(self.running) < self.cap and not self.queued):
+        if limit is not None and ew > float(limit) and not (len(self.running) < self.cap and not self.queued and not self.paused):
             self.totals["rejected"] += 1
             raise AdmissionError("wait_exceeds", f"expected wait {ew}s exceeds the limit {limit}s", ew)
         job.fut = asyncio.get_running_loop().create_future()
@@ -126,6 +128,39 @@ class Scheduler:
             raise
         job.started = time.monotonic()
 
+    # -- G2: operator actions on the queue (the node API)
+    def find(self, job_id):
+        for j in self.queued:
+            if j.id == job_id:
+                return j, "queued"
+        j = self.running.get(job_id)
+        return (j, "running") if j else (None, None)
+
+    def cancel_queued(self, job_id):
+        """Refuse a queued job now; its waiting caller gets AdmissionError('cancelled'). False when not queued here."""
+        j, state = self.find(job_id)
+        if state != "queued":
+            return False
+        self.queued.remove(j)
+        j.cancelled = True
+        self.totals["cancelled"] += 1
+        if j.fut and not j.fut.done():
+            j.fut.set_exception(AdmissionError("cancelled", "cancelled by an operator while queued"))
+        self._dispatch()
+        return True
+
+    def reprioritise(self, job_id, cls):
+        j, state = self.find(job_id)
+        if state != "queued":
+            return False
+        j.cls = cls
+        self._dispatch()
+        return True
+
+    def pause(self, paused=True):
+        self.paused = paused
+        self._dispatch()
+
     def release(self, job, service_s=None, load_s=None, tokens=None, switched=None):
         if self.running.pop(job.id, None) is not None:
             self.totals["completed"] += 1
@@ -137,8 +172,10 @@ class Scheduler:
 
     # -- dispatch
     def _dispatch(self):
-        while len(self.running) < self.cap and self.queued:
+        while len(self.running) < self.cap and self.queued and not self.paused:
             job = self._pick()
+            if job is None:
+                break
             self.queued.remove(job)
             self.running[job.id] = job
             job.started = time.monotonic()
@@ -146,8 +183,15 @@ class Scheduler:
                 job.fut.set_result(True)
 
     def _pick(self):
-        top = min(self._prio(j.cls) for j in self.queued)
-        cand = [j for j in self.queued if self._prio(j.cls) == top]
+        # a principal at its own cap (an inference key's max_concurrent) waits, whatever its class
+        inflight = {}
+        for r in self.running.values():
+            inflight[r.principal] = inflight.get(r.principal, 0) + 1
+        pool = [j for j in self.queued if inflight.get(j.principal, 0) < self.principal_limits.get(j.principal, 10 ** 6)]
+        if not pool:
+            return None
+        top = min(self._prio(j.cls) for j in pool)
+        cand = [j for j in pool if self._prio(j.cls) == top]
         if self.resident and any(j.model == self.resident for j in cand):
             others = [j for j in cand if j.model != self.resident]
             if others:
@@ -169,8 +213,9 @@ class Scheduler:
             by_class[name] = {"queued": sum(1 for j in self.queued if j.cls == name),
                               "expected_wait_s": self.expected_wait(name)}
         return {
-            "backend": self.backend, "capacity": self.cap, "resident": self.resident,
+            "backend": self.backend, "capacity": self.cap, "resident": self.resident, "paused": self.paused,
             "queued": len(self.queued), "running": len(self.running),
+            "oldest_queued_ms": int((now - min(j.enqueued for j in self.queued)) * 1000) if self.queued else 0,
             "classes": by_class,
             "jobs": [{"id": j.id, "principal": j.principal, "class": j.cls, "model": j.model, "kind": j.kind,
                       "state": "running", "elapsed_s": round(now - j.started, 1)} for j in self.running.values()]

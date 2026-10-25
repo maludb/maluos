@@ -147,6 +147,11 @@ def ensure_schema(psql, exists, qi, ql, db, tenant, role=ROLE, schema=SCHEMA):
         psql(f"SET ROLE {t}; GRANT SELECT ON {t}.maluos_agent TO {rl};", db)
     except Exception as e:
         print(f"maluos-gateway: no grant on maluos_agent ({e.__class__.__name__}): agent alerts carry no owner", file=sys.stderr)
+    # G2: the node API mints inference keys, each a principal key:<name> (maludb_principal_upsert as the tenant function).
+    try:
+        psql(f"GRANT EXECUTE ON FUNCTION {t}.maludb_principal_upsert(text, text, text, text, text, boolean) TO {rl};", db)   # as postgres: the tenant role does not own it
+    except Exception as e:
+        print(f"maluos-gateway: no grant on maludb_principal_upsert ({e.__class__.__name__}): POST /node/v1/keys needs maluctl gateway key issue", file=sys.stderr)
     os.makedirs("/etc/maluos/alert-hooks.d", exist_ok=True)
 
 
@@ -195,6 +200,8 @@ def ensure_engine_principal(psql, exists, qi, ql, db, tenant):
     """The engine queue's work runs as principal service:engine, so cloud keys can be granted to it."""
     pre = f"SET ROLE {qi(tenant)}; SET search_path TO {qi(tenant)}, maludb_core, public; "
     psql(pre + "SELECT maludb_principal_upsert('service:engine', 'service', 'MaluDB engine (model request queue)', 'org');", db)
+    # G2: the gateway itself holds the pairing keys of remote nodes (vault system/remote-<name>, granted to it)
+    psql(pre + f"SELECT maludb_principal_upsert({ql('user:' + ROLE)}, 'service', 'MaluOS inference gateway (remote node keys)', 'org');", db)
 
 
 def register_tool(psql, exists, qi, ql, db, tenant, listener_user):

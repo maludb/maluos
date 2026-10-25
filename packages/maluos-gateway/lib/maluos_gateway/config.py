@@ -24,6 +24,8 @@ DEFAULTS = {
     # chassis rule (a server shares, a desktop or laptop only when its owner opts in); contribution null = the rule's
     # (always on a server or desktop, idle on a laptop). `maluctl gateway share on|off [--when always|idle]`.
     "share": {"enabled": None, "contribution": None},
+    # Phase 13 G2: this node on the network. name null = the hostname; the id is made at first start (state_dir/node-id).
+    "node": {"name": None, "result_retention_hours": 72, "max_finished_jobs": 1000},
     "ollama": {"url": "http://127.0.0.1:11434", "keep_alive": "30m", "max_concurrent": 1,
                "keep_warm": [], "pull": [], "install": False, "version": "v0.40.6"},
     # Seeded into the catalogue at provisioning when it is empty (operators edit the tables after).

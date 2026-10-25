@@ -116,3 +116,13 @@ BEGIN
 END $$;
 -- The listener calls tools with its own pinned search_path: bind this function to the tenant schema.
 ALTER FUNCTION maluos_model_status(jsonb, jsonb) SET search_path FROM CURRENT;
+
+-- Phase 13 G2 (0.4.0): the node API, keys as principals, the remote backend kind. Idempotent upgrades.
+ALTER TABLE maluos_token ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'token';     -- token (a principal's own), inference, node
+ALTER TABLE maluos_token ADD COLUMN IF NOT EXISTS limits jsonb NOT NULL DEFAULT '{}'::jsonb;  -- max_concurrent, ... (the policy holds class, cloud, tiers)
+ALTER TABLE maluos_token ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
+ALTER TABLE maluos_token DROP CONSTRAINT IF EXISTS maluos_token_kind_check;
+ALTER TABLE maluos_token ADD CONSTRAINT maluos_token_kind_check CHECK (kind IN ('token','inference','node'));
+ALTER TABLE maluos_policy ADD COLUMN IF NOT EXISTS remote_allowed boolean NOT NULL DEFAULT true;  -- a LAN node is not the cloud
+ALTER TABLE maluos_backend DROP CONSTRAINT IF EXISTS maluos_backend_kind_check;
+ALTER TABLE maluos_backend ADD CONSTRAINT maluos_backend_kind_check CHECK (kind IN ('ollama_local','ollama_cloud','anthropic','openai','openai_compat','mock','remote'));

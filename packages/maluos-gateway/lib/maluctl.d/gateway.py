@@ -3,15 +3,17 @@
   maluctl gateway status | queue | routes [--limit N] | backends | whoami
   maluctl gateway chat "PROMPT" [--model NAME] [--class C] [--stream]   quick test call
   maluctl gateway catalog                                tiers, aliases, classes, policies
-  maluctl gateway backend add NAME --kind ollama_local|ollama_cloud|anthropic|openai|openai_compat|mock --endpoint URL
+  maluctl gateway backend add NAME --kind ollama_local|ollama_cloud|anthropic|openai|openai_compat|mock|remote --endpoint URL
                     [--secret REF] [--models a,b] [--max-concurrent N] [--keep-alive 30m]
+  maluctl gateway backend add NAME URL --key KEY [--models a,b]   a shared MaluOS GPU host (kind remote, docs/inference-node-api.md §6):
+                                                     the pairing key goes to the vault (system/remote-NAME) for the gateway's own use
   maluctl gateway price set BACKEND MODEL --input USD/Mtok --output USD/Mtok [--cached USD/Mtok]  |  price list
   maluctl gateway backend enable|disable|rm NAME
   maluctl gateway tier add NAME [--description D]  |  tier rm NAME
   maluctl gateway alias set NAME --backend B --model M [--tier T] [--position N]
   maluctl gateway alias rm NAME [--backend B] [--model M]
   maluctl gateway class set NAME [--priority N] [--weight N] [--max-queue N] [--max-wait S|none] [--fallback-wait S|none]
-  maluctl gateway policy set (--default | --principal REF | --scope S) [--class C] [--tiers a,b|all] [--backends a,b|all] [--cloud yes|no]
+  maluctl gateway policy set (--default | --principal REF | --scope S) [--class C] [--tiers a,b|all] [--backends a,b|all] [--cloud yes|no] [--remote yes|no]
                     [--egress public|internal|restricted|prohibited] [--ladder b1,b2|none] [--budget usd_per_day=5,usd_per_month=100|none]
   maluctl gateway policy rm (--principal REF | --scope S)
   maluctl gateway token issue --principal REF [--name N] [--expires 90d]   bearer token for the TCP listener
@@ -20,8 +22,15 @@
   maluctl gateway ollama install [--version vX.Y.Z] | pull MODEL [--backend B] | warm MODEL [--backend B] | status
   maluctl gateway alerts [--since 7d]                  alert rows (budget, backend down/recovered, usage anomaly, restart)
   maluctl gateway share [status]                     this host's GPU sharing switch and the chassis rule
-  maluctl gateway share on|off [--when always|idle]  share this host's GPU with the MaluOS network (root; the
-                                                     sharing itself arrives with slice G2, the switch is recorded now)
+  maluctl gateway share on|off [--when always|idle]  share this host's GPU with the MaluOS network (root)
+  maluctl gateway key issue --name N [--kind inference|node] [--class C] [--cloud-allowed yes|no] [--remote-allowed yes|no]
+                    [--tiers a,b] [--max-concurrent N] [--expires 90d]   an inference key (a caller on the network: a desk,
+                    a tool, the manager's agents) or a node key (the manager); shown once (root)
+  maluctl gateway key list | key revoke NAME|ID | key set NAME|ID [--class C] [--cloud-allowed yes|no] [--tiers a,b] [--max-concurrent N]
+  maluctl gateway expose [--bind ADDR] [--port 11435] | unexpose   the TCP listener for the network (root; refuses without a key)
+  maluctl gateway node status | queue | runs [--since-seq N] [--limit N] | models | cancel ID | priority ID CLASS | pause [LANE] | resume [LANE]
+                                                     the node API (/node/v1) as an operator; a manager uses it with a node key
+  maluctl gateway jobs [--status S] | job ID | job cancel ID    async jobs (yours; every job as root)
   maluctl gateway reload
 
 Callers use the gateway at the Unix socket /run/maluos/gateway.sock with any
@@ -198,14 +207,23 @@ def run(a):
     if cmd == "backend":
         sub, name = a.pop(0), a.pop(0)
         if sub == "add":
-            kind = opt(a, "--kind", "ollama_local"); ep = opt(a, "--endpoint") or sys.exit("--endpoint required")
+            url = a.pop(0) if a and not a[0].startswith("--") else None
+            kind = opt(a, "--kind", "remote" if url else "ollama_local"); ep = url or opt(a, "--endpoint") or sys.exit("--endpoint required")
             cloud = kind in ("ollama_cloud", "anthropic", "openai", "openai_compat")
-            cap = json.dumps({"max_concurrent": int(opt(a, "--max-concurrent", 8 if cloud else 1))})
-            o = {"keep_alive": opt(a, "--keep-alive", "30m")} if not cloud else {}
+            remote = kind == "remote"
+            cap = json.dumps({"max_concurrent": int(opt(a, "--max-concurrent", 8 if cloud else 2 if remote else 1))})
+            o = {"keep_alive": opt(a, "--keep-alive", "30m")} if not (cloud or remote) else {}
             models = opt(a, "--models")
             if models:
                 o["models"] = [m.strip() for m in models.split(",") if m.strip()]
             secret = opt(a, "--secret")
+            key = opt(a, "--key")
+            if remote:
+                secret = secret or f"system/remote-{name}"
+                if key:
+                    pair_key(name, secret, key)
+                elif not secret_exists(secret):
+                    sys.exit(f"--key KEY required for a remote node (the host's `maluctl gateway key issue`), or an existing vault secret via --secret")
             sql(f"INSERT INTO maluos_backend (name, kind, endpoint, secret_ref, capacity, options) VALUES ({ql(name)}, {ql(kind)}, {ql(ep)}, {ql(secret)}, {ql(cap)}::jsonb, {ql(json.dumps(o))}::jsonb) "
                 f"ON CONFLICT (name) DO UPDATE SET kind=EXCLUDED.kind, endpoint=EXCLUDED.endpoint, secret_ref=EXCLUDED.secret_ref, capacity=EXCLUDED.capacity, options=maluos_backend.options || EXCLUDED.options, enabled=true")
             print(f"backend {name} ({kind}) -> {ep}" + (f"  key: vault {secret}" if secret else "")); api("POST", "/v1/maluos/reload"); return 0
@@ -261,9 +279,10 @@ def run(a):
         if sub == "rm":
             sql(f"DELETE FROM maluos_policy WHERE subject_kind={ql(kind)} AND subject_ref={ql(ref)}"); api("POST", "/v1/maluos/reload"); print("removed"); return 0
         cls, tiers, backends, cloud = opt(a, "--class"), opt(a, "--tiers"), opt(a, "--backends"), opt(a, "--cloud")
-        egress, ladder, budget = opt(a, "--egress"), opt(a, "--ladder"), opt(a, "--budget")
+        egress, ladder, budget, remote = opt(a, "--egress"), opt(a, "--ladder"), opt(a, "--budget"), opt(a, "--remote")
         sets = []
         if cls is not None: sets.append(f"default_class={ql(None if cls == 'none' else cls)}")
+        if remote is not None: sets.append(f"remote_allowed={'true' if remote in ('yes', 'true', '1') else 'false'}")
         if tiers is not None: sets.append(f"allowed_tiers={arr(tiers)}")
         if backends is not None: sets.append(f"allowed_backends={arr(backends)}")
         if cloud is not None: sets.append(f"cloud_allowed={'true' if cloud in ('yes', 'true', '1') else 'false'}")
@@ -280,6 +299,14 @@ def run(a):
         sql(f"INSERT INTO maluos_policy (subject_kind, subject_ref) VALUES ({ql(kind)}, {ql(ref)}) ON CONFLICT (subject_kind, subject_ref) DO NOTHING; "
             + (f"UPDATE maluos_policy SET {', '.join(sets)}, updated_at=now() WHERE subject_kind={ql(kind)} AND subject_ref={ql(ref)}" if sets else "SELECT 1"))
         api("POST", "/v1/maluos/reload"); print(f"policy {kind} {ref}: {', '.join(sets) or 'created'}"); return 0
+    if cmd == "key":
+        return key_cmd(a)
+    if cmd in ("expose", "unexpose"):
+        return expose(cmd, a)
+    if cmd == "node":
+        return node_cmd(a)
+    if cmd in ("jobs", "job"):
+        return jobs_cmd(cmd, a)
     if cmd == "token":
         sub = a.pop(0)
         if sub == "issue":
@@ -377,12 +404,13 @@ def share(a):
     """The GPU sharing switch (Phase 13 G1): recorded in gateway.yaml `share:` and shown in the status; G2 acts on it."""
     sub = a.pop(0) if a and not a[0].startswith("--") else "status"
     if sub == "status":
-        st = api("GET", "/v1/maluos/status"); sh = st.get("share") or {}
+        st = api("GET", "/v1/maluos/status"); sh = st.get("share") or {}; ex = st.get("exposed") or {}
         rule = {"always": "a server: shares always", "opt-in": "a dedicated desktop: shares when its owner opts in",
                 "opt-in-idle": "a laptop: shares when its owner opts in, and only while idle"}.get(sh.get("rule"), sh.get("rule"))
         print(f"share:       {'on' if sh.get('enabled') else 'off'}" + ("" if sh.get("configured") else " (by the chassis rule)")
               + f"  contribution {sh.get('contribution')}  chassis {sh.get('chassis')} ({rule})"
-              + ("  exposed on the network" if sh.get("exposed") else "  not exposed (slice G2 brings `maluctl gateway expose`)"))
+              + (f"  exposed on {ex.get('host')}:{ex.get('port')}" if ex.get("network") else f"  tcp on {ex.get('host')}:{ex.get('port')} only (not the network)" if ex.get("enabled")
+                 else "  not exposed (sudo maluctl gateway expose)"))
         return 0
     if sub not in ("on", "off"):
         raise GwError("share: status, on or off")
@@ -419,3 +447,203 @@ def share(a):
         pass
     print(f"share {sub}" + (f", contribution {when}" if when else "") + " recorded in " + CONF)
     return share(["status"]) if os.path.exists(SOCKET) else 0
+
+
+GATEWAY_USER = os.environ.get("MALUOS_GATEWAY_USER", "maluos-gateway")
+
+
+def _vault():
+    from maluos_vault_client import Vault
+    return Vault()
+
+
+def secret_exists(ref):
+    from maluos_vault_client import VaultError
+    try:
+        _vault().get(ref); return True
+    except VaultError:
+        return False
+
+
+def pair_key(name, ref, key):
+    """The pairing key of a remote node: vault system/remote-NAME, granted to the gateway's own principal (use)."""
+    from maluos_vault_client import VaultError
+    if os.geteuid() != 0:
+        raise GwError("backend add --key needs sudo")
+    v = _vault()
+    comp, sname = ref.split("/", 1) if "/" in ref else ("system", ref)
+    try:
+        v.create_compartment(comp, scope="org")
+    except VaultError:
+        pass            # exists
+    try:
+        v.add(sname, key, compartment=comp, kind="token", provider="maluos-node", upsert=True)
+    except VaultError as e:
+        raise GwError(f"vault: {e.message}")
+    try:
+        v.grant(ref, "principal", f"user:{GATEWAY_USER}", level="use")
+    except VaultError as e:
+        raise GwError(f"vault grant to user:{GATEWAY_USER}: {e.message}")
+    print(f"pairing key for {name} stored as {ref} (use granted to user:{GATEWAY_USER})")
+
+
+def yn(v):
+    return v in ("yes", "true", "1", "on")
+
+
+def key_cmd(a):
+    sub = a.pop(0) if a else "list"
+    if sub == "issue":
+        if os.geteuid() != 0:
+            raise GwError("key issue needs sudo")
+        name = opt(a, "--name") or (a.pop(0) if a and not a[0].startswith("--") else None) or sys.exit("--name required")
+        body = {"name": name, "kind": opt(a, "--kind", "inference")}
+        for o, k in (("--class", "class"), ("--expires", "expires")):
+            v = opt(a, o)
+            if v is not None:
+                body[k] = v
+        for o, k in (("--cloud-allowed", "cloud_allowed"), ("--remote-allowed", "remote_allowed")):
+            v = opt(a, o)
+            if v is not None:
+                body[k] = yn(v)
+        t = opt(a, "--tiers")
+        if t is not None:
+            body["tiers"] = None if t == "all" else [x.strip() for x in t.split(",") if x.strip()]
+        mc = opt(a, "--max-concurrent")
+        if mc is not None:
+            body["max_concurrent"] = int(mc)
+        try:
+            r = api("POST", "/node/v1/keys", body)
+        except GwError as e:
+            if "cannot create the principal" not in str(e):
+                raise
+            # the gateway role lacks the grant (an older provisioning): create the principal as root, then mint
+            sql(f"SELECT maludb_principal_upsert({ql('key:' + name)}, 'service', {ql(body['kind'] + ' key ' + name)}, 'org');")
+            r = api("POST", "/node/v1/keys", body)
+        print(r["key"])
+        print(f"{r['kind']} key {r['name']} (id {r['id']}, principal {r['principal']}" + (f", class {r['policy'].get('class') or 'default'}, cloud {'yes' if r['policy'].get('cloud_allowed') else 'no'}" if r.get("policy") else "")
+              + (f", expires {r['expires_at'][:10]}" if r.get("expires_at") else "") + "): shown once", file=sys.stderr)
+        return 0
+    if sub == "list":
+        rows = api("GET", "/node/v1/keys")["keys"]
+        out = []
+        for r in rows:
+            p = r.get("policy") or {}
+            out.append({"id": r["id"], "name": r["name"], "kind": r["kind"], "class": p.get("class") or "-", "cloud": "yes" if p.get("cloud_allowed") else "no",
+                        "tiers": ",".join(p.get("tiers") or []) or "all", "max_conc": (r.get("limits") or {}).get("max_concurrent") or "-",
+                        "expires": (r.get("expires_at") or "never")[:10], "last_used": (r.get("last_used_at") or "never")[:19],
+                        "state": "revoked" if r.get("revoked_at") else "live"})
+        table(out, ["id", "name", "kind", "class", "cloud", "tiers", "max_conc", "expires", "last_used", "state"]); return 0
+    if sub == "revoke":
+        r = api("DELETE", f"/node/v1/keys/{urllib.parse.quote(a.pop(0))}"); print(f"revoked key {r['name']} (id {r['id']})"); return 0
+    if sub == "set":
+        kid = a.pop(0); body = {}
+        c = opt(a, "--class")
+        if c is not None:
+            body["class"] = None if c == "none" else c
+        for o, k in (("--cloud-allowed", "cloud_allowed"), ("--remote-allowed", "remote_allowed")):
+            v = opt(a, o)
+            if v is not None:
+                body[k] = yn(v)
+        t = opt(a, "--tiers")
+        if t is not None:
+            body["tiers"] = None if t == "all" else [x.strip() for x in t.split(",") if x.strip()]
+        mc = opt(a, "--max-concurrent")
+        if mc is not None:
+            body["max_concurrent"] = None if mc == "none" else int(mc)
+        r = api("PATCH", f"/node/v1/keys/{urllib.parse.quote(kid)}", body); print(f"key {r['name']}: {json.dumps(r.get('policy'))} limits {json.dumps(r.get('limits'))}"); return 0
+    raise GwError("key: issue, list, revoke, set")
+
+
+def expose(cmd, a):
+    """The TCP listener for the network, recorded in gateway.yaml and applied live by the gateway (reload)."""
+    if os.geteuid() != 0:
+        raise GwError(f"{cmd} needs sudo")
+    bind, port, force = opt(a, "--bind", "0.0.0.0"), int(opt(a, "--port", 11435)), opt(a, "--force", flag=True)
+    if a:
+        raise GwError(f"{cmd}: unknown argument {a[0]}")
+    import yaml
+    conf = {}
+    if os.path.exists(CONF):
+        with open(CONF) as f:
+            conf = yaml.safe_load(f) or {}
+    tcp = dict(conf.get("tcp") or {})
+    if cmd == "expose":
+        if not force:
+            try:
+                keys = [k for k in api("GET", "/node/v1/keys")["keys"] if not k.get("revoked_at")]
+            except GwError:
+                keys = []
+            if not keys:
+                raise GwError("no live key: issue one first (sudo maluctl gateway key issue --name NAME), or --force")
+        tcp.update({"enabled": True, "host": bind, "port": port})
+    else:
+        tcp["enabled"] = False
+    conf["tcp"] = tcp
+    with open(CONF, "w") as f:
+        f.write("# MaluOS inference gateway (maluos-gateway). database/tenant are set by first boot.\n"
+                "# See docs/phase6-slice2-gateway.md; the catalogue (tiers, aliases, classes, policies)\n"
+                "# lives in the database: maluctl gateway catalog.\n")
+        yaml.safe_dump(conf, f, sort_keys=True)
+    os.chmod(CONF, 0o644)
+    try:
+        r = api("POST", "/v1/maluos/reload")
+    except GwError as e:
+        print(f"recorded in {CONF}; the gateway is not running ({e})"); return 0
+    ex = r.get("exposed") or {}
+    if cmd == "expose" and not ex.get("enabled"):
+        raise GwError(f"the gateway could not listen on {bind}:{port} (journalctl -u maluos-gateway)")
+    print(f"tcp listener {'on ' + str(ex.get('host')) + ':' + str(ex.get('port')) if ex.get('enabled') else 'off'}" + ("  (the network; keys required)" if ex.get("network") else ""))
+    return 0
+
+
+def node_cmd(a):
+    sub = a.pop(0) if a else "status"
+    if sub == "status":
+        st = api("GET", "/node/v1/status")
+        m = st.get("machine") or {}
+        print(f"node:        {st['node_name']}  {st['node_id']}  v{st['version']}  up {st['uptime_s']}s  api {st['api_version']}"
+              + (f"  manager seen {st['last_manager_seen_at']}" if st.get("last_manager_seen_at") else "  no manager yet"))
+        ex = st.get("exposed") or {}
+        print(f"listener:    {'tcp ' + str(ex.get('host')) + ':' + str(ex.get('port')) if ex.get('enabled') else 'socket only'}  share {'on' if (st.get('share') or {}).get('enabled') else 'off'}"
+              f" ({(st.get('share') or {}).get('contribution')}, chassis {(st.get('share') or {}).get('chassis')})")
+        print(f"machine:     {m.get('hostname')}  {m.get('os')}  {m.get('cpu_count')} cpus  mem {(m.get('memory_available') or 0) // 2**20}/{(m.get('memory_total') or 0) // 2**20} MB free"
+              + (f"  gpus: {', '.join(g.get('model') or g.get('name') or '?' for g in m.get('gpus') or [])}" if m.get("gpus") else "  no gpu"))
+        for name, l in (st.get("lanes") or {}).items():
+            print(f"lane:        {name}  {l['kind']}  cap {l['capacity']}  running {l['running']}  queued {l['queued']}" + ("  PAUSED" if l.get("paused") else "")
+                  + f"  resident {l.get('resident') or '-'}  " + "  ".join(f"{c}: wait {v['expected_wait_ms']}ms" for c, v in l["classes"].items()))
+        c = st.get("counters") or {}
+        print(f"counters:    jobs {json.dumps(c.get('jobs'))}  async {json.dumps(c.get('async_jobs'))}")
+        return 0
+    if sub == "queue":
+        rows = api("GET", "/node/v1/queue")["queue"]
+        table(rows, ["id", "state", "lane", "class", "principal", "key", "model", "kind", "face", "mode", "waited_ms", "elapsed_ms", "expected_wait_ms"]); return 0
+    if sub == "runs":
+        r = api("GET", "/node/v1/runs", query={"since_seq": opt(a, "--since-seq", 0), "limit": opt(a, "--limit", 30), "status": opt(a, "--status")})
+        for x in r["runs"]:
+            print(f"{x['seq']:>7}  {x['at'][11:19]}  {x['status']:6} {x['principal']:22} {(x.get('key') or '-'):12} {x.get('face') or '-':9} {x.get('requested_model') or '-':14} "
+                  f"{(x.get('lane') or '-') + '/' + (x.get('model') or '-'):28} {x.get('class') or '-':11} "
+                  f"{str(x.get('tokens_in') or 0) + '/' + str(x.get('tokens_out') or 0):>9}  {x.get('reason') or ''}"
+                  + (f"  <- {x['origin_request']}" if x.get("origin_request") else "") + (f"  -> {x['provider_request_id']}" if x.get("provider_request_id") and not x.get("origin_request") else ""))
+        print(f"({len(r['runs'])} runs{'; more' if r.get('more') else ''}; next --since-seq {r['runs'][-1]['seq'] if r['runs'] else r['since_seq']})"); return 0
+    if sub == "models":
+        r = api("GET", "/node/v1/models")
+        table(r["models"], ["name", "kind", "backend", "lane", "model", "loaded"]); print(f"(catalogue seq {r['seq']})"); return 0
+    if sub == "cancel":
+        r = api("DELETE", f"/node/v1/queue/{a.pop(0)}"); print(f"cancelled {r['id']} ({r['state']})"); return 0
+    if sub == "priority":
+        jid, cls = a.pop(0), a.pop(0); r = api("POST", f"/node/v1/queue/{jid}/priority", {"class": cls}); print(f"{r['id']} -> class {r['class']}"); return 0
+    if sub in ("pause", "resume"):
+        lane = a.pop(0) if a else "local"
+        r = api("POST", f"/node/v1/queue/{sub}", {"lane": lane}); print(f"{sub}d {', '.join(r['lanes'])}"); return 0
+    raise GwError("node: status, queue, runs, models, cancel, priority, pause, resume")
+
+
+def jobs_cmd(cmd, a):
+    if cmd == "jobs":
+        rows = api("GET", "/v1/jobs", query={"status": opt(a, "--status")})["jobs"]
+        table(rows, ["job_id", "status", "face", "kind", "requested_model", "lane", "model", "class", "call", "key"]); return 0
+    sub = a.pop(0)
+    if sub == "cancel":
+        r = api("DELETE", f"/v1/jobs/{a.pop(0)}"); print(f"{r['job_id']}: {r['status']}"); return 0
+    print(json.dumps(api("GET", f"/v1/jobs/{sub}"), indent=1)); return 0

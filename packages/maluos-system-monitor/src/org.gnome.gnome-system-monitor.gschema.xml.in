@@ -102,6 +102,7 @@
         <choice value="resources"/>
         <choice value="processes"/>
         <choice value="disks"/>
+        <choice value="gpus"/>
       </choices>
       <default>'resources'</default>
       <summary>Saves the currently viewed tab

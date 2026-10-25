@@ -63,7 +63,13 @@ socket, and optionally installs Ollama and pulls models (ollama.install /
 ollama.pull in /etc/maluos/gateway.yaml or components.maluos-gateway.ollama
 in firstboot.yaml). Cloud rungs, budgets and alerts are in slices 3 and 4
 (docs/phase6-slice3-routing.md, phase6-slice4-operations.md); alert hooks go
-in /etc/maluos/alert-hooks.d.
+in /etc/maluos/alert-hooks.d. From 0.4.0 (Phase 13 G2) the gateway is also
+an inference node of the MaluOS network (docs/inference-node-api.md): the
+node API /node/v1 for the Sovereign LLM Manager, inference and node keys,
+the Anthropic face, async jobs, and the `remote` backend kind that pairs a
+desk with a shared GPU host (`maluctl gateway key issue`, `expose`,
+`backend add NAME URL --key`); the component also enrols the gateway's own
+principal user:maluos-gateway, which holds the pairing keys.
 
 ### maluos-agent (package maluos-agent, in maluos-server)
 

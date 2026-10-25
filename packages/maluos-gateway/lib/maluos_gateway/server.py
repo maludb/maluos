@@ -3,7 +3,7 @@
 tiers and aliases to backend models under the caller's policy, admission
 through the per-backend scheduler, streaming passthrough, a ledger row per
 call, live status, and the engine's model request queue drained as batch work."""
-import asyncio, collections, json, os, pwd, secrets, signal, socket, struct, sys, time
+import asyncio, collections, json, os, pwd, secrets, signal, socket, struct, sys, time, uuid
 import aiohttp, psycopg
 from aiohttp import web
 
@@ -13,6 +13,8 @@ from .db import Database
 from .ollama import OllamaBackend, BackendError, usage_from
 from .scheduler import Scheduler, Job, AdmissionError
 from .alerts import Alerts
+from .jobs import Jobs
+from . import node_api, anthropic_face
 
 
 def log(msg):
@@ -31,17 +33,23 @@ class Caller:
     def __init__(self, ref, linux_user=None, uid=None, process_ref=None, via="socket"):
         self.ref, self.linux_user, self.uid, self.process_ref, self.via = ref, linux_user, uid, process_ref, via
         self.enrolled, self.kind, self.scopes, self.operator, self.token_name = False, None, set(), False, None
+        self.token_kind, self.token_limits = None, {}     # G2: token (a principal's own), inference, node
 
     def as_dict(self):
         return {"principal": self.ref, "enrolled": self.enrolled, "kind": self.kind, "user": self.linux_user, "uid": self.uid,
-                "process": self.process_ref, "via": self.via, "operator": self.operator, "scopes": sorted(self.scopes)}
+                "process": self.process_ref, "via": self.via, "operator": self.operator, "scopes": sorted(self.scopes),
+                "token": self.token_name, "token_kind": self.token_kind}
 
 
 class Call:
     """One request through the gateway: who, what was asked, where it went."""
     __slots__ = ("id", "caller", "kind", "requested", "tier", "backend", "model", "reason", "cls", "route", "task", "hints",
                  "job", "t0", "queued_ms", "endpoint", "stream", "engine_request_id", "rungs", "rung", "keys", "attempts",
-                 "cost_est", "currency", "warnings")
+                 "cost_est", "currency", "warnings",
+                 "face", "mode", "async_job", "accepted_at", "started_at", "origin_request", "origin_node", "aio_task", "cancel_reason")
+
+    FACES = {"/v1/chat/completions": "openai", "/v1/embeddings": "openai", "/v1/messages": "anthropic", "/api/chat": "ollama", "/api/generate": "ollama",
+             "/api/embed": "ollama", "/api/embeddings": "ollama", "/api/show": "ollama", "engine:model_request": "engine"}
 
     def __init__(self, caller, kind, requested, hints, endpoint, stream):
         self.id = f"mg-{secrets.token_hex(6)}"
@@ -50,6 +58,11 @@ class Call:
         self.route, self.task, self.job, self.t0, self.queued_ms, self.engine_request_id = [], hints.get("task"), None, time.monotonic(), None, None
         self.rungs, self.rung, self.keys, self.attempts = [], None, {}, 0
         self.cost_est, self.currency, self.warnings = None, None, []
+        # G2: the node API's view of a call
+        self.face, self.mode, self.async_job = self.FACES.get(endpoint, "openai"), hints.get("mode") or "sync", hints.get("job")
+        self.accepted_at, self.started_at = time.time(), None
+        self.origin_request, self.origin_node = hints.get("origin_request"), hints.get("origin_node")
+        self.aio_task, self.cancel_reason = None, None
 
 
 def process_ref(pid):
@@ -185,6 +198,85 @@ class Gateway:
         self.alerts = Alerts(self)
         self.inflight_file = os.path.join(cfg.get("state_dir") or "/var/lib/maluos-gateway", "engine-inflight.json")
         self.inflight = set()
+        # G2: this node on the network (docs/inference-node-api.md)
+        self.node_id = self.load_node_id()
+        self.node_name = (cfg.get("node") or {}).get("name") or socket.gethostname()
+        self.manager_seen = None
+        self.calls = {}                 # call id -> Call, from admission to the ledger row (the queue's detail, cancel)
+        self.jobs = Jobs(self)
+        self._models_sig, self._catalog_seq = None, 0
+        self.runner, self.tcp_site, self.tcp_bound = None, None, None
+
+    def load_node_id(self):
+        path = os.path.join(self.cfg.get("state_dir") or "/var/lib/maluos-gateway", "node-id")
+        try:
+            with open(path) as f:
+                v = f.read().strip()
+            if v:
+                return v
+        except OSError:
+            pass
+        v = str(uuid.uuid4())
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                f.write(v + "\n")
+        except OSError as e:
+            log(f"node id not saved ({e}); this start uses {v}")
+        return v
+
+    def catalog_seq(self):
+        sig = tuple(sorted((b.name, n) for b in self.backends.values() for n in b.models)) + tuple(sorted(self.catalog.tiers)) + \
+              tuple(sorted((a["name"], a["backend"], a["model"]) for a in self.catalog.aliases)) if self.catalog else ()
+        if sig != self._models_sig:
+            self._models_sig = sig
+            self._catalog_seq += 1
+        return self._catalog_seq
+
+    # -- G2: the TCP listener, applied live from gateway.yaml (maluctl gateway expose)
+    async def apply_tcp(self):
+        tcp = self.cfg["tcp"]
+        want = (tcp.get("host", "127.0.0.1"), int(tcp.get("port", 11435))) if tcp.get("enabled") else None
+        if want == self.tcp_bound or not self.runner:
+            return
+        if self.tcp_site:
+            await self.tcp_site.stop()
+            log(f"tcp listener on {self.tcp_bound[0]}:{self.tcp_bound[1]} closed")
+            self.tcp_site = self.tcp_bound = None
+        if want:
+            site = web.TCPSite(self.runner, want[0], want[1])
+            try:
+                await site.start()
+            except OSError as e:
+                log(f"tcp listener on {want[0]}:{want[1]} failed: {e}")
+                return
+            self.tcp_site, self.tcp_bound = site, want
+            log(f"listening on tcp {want[0]}:{want[1]} (tokens required)")
+
+    def exposed(self):
+        b = self.tcp_bound
+        return {"enabled": bool(b), "host": b[0] if b else None, "port": b[1] if b else None,
+                "network": bool(b) and b[0] not in ("127.0.0.1", "::1", "localhost")}
+
+    async def remote_key(self, b):
+        """The pairing key of a remote backend, from the vault as the gateway itself (system/remote-<name>)."""
+        if b.key or time.time() - b.key_checked < 30:
+            return b.key
+        b.key_checked = time.time()
+        try:
+            from maluos_vault_client import Vault, VaultError
+        except ImportError:
+            log(f"remote {b.name}: no vault client module (maluos-vault)")
+            return None
+        try:
+            r = await asyncio.to_thread(Vault(self.cfg.get("vault_socket")).use, b.secret_ref, f"pairing key for {b.name}")
+            b.key = r["value"]
+            log(f"remote {b.name}: pairing key {b.secret_ref} loaded from the vault")
+        except VaultError as e:
+            log(f"remote {b.name}: no pairing key ({e.code}: {e.message[:80]})")
+        except Exception as e:
+            log(f"remote {b.name}: vault: {e.__class__.__name__}: {str(e)[:80]}")
+        return b.key
 
     # -- lifecycle
     async def start(self):
@@ -267,7 +359,11 @@ class Gateway:
                 self.backends[name].update(row)
             else:
                 self.backends[name] = make_backend(row, self.session)
-                self.spawn(self.backends[name].refresh())
+                if self.backends[name].is_remote:
+                    self.backends[name].node_id, self.backends[name].node_name = self.node_id, self.node_name
+                    self.spawn(self.remote_paired(self.backends[name]))
+                else:
+                    self.spawn(self.backends[name].refresh())
             self.backends[name].cooldown_s = float((self.cfg.get("health") or {}).get("cooldown_s") or 60)
             sch = self.schedulers.get(name)
             cap = self.backends[name].max_concurrent if not self.backends[name].is_cloud else int((row.get("capacity") or {}).get("max_concurrent") or 8)
@@ -279,13 +375,22 @@ class Gateway:
                 del self.backends[name]; self.schedulers.pop(name, None)
         self.catalog = cat
 
+    async def remote_paired(self, b):
+        await self.remote_key(b)
+        await b.refresh()
+
     async def catalog_loop(self):
         while True:
             await asyncio.sleep(float(self.cfg.get("catalog_reload_s") or 10))
             await self.reload_catalog()
+            node = self.cfg.get("node") or {}
+            self.jobs.prune(float(node.get("result_retention_hours") or 72) * 3600, int(node.get("max_finished_jobs") or 1000))
 
     async def health_loop(self):
         while True:
+            for b in list(self.backends.values()):
+                if b.is_remote and not b.key:
+                    await self.remote_key(b)
             await asyncio.gather(*(b.refresh() for b in list(self.backends.values())), return_exceptions=True)
             await asyncio.sleep(float((self.cfg.get("health") or {}).get("probe_s") or 10))
 
@@ -348,7 +453,7 @@ class Gateway:
             r = row[0]
             peer = request.transport.get_extra_info("peername") if request.transport else None
             c = Caller(r["principal_ref"], None, None, f"tcp:{peer[0]}" if peer else "tcp", "token")
-            c.token_name = r["name"]
+            c.token_name, c.token_kind, c.token_limits = r["name"], r.get("kind") or "token", r.get("limits") or {}
         await self.enrich(c)
         return c
 
@@ -390,6 +495,18 @@ class Gateway:
         if h["sensitivity"] and h["sensitivity"] not in SENS:
             raise ApiError(400, "bad_hint", f"sensitivity must be one of {', '.join(SENS)}")
         h["prefer"] = pick("X-MaluOS-Prefer", "prefer", lambda v: str(v).lower())
+        # G2: the node API's request fields (docs/inference-node-api.md §5, §6)
+        node = body.pop("node", None) if isinstance(body, dict) else None
+        node = node if isinstance(node, dict) else {}
+        for k in node:
+            if k not in ("mode", "tags"):
+                raise ApiError(400, "bad_node_field", f"unknown node.{k} (mode, tags)")
+        h["mode"] = request.headers.get("X-Node-Mode") or node.get("mode") or "sync"
+        if h["mode"] not in ("sync", "async"):
+            raise ApiError(400, "bad_mode", "node mode is sync or async")
+        h["tags"] = node.get("tags")
+        h["origin_request"] = request.headers.get("X-MaluOS-Origin-Request") or None
+        h["origin_node"] = request.headers.get("X-MaluOS-Origin-Node") or None
         return h
 
     def known_models(self):
@@ -421,6 +538,13 @@ class Gateway:
         call = Call(caller, kind, requested, hints, endpoint, stream)
         needs = needs or {}
         policy = cat.policy_for(caller.ref, caller.scopes)
+        # G2: a node key opens the node API only; an inference key over the network needs the sharing switch on
+        if caller.token_kind == "node":
+            await self.ledger_denied(call, "node_key", "a node key serves no inference")
+            raise ApiError(403, "node_key", "a node key opens /node/v1 only; inference needs an inference key")
+        if caller.via == "token" and caller.token_kind == "inference" and not self.share_state().get("enabled"):
+            await self.ledger_denied(call, "not_shared", "this host is not sharing its GPU")
+            raise ApiError(503, "not_shared", "this host is not sharing its GPU (sudo maluctl gateway share on)")
         cls = hints.get("class") or policy.get("default_class") or ("agent" if caller.kind == "agent" and "agent" in cat.classes else None) or cat.default_class()
         if cls not in cat.classes and cat.classes:
             await self.ledger_denied(call, "bad_class", f"unknown class {cls}")
@@ -454,6 +578,18 @@ class Gateway:
                 skip = "policy"
             elif b.healthy is False:
                 skip = "unhealthy"
+            elif b.is_remote:
+                # a paired node: not the cloud, but the data leaves the host (docs/inference-node-api.md §6)
+                if hints.get("local_only"):
+                    skip = "local_only"
+                elif call.origin_request:
+                    skip = "no_chain"
+                elif not policy.get("remote_allowed", True):
+                    skip = "remote_not_allowed"
+                elif SENS[req_sens] > SENS.get(egress, 1):
+                    skip = f"sensitivity:{req_sens}>{egress}"
+                elif not b.key and not await self.remote_key(b):
+                    skip = "no_credential"
             elif b.is_cloud:
                 if hints.get("local_only"):
                     skip = "local_only"
@@ -503,7 +639,7 @@ class Gateway:
         call.route, call.keys = rungs, keys
         if not eligible:
             reasons = {r.get("skipped", "").split(":")[0] for r in rungs}
-            policy_only = reasons <= {"policy", "cloud_not_allowed", "sensitivity", "no_credential", "local_only", "not_enrolled", "credential_locked", "credential_expired", "disabled", "prefer_local"}
+            policy_only = reasons <= {"policy", "cloud_not_allowed", "remote_not_allowed", "no_chain", "sensitivity", "no_credential", "local_only", "not_enrolled", "credential_locked", "credential_expired", "disabled", "prefer_local"}
             code = "policy" if policy_only else "backend_unavailable"
             if "vault_unavailable" in reasons:
                 code = "vault_unavailable"
@@ -598,13 +734,21 @@ class Gateway:
     async def admit(self, call):
         sch = self.schedulers[call.backend]
         call.job = Job(call.id, call.caller.ref, call.cls, call.model, call.kind)
+        mc = (call.caller.token_limits or {}).get("max_concurrent")
+        if mc:
+            sch.principal_limits[call.caller.ref] = int(mc)
+        self.calls[call.id] = call
+        call.aio_task = asyncio.current_task()
         t = time.monotonic()
         try:
             await sch.acquire(call.job, call.hints.get("max_wait"))
         except AdmissionError as e:
-            await self.ledger_denied(call, e.code, e.message, expected_wait=e.expected_wait)
+            await self.ledger_denied(call, e.code, e.message, expected_wait=e.expected_wait, status="error" if e.code == "cancelled" else "denied")
+            if e.code == "cancelled":
+                raise ApiError(409, "cancelled", e.message)
             raise ApiError(503, e.code, e.message, expected_wait_s=e.expected_wait, **{"class": call.cls}, retry_after_s=e.expected_wait)
         call.queued_ms = (call.queued_ms or 0) + int((time.monotonic() - t) * 1000)
+        call.started_at = time.time()
 
     def release(self, call, final=None, error=False):
         sch = self.schedulers.get(call.backend)
@@ -626,10 +770,24 @@ class Gateway:
                 "backend": call.backend, "model": call.model, "queue_wait_ms": call.queued_ms, "task_ref": call.task,
                 "purpose": call.endpoint, "cost_est": call.cost_est, "currency": call.currency}
 
+    def node_detail(self, call):
+        """G2: what the node API's run record needs beside the row's columns."""
+        d = {"request": call.id, "face": call.face, "mode": call.mode, "kind": call.kind}
+        if call.caller.token_name:
+            d["token"] = call.caller.token_name
+        if call.async_job:
+            d["job"] = call.async_job
+        if call.origin_request:
+            d["origin_request"], d["origin_node"] = call.origin_request, call.origin_node
+        if call.hints.get("tags"):
+            d["tags"] = call.hints["tags"]
+        self.calls.pop(call.id, None)
+        return d
+
     async def ledger_denied(self, call, reason, message, status="denied", expected_wait=None):
         row = self.base_row(call)
         row.update({"status": status, "reason": reason, "error_class": reason,
-                    "detail": {"message": message[:300], "expected_wait_s": expected_wait, "via": call.caller.via}})
+                    "detail": {"message": message[:300], "expected_wait_s": expected_wait, "via": call.caller.via, **self.node_detail(call)}})
         await self.ledger_write(row)
         self.routes.appendleft({"ts": time.time(), "id": call.id, "principal": call.caller.ref, "requested": call.requested,
                                 "class": call.cls, "route": call.route, "status": status, "reason": reason})
@@ -637,7 +795,7 @@ class Gateway:
     async def ledger_done(self, call, final=None, error=None, cancelled=False):
         row = self.base_row(call)
         elapsed_ms = int((time.monotonic() - call.t0) * 1000) - (call.queued_ms or 0)
-        detail = {"endpoint": call.endpoint, "stream": call.stream, "via": call.caller.via, "reason": call.reason}
+        detail = {"endpoint": call.endpoint, "stream": call.stream, "via": call.caller.via, "reason": call.reason, **self.node_detail(call)}
         if call.warnings:
             detail["warnings"] = call.warnings
         if call.engine_request_id:
@@ -653,7 +811,7 @@ class Gateway:
         else:
             row["service_ms"] = elapsed_ms
         if cancelled:
-            row.update({"status": "error", "error_class": "cancelled", "reason": "client_disconnected"})
+            row.update({"status": "error", "error_class": "cancelled", "reason": call.cancel_reason or "client_disconnected"})
         elif error is not None:
             row.update({"status": "error", "error_class": getattr(error, "error_class", None) or getattr(error, "code", None) or error.__class__.__name__,
                         "reason": str(getattr(error, "message", error))[:200]})
@@ -704,13 +862,14 @@ class Gateway:
             call.attempts += 1
             key = call.keys.get(call.backend)
             fwd = dict(body, model=call.model)
+            kw = {"call": call} if b.is_remote else {}
             try:
                 if stream:
-                    gen = b.stream(path, fwd, timeout_s, key=key)
+                    gen = b.stream(path, fwd, timeout_s, key=key, **kw)
                     first = await anext(gen)
                     rung["taken"] = True
                     return gen, first
-                res = await b.call(path, fwd, timeout_s, key=key)
+                res = await b.call(path, fwd, timeout_s, key=key, **kw)
                 rung["taken"] = True
                 self.release(call, res)
                 return res
@@ -746,6 +905,9 @@ class Gateway:
             raise ApiError(e.status if e.status in (401, 403, 404, 429, 503, 504) else 502, self.error_code(call, e), e.message, backend=call.backend, route=call.route)
         except asyncio.CancelledError:
             await self.ledger_done(call, cancelled=True)
+            if call.cancel_reason == "operator" and asyncio.current_task():
+                asyncio.current_task().uncancel()      # G2: cancelled through the node API, not by a disconnect: answer 409
+                raise ApiError(409, "cancelled", "cancelled by an operator")
             raise
         await self.ledger_done(call, res)
         return res
@@ -788,6 +950,15 @@ class Gateway:
         except (asyncio.CancelledError, ConnectionResetError, ConnectionError):
             self.release(call, error=True)
             await self.ledger_done(call, final, cancelled=True)
+            if call.cancel_reason == "operator" and asyncio.current_task():
+                asyncio.current_task().uncancel()
+                try:
+                    for out in on_error(BackendError(409, "cancelled by an operator", "cancelled")):
+                        await resp.write(out)
+                    await resp.write_eof()
+                except Exception:
+                    pass
+                return resp
             raise
         self.release(call, final, error=err is not None)
         await self.ledger_done(call, final, error=err)
@@ -799,7 +970,10 @@ class Gateway:
 
     def headers_for(self, call):
         return {"X-MaluOS-Route": f"{call.backend}/{call.model} ({call.reason})", "X-MaluOS-Request": call.id, "X-MaluOS-Class": call.cls,
-                "X-MaluOS-Attempts": str(call.attempts or 1)}
+                "X-MaluOS-Attempts": str(call.attempts or 1),
+                # G2: the node headers (docs/inference-node-api.md §5)
+                "X-Node-Id": self.node_id, "X-Node-Job-Id": call.id, "X-Node-Lane": call.backend or "", "X-Node-Served-Model": call.model or "",
+                "X-Node-Queue-Wait-Ms": str(call.queued_ms or 0)}
 
     # -- status
     def share_state(self):
@@ -817,7 +991,7 @@ class Gateway:
         ew = {}
         for cls in (self.catalog.classes if self.catalog else {}):
             ew[cls] = max([s["classes"].get(cls, {}).get("expected_wait_s", 0) for s in local] or [0])
-        return {"version": VERSION, "uptime_s": int(time.time() - self.started),
+        return {"version": VERSION, "uptime_s": int(time.time() - self.started), "node": {"id": self.node_id, "name": self.node_name}, "exposed": self.exposed(),
                 "backends": [b.status() for b in self.backends.values()],
                 "queue": {"queued": sum(s["queued"] for s in snaps.values()), "running": sum(s["running"] for s in snaps.values())},
                 "expected_wait_s": ew, "schedulers": snaps,
@@ -952,6 +1126,11 @@ def build_app(gw):
     r.add_post("/v1/embeddings", h_openai_embeddings)
     r.add_get("/v1/models", h_openai_models)
     r.add_get("/v1/models/{id:.+}", h_openai_model)
+    r.add_post("/v1/messages", h_anthropic_messages)          # G2: the Anthropic face
+    r.add_get("/v1/jobs", h_jobs)                              # G2: async jobs
+    r.add_get("/v1/jobs/{id}", h_job)
+    r.add_delete("/v1/jobs/{id}", h_job_cancel)
+    node_api.add_routes(r)                                     # G2: /node/v1
     r.add_post("/api/chat", h_ollama_chat)
     r.add_post("/api/generate", h_ollama_generate)
     r.add_post("/api/embed", h_ollama_embed)
@@ -1019,19 +1198,15 @@ async def h_openai_chat(request):
     obody = openai_to_ollama_chat(body)
     stream = bool(body.get("stream"))
     include_usage = bool((body.get("stream_options") or {}).get("include_usage"))
-    call = await gw.prepare(caller, "chat", requested, hints, "/v1/chat/completions", stream, needs=needs_of(obody))
     created, rid = int(time.time()), f"chatcmpl-{secrets.token_hex(10)}"
+    needs = needs_of(obody)
+    if hints.get("mode") == "async":
+        return await submit_async(gw, caller, "openai", "chat", requested, hints, "/v1/chat/completions", "/api/chat", obody, needs,
+                                  lambda call, res: openai_completion(call, res, rid, created))
+    call = await gw.prepare(caller, "chat", requested, hints, "/v1/chat/completions", stream, needs=needs)
     if not stream:
         res = await gw.execute(call, "/api/chat", obody)
-        msg = res.get("message") or {}
-        m = {"role": "assistant", "content": msg.get("content", "")}
-        if msg.get("tool_calls"):
-            m["tool_calls"] = openai_tool_calls(msg["tool_calls"])
-            if not m["content"]:
-                m["content"] = None
-        out = {"id": rid, "object": "chat.completion", "created": created, "model": call.model, "system_fingerprint": f"maluos/{call.backend}",
-               "choices": [{"index": 0, "message": m, "finish_reason": finish_reason(res)}], "usage": openai_usage(res)}
-        return web.json_response(out, headers=gw.headers_for(call))
+        return web.json_response(openai_completion(call, res, rid, created), headers=gw.headers_for(call))
     state = {"first": True}
 
     def chunk(delta, fin=None):
@@ -1061,6 +1236,98 @@ async def h_openai_chat(request):
     def on_error(e):
         return [sse({"error": {"message": e.message, "type": e.error_class, "code": e.error_class}}), b"data: [DONE]\n\n"]
     return await gw.stream(request, call, "/api/chat", obody, on_chunk, on_end, on_error, "text/event-stream")
+
+
+def openai_completion(call, res, rid, created):
+    msg = res.get("message") or {}
+    m = {"role": "assistant", "content": msg.get("content", "")}
+    if msg.get("tool_calls"):
+        m["tool_calls"] = openai_tool_calls(msg["tool_calls"])
+        if not m["content"]:
+            m["content"] = None
+    return {"id": rid, "object": "chat.completion", "created": created, "model": call.model, "system_fingerprint": f"maluos/{call.backend}",
+            "choices": [{"index": 0, "message": m, "finish_reason": finish_reason(res)}], "usage": openai_usage(res)}
+
+
+# -- G2: async jobs on every face
+async def submit_async(gw, caller, face, kind, requested, hints, endpoint, path, body, needs, shape):
+    hints = dict(hints, mode="async")
+
+    async def runner(job):
+        h = dict(hints, job=job["id"])
+        call = await gw.prepare(caller, kind, requested, h, endpoint, False, needs=needs)
+        job["call"] = call
+        res = await gw.execute(call, path, body)
+        return shape(call, res)
+    job = gw.jobs.submit(caller, face, kind, requested, runner)
+    await asyncio.sleep(0)      # let the task reach admission, so the answer can carry the queue position
+    d = gw.jobs.describe(job, with_result=False)
+    return web.json_response(d, status=202, headers={"X-Node-Id": gw.node_id, "X-Node-Job-Id": job["id"]})
+
+
+def own_job(gw, caller, jid):
+    job = gw.jobs.jobs.get(jid)
+    if not job or not (caller.operator or job["principal"] == caller.ref):
+        raise ApiError(404, "not_found", f"no job {jid}")
+    return job
+
+
+async def h_jobs(request):
+    gw = request.app["gw"]
+    caller = await gw.caller(request)
+    want = request.query.get("status")
+    rows = [gw.jobs.describe(j, with_result=False) for j in gw.jobs.jobs.values() if caller.operator or j["principal"] == caller.ref]
+    return web.json_response({"jobs": [r for r in rows if not want or r["status"] == want]})
+
+
+async def h_job(request):
+    gw = request.app["gw"]
+    caller = await gw.caller(request)
+    return web.json_response(gw.jobs.describe(own_job(gw, caller, request.match_info["id"])), headers={"X-Node-Id": gw.node_id})
+
+
+async def h_job_cancel(request):
+    gw = request.app["gw"]
+    caller = await gw.caller(request)
+    job = own_job(gw, caller, request.match_info["id"])
+    cancelled = gw.jobs.cancel(job, "operator" if caller.operator and job["principal"] != caller.ref else "the caller")
+    await asyncio.sleep(0)
+    return web.json_response({"job_id": job["id"], "cancelled": cancelled, "status": gw.jobs.status(job)})
+
+
+# -- G2: the Anthropic Messages face
+async def h_anthropic_messages(request):
+    gw = request.app["gw"]
+    try:
+        return await anthropic_messages(request, gw)
+    except ApiError as e:
+        return web.json_response(anthropic_face.error_body(e.status, e.code, e.message), status=e.status)
+
+
+async def anthropic_messages(request, gw):
+    caller = await gw.caller(request)
+    body = await read_json(request)
+    hints = gw.hints(request, body)
+    if not body.get("messages"):
+        raise ApiError(400, "bad_request", "messages is required")
+    if body.get("max_tokens") is None:
+        raise ApiError(400, "bad_request", "max_tokens is required")
+    requested = body.get("model") or ("standard" if "standard" in gw.catalog.tiers else None)
+    obody, refused = anthropic_face.to_ollama(body)
+    if refused:
+        raise ApiError(400, "unsupported", refused)
+    stream = bool(body.get("stream"))
+    msg_id = f"msg_{secrets.token_hex(12)}"
+    needs = needs_of(obody)
+    if hints.get("mode") == "async":
+        return await submit_async(gw, caller, "anthropic", "chat", requested, hints, "/v1/messages", "/api/chat", obody, needs,
+                                  lambda call, res: anthropic_face.message(res, call.model, msg_id, finish_reason(res)))
+    call = await gw.prepare(caller, "chat", requested, hints, "/v1/messages", stream, needs=needs)
+    if not stream:
+        res = await gw.execute(call, "/api/chat", obody)
+        return web.json_response(anthropic_face.message(res, call.model, msg_id, finish_reason(res)), headers=gw.headers_for(call))
+    st = anthropic_face.Stream(call.model, msg_id, finish_reason)
+    return await gw.stream(request, call, "/api/chat", obody, st.on_chunk, st.on_end, st.on_error, "text/event-stream")
 
 
 async def h_openai_embeddings(request):
@@ -1134,6 +1401,8 @@ async def ollama_passthrough(request, kind, path, endpoint, required):
     requested = body.get("model")
     stream = body.get("stream", True) if kind != "embed" else False
     fwd = {k: v for k, v in body.items() if k not in ("model", "stream")}
+    if hints.get("mode") == "async":
+        return await submit_async(gw, caller, "ollama", kind, requested, hints, endpoint, path, fwd, needs_of(fwd), lambda call, res: res)
     call = await gw.prepare(caller, kind, requested, hints, endpoint, bool(stream), needs=needs_of(fwd))
     if not stream:
         res = await gw.execute(call, path, fwd)
@@ -1284,10 +1553,14 @@ async def h_reload(request):
     need_operator(await gw.caller(request))
     gw.cfg.reload()
     await gw.reload_catalog()
+    await gw.apply_tcp()
     for b in gw.backends.values():
         b.cooldown_until = 0
+        if b.is_remote:
+            b.key, b.key_checked = None, 0            # re-read the pairing key now (backend add --key)
+            await gw.remote_key(b)
     await asyncio.gather(*(b.refresh() for b in gw.backends.values()), return_exceptions=True)
-    return web.json_response({"reloaded": True, "backends": list(gw.backends)})
+    return web.json_response({"reloaded": True, "backends": list(gw.backends), "exposed": gw.exposed()})
 
 
 async def h_warm(request):
@@ -1343,15 +1616,14 @@ async def main(argv):
             os.remove(path)
         sites.append(web.UnixSite(runner, path))
         log(f"listening on {path}")
-    tcp = cfg["tcp"]
     if args.tcp:
         host, port = args.tcp.rsplit(":", 1)
         sites.append(web.TCPSite(runner, host, int(port))); log(f"listening on tcp {host}:{port} (tokens required)")
-    elif tcp.get("enabled"):
-        sites.append(web.TCPSite(runner, tcp.get("host", "127.0.0.1"), int(tcp.get("port", 11435))))
-        log(f"listening on tcp {tcp.get('host', '127.0.0.1')}:{tcp.get('port', 11435)} (tokens required)")
     for s in sites:
         await s.start()
+    gw.runner = runner
+    if not args.tcp:
+        await gw.apply_tcp()       # G2: from gateway.yaml, and again on every reload (maluctl gateway expose)
     if not fds and not args.socket:
         pass
     if args.socket or not fds:

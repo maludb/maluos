@@ -1,3 +1,16 @@
+maluos-system-monitor (49.1+maluos.2) resolute; urgency=medium
+
+  * The self-test no longer fails while a GetState call is still in flight:
+    on a slow machine (the boot test under TCG) the window's first paint held
+    the main loop past the 20 s deadline and the timer fired before the
+    reply was dispatched. The deadline is now 60 s, a pending call is always
+    waited for (the call's own 30 s timeout ends it), a refused call fails
+    the test at once, and the FAIL line carries the D-Bus error.
+  * The gsettings schema accepts `gpus` for current-tab, so the GPUs tab is
+    remembered like the others (no "outside of valid range" warning).
+
+ -- Edward Honour <ed@maludb.org>  Sun, 25 Oct 2026 20:30:00 +0000
+
 maluos-system-monitor (49.1+maluos.1) resolute; urgency=medium
 
   * GNOME System Monitor 49.1 (Ubuntu 26.04's 49.1-2 packaging) forked for
