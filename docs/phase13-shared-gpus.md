@@ -218,8 +218,9 @@ Answered by the owner 2026-10-25 unless marked open.
 ## Status
 
 **G1 built 2026-10-25** (packages, unit tests and the local self-test pass
-on the dev host; the image boot test and the desktop image rebuild are the
-next step):
+on the dev host; both profiles' images rebuilt and their UEFI boot tests
+passed the same day, after a fix to the fork's self-test, 49.1+maluos.2,
+whose deadline fired while the first paint held the main loop under TCG):
 
 - maluos-firstboot 0.1.10: `/usr/lib/maluos/maluos_gpu.py` (NVIDIA through
   nvidia-smi with a retry for an older binary without `compute_cap`; AMD and
