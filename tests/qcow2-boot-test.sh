@@ -440,7 +440,8 @@ export GNUPGHOME=$HOME/.gnupg-cat; mkdir -p "$GNUPGHOME" ~/cat && chmod 700 "$GN
 gpg --batch --quiet --passphrase '' --quick-gen-key "Boot Test Catalogue <cat@test.invalid>" default default never >/dev/null 2>&1 && gpg --batch --export > ~/cat/keyring.gpg
 printf '{"schema": 1, "apps": [{"id": "pubtool", "name": "Public Tool", "description": "a public app", "kind": "web", "url": "https://example.invalid/tool", "version": "1"}]}' > ~/cat/catalog.json
 gpg --batch --quiet --passphrase '' --armor --detach-sign -o ~/cat/catalog.json.asc ~/cat/catalog.json; unset GNUPGHOME
-systemd-run --user --quiet --unit boot-test-catalog python3 -m http.server 18081 --bind 127.0.0.1 --directory "$HOME/cat" 2>/dev/null; sleep 1
+systemd-run --user --quiet --unit boot-test-catalog python3 -m http.server 18081 --bind 127.0.0.1 --directory "$HOME/cat" 2>/dev/null
+for i in $(seq 1 30); do curl -fsS --max-time 2 http://127.0.0.1:18081/catalog.json >/dev/null 2>&1 && break; sleep 1; done   # the server takes a few seconds to listen under TCG
 catapps() { MALUOS_APPS_PUBLIC_URL=http://127.0.0.1:18081/catalog.json MALUOS_APPS_KEYRING=$HOME/cat/keyring.gpg maluctl office apps --json --compact --refresh 2>/dev/null; }
 catapps | python3 -c "import json,sys; c=json.load(sys.stdin); a=[x for x in c['apps'] if x['id']=='pubtool']; assert a and a[0]['source']=='public' and a[0]['available'] and not c.get('errors'), (c.get('errors'), [x['id'] for x in c['apps']]); print('  ok   a public catalogue with a good signature is accepted (gpgv against the keyring)')" || { echo "  FAIL signed catalogue: $(catapps | head -c 300)"; fail=1; }
 sed -i 's/Public Tool/Evil Tool/' ~/cat/catalog.json
@@ -458,8 +459,11 @@ curl -fsS --max-time 5 http://127.0.0.1:18080/mock/state | python3 -c "import js
 ! sudo -n -u edward maluctl gateway chat "x" --model office >/dev/null 2>&1 && echo "  ok   another user cannot use the desk's office rung (no token, no delegation)" || { echo "  FAIL ungranted office use"; fail=1; }
 # slice 9: that refusal filed a grant request for the owner with its cause (the call), the owner decides it with parameters
 maluctl secret requests | grep -E 'office-desk-token +user:edward +use .* office@office' >/dev/null && echo "  ok   the gateway's refused lookup filed a request for user:maluos from user:edward with its cause (--model office)" || { echo "  FAIL request with cause: $(maluctl secret requests 2>&1 | tail -2)"; fail=1; }
-gdbus call --session --dest com.maluos.Session --object-path /com/maluos/Session --method com.maluos.Session1.Refresh >/dev/null 2>&1; sleep 4
-crid=$(state | python3 -c "import json,sys; s=json.load(sys.stdin); r=[x for x in s['vault'].get('requests') or [] if x['requester']=='user:edward' and x['mine_to_decide'] and (x.get('cause') or {}).get('model')=='office' and x['cause'].get('backend')=='office' and x['cause'].get('call')]; print(r[0]['id'] if r else '')")
+gdbus call --session --dest com.maluos.Session --object-path /com/maluos/Session --method com.maluos.Session1.Refresh >/dev/null 2>&1
+for i in $(seq 1 10); do   # the refresh runs in the session's thread; under TCG it can take more than a few seconds
+  crid=$(state | python3 -c "import json,sys; s=json.load(sys.stdin); r=[x for x in s['vault'].get('requests') or [] if x['requester']=='user:edward' and x['mine_to_decide'] and (x.get('cause') or {}).get('model')=='office' and x['cause'].get('backend')=='office' and x['cause'].get('call')]; print(r[0]['id'] if r else '')")
+  [ -n "$crid" ] && break; sleep 3
+done
 [ -n "$crid" ] && echo "  ok   session state: request #$crid carries its cause (model office, backend office, the call id)" || { echo "  FAIL cause in state: $(state | python3 -c 'import json,sys; print(json.load(sys.stdin)["vault"].get("requests"))' | head -c 300)"; fail=1; }
 sleep 2; sudo -n journalctl -b --no-pager _SYSTEMD_USER_UNIT=maluos-desktop-session.service 2>/dev/null | grep -q 'notify: Principal edward asks for user:maluos/office-desk-token — for --model office (office) at ' && echo "  ok   notification names the call: for --model office (office) at HH:MM" || { echo "  FAIL cause notification"; sudo -n journalctl -b --no-pager _SYSTEMD_USER_UNIT=maluos-desktop-session.service | grep 'notify: Principal' | tail -2; fail=1; }
 [ -n "$crid" ] && gdbus call --session --dest com.maluos.Session --object-path /com/maluos/Session --method com.maluos.Session1.RequestDecide "$crid" approve '{"expires": "30d", "level": "use", "budget": {"usd_per_day": 10}}' | grep -q approved && echo "  ok   RequestDecide with parameters (use, a month, 10 USD/day) over the session bus" || { echo "  FAIL RequestDecide with parameters"; fail=1; }

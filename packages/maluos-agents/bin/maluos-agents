@@ -368,7 +368,7 @@ def run_gui(argv, selected, self_test):
             self.win = Window(self)
             self.win.present()
             if self_test:
-                GLib.timeout_add(90000, lambda: (print("self-test FAIL: the UI did not report ready within 90 s", file=sys.stderr), self.quit()) and False)
+                GLib.timeout_add(240000, lambda: (print("self-test FAIL: the UI did not report ready within 240 s", file=sys.stderr), self.quit()) and False)
 
         def set_state(self, text, push=True):
             try:
