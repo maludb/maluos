@@ -9,6 +9,7 @@ Before=getty.target
 
 [Service]
 Type=simple
+ExecStartPre=-/usr/bin/dmesg --console-level 1
 ExecStart=/usr/bin/maluos-install
 StandardInput=tty
 StandardOutput=tty

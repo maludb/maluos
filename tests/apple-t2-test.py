@@ -96,6 +96,22 @@ class Package(unittest.TestCase):
         live = open(os.path.join(ROOT, "image/profiles/live.pkgs")).read()
         self.assertIn("apple-bce-dkms", live)
 
+    def test_catalogue_offline_flag(self):
+        with tempfile.TemporaryDirectory() as d:
+            off = os.path.join(d, "offline.txt"); open(off, "w").write("maluos-apple-t2\n")
+            man = os.path.join(d, "manifest"); open(man, "w").write("maluos-server\t0.2.10\n")
+            args = [sys.executable, os.path.join(ROOT, "iso/catalog.py"), os.path.join(ROOT, "seeds"),
+                    os.path.join(ROOT, "packages/maluos-meta/debian/descriptions"), "/dev/null", man]
+            out = subprocess.run(args + [off], capture_output=True, text=True, check=True).stdout
+            entries = {}
+            for block in out.split("  - name: ")[1:]:
+                name = block.split("\n")[0].strip(); entries[name] = block
+            self.assertIn("offline: true", entries["maluos-apple-t2"])
+            self.assertIn("offline: false", entries["maluos-api"])
+            self.assertIn("offline: true", entries["maluos-server"])        # in the image
+            out2 = subprocess.run(args, capture_output=True, text=True, check=True).stdout
+            self.assertNotIn("offline: false", out2)                       # no list: everything offline
+
     def test_vendor_checksums(self):
         vdir = os.path.join(ROOT, "vendor/apple-t2")
         import hashlib, re

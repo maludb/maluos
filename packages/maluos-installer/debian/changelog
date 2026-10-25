@@ -1,3 +1,14 @@
+maluos-installer (0.3.2) resolute; urgency=medium
+
+  * From the first MacBookPro15,1 round: a retry after a failed configure
+    no longer refuses the disk for the installer's own /target mounts; a
+    component the medium cannot install offline (catalogue offline: false)
+    is refused at the check and on the Components screen instead of failing
+    in apt; the console unit lowers the kernel's console log level so
+    driver messages stay off the screens.
+
+ -- Edward Honour <ed@maludb.org>  Sun, 25 Oct 2026 05:10:00 +0000
+
 maluos-installer (0.3.1) resolute; urgency=medium
 
   * engine.run: the environment merge raised TypeError when a step passed

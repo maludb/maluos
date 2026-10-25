@@ -35,6 +35,10 @@ def check(ctx):
             for c in comps["install"] + comps["remove"]:
                 if c not in names:
                     errs.append(f"component {c!r} is not on this medium (catalogue: {', '.join(sorted(names))})")
+            for c in comps["install"]:
+                entry = next((e for e in cat if e["name"] == c), None)
+                if entry is not None and entry.get("offline") is False and not entry.get("in_image"):
+                    errs.append(f"component {c} needs the network: this medium does not carry its Ubuntu packages (leave it out; `apt install {c}` on the installed system)")
     ap = ctx.facts.get("apple") or {}
     if ap.get("t2"):
         entry = next((c for c in (cat or []) if c["name"] == APPLE_COMPONENT), None)
@@ -43,6 +47,8 @@ def check(ctx):
                      "the installed system will have no internal keyboard, trackpad or audio")
         elif APPLE_COMPONENT in comps["remove"]:
             ctx.warn(f"Apple {ap.get('model')}: the plan removes {APPLE_COMPONENT}; the internal keyboard, trackpad and audio will not work")
+        elif entry.get("offline") is False and not entry.get("in_image"):
+            ctx.warn(f"Apple {ap.get('model')}: this medium does not carry {APPLE_COMPONENT}'s Ubuntu packages; the component is not added (the medium was built without its pool)")
         elif APPLE_COMPONENT not in comps["install"] and not entry.get("in_image"):
             comps["install"].append(APPLE_COMPONENT)
             ctx.info(f"Apple {ap.get('model')} with the T2 chip: the {APPLE_COMPONENT} component is added (keyboard, trackpad, Touch Bar, audio, firmware import)")

@@ -105,8 +105,13 @@ mkdir -p "$S/maluos/apt"; cp -rL "$MALUOS_PUBLISH_ROOT"/{dists,pool,bootstrap} "
 sed -e "s|@MALUOS_SUITE@|$MALUOS_SUITE|g" "$ROOT/packages/maluos-archive/sources/pgdg.sources.in" > "$S/maluos/pgdg.sources"
 # the Apple T2 round: the Ubuntu packages the apple-t2 component needs beyond the image, and the script for macOS
 if [ "${MALUOS_NO_EXTRA_POOL:-0}" = 1 ]; then echo "   extra pool skipped (MALUOS_NO_EXTRA_POOL=1): the apple-t2 component will not install offline"
-else python3 "$ROOT/iso/extra-pool.py" --manifest "$IMG/maluos-$PROFILE.manifest" --squashfs "$TARGET" --out "$S/maluos/apt/extra" \
-        --index "$S/maluos/apt/dists/$MALUOS_SUITE/$MALUOS_COMPONENT/binary-amd64/Packages" --seed "$ROOT/seeds/apple-t2.seed" | sed 's/^/   /'
+else
+    # every component of the catalogue that the image lacks; the Apple one is required
+    # (the desktop component stays off the server medium's pool: Firefox comes from Mozilla's repository, which
+    # needs the network; the catalogue marks it so)
+    COMPS=$(for f in "$ROOT"/seeds/*.seed; do n=$(basename "$f" .seed); case "$n" in base|live|desktop) ;; *) grep -q "^maluos-$n\s" "$IMG/maluos-$PROFILE.manifest" || echo "maluos-$n";; esac; done)
+    python3 "$ROOT/iso/extra-pool.py" --manifest "$IMG/maluos-$PROFILE.manifest" --squashfs "$TARGET" --repo "$S/maluos/apt" --out "$S/maluos/apt/extra" \
+        --require maluos-apple-t2 $COMPS | sed 's/^/   /'
 fi
 mkdir -p "$S/maluos/apple"; cp "$ROOT/packages/maluos-apple-t2-support/share/firmware.sh" "$S/maluos/apple/firmware.sh"
 cat > "$S/maluos/apple/README.txt" <<'TXT'
@@ -128,7 +133,7 @@ echo "== plans and catalogue"
 rm -f "$S/maluos/plan/.keep"
 cp "$ROOT/iso/plans/$PROFILE-unattended.yaml" "$S/maluos/plan/$PROFILE-unattended.yaml"
 python3 "$ROOT/iso/catalog.py" "$ROOT/seeds" "$ROOT/packages/maluos-meta/debian/descriptions" \
-    "$S/maluos/apt/dists/$MALUOS_SUITE/$MALUOS_COMPONENT/binary-amd64/Packages" "$IMG/maluos-$PROFILE.manifest" > "$S/maluos/catalog.yaml"
+    "$S/maluos/apt/dists/$MALUOS_SUITE/$MALUOS_COMPONENT/binary-amd64/Packages" "$IMG/maluos-$PROFILE.manifest" "$S/maluos/apt/extra/offline.txt" > "$S/maluos/catalog.yaml"
 if [ $TESTINSTALL = 1 ] || [ $TESTSSH = 1 ]; then
     # the test plan: the unattended plan with the test key, the SSH server on, the serial console, telemetry off;
     # no forced password change (sshd refuses a non-interactive command for an expired password, and the test

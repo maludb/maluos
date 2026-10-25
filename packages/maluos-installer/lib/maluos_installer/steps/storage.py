@@ -203,7 +203,7 @@ def check(ctx):
     ctx.state["storage"] = layout
     errs = list(layout["errors"])
     d = layout["disk_info"]
-    if d.get("in_use") and layout["mode"] == "disk":
+    if d.get("in_use") and layout["mode"] == "disk" and _foreign_mounts(ctx, d["path"]):
         errs.append(f"{d['path']} has mounted filesystems; unmount them first (the live system must not be using the target)")
     if layout["mode"] == "free" and ctx.facts.get("firmware") != "uefi":
         errs.append("storage.target free installs beside the existing systems on UEFI only (no BIOS boot partition is made), but the live environment booted with BIOS firmware")
@@ -219,6 +219,21 @@ def check(ctx):
     if not errs:
         ctx.info(describe(layout))
     return errs
+
+
+def _foreign_mounts(ctx, disk):
+    """Mount points on the disk that are not the installer's own /target (a retry after a failed configure
+    finds the target still mounted; that is ours to reuse or redo, not a reason to refuse)."""
+    if ctx.dry_run:
+        return []
+    out = disksmod.sh("lsblk", "-rno", "MOUNTPOINTS", disk)
+    mounts = []
+    for line in out.splitlines():
+        for mp in line.split("\\x0a"):
+            mp = mp.strip()
+            if mp and mp != "[SWAP]" and not (mp == ctx.target or mp.startswith(ctx.target.rstrip("/") + "/")):
+                mounts.append(mp)
+    return mounts
 
 
 def summary(ctx):

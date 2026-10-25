@@ -6,4 +6,4 @@ engine.py   runs the steps in order, keeps the journal, emits events, resumes
 steps/      storage, unpack, configure, bootloader, finish: plan(ctx), check(ctx), apply(ctx), summary(ctx)
 telemetry.py  the one report, built from facts and the journal, sent only when the plan says so
 """
-VERSION = "0.3.1"
+VERSION = "0.3.2"

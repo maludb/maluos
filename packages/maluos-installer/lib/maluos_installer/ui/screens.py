@@ -400,12 +400,17 @@ class Components(Screen):
         for c in self.catalog:
             state = (c["name"] in wanted) or (c.get("in_image") and c["name"] not in removed) \
                 or (t2 and c["name"] == "maluos-apple-t2" and c["name"] not in removed)
-            box = Check(f"{c['name']}  ({'in the image' if c.get('in_image') else str(c.get('size_mb', 0)) + ' MB from the medium'})", state=bool(state))
+            where = "in the image" if c.get("in_image") else (f"{c.get('size_mb', 0)} MB from the medium" if c.get("offline", True) else "not on this medium: needs the network, after the install")
+            box = Check(f"{c['name']}  ({where})", state=bool(state) and (c.get("offline", True) or bool(c.get("in_image"))))
             box.component = c
             self.boxes.append(box)
             lines.append(box)
             lines.append(text(f"      {c.get('title', '')}: {c.get('description', '')}"[:400], "dim"))
         return lines
+
+    def validate(self):
+        bad = [b.component["name"] for b in self.boxes if b.state and not b.component.get("in_image") and b.component.get("offline") is False]
+        return [f"{', '.join(bad)}: not on this medium; install it on the installed system with apt and the network"] if bad else []
 
     def apply(self):
         install, remove = [], []

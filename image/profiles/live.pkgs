@@ -20,5 +20,6 @@ zstd
 maluos-apple-t2-support
 apple-bce-dkms
 bcm5974-t2
+applesmc-t2
 dkms
 linux-headers-generic
