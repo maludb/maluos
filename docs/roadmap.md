@@ -77,11 +77,26 @@ owner. Each slice ends with its test on the three-machine proof.
 |---|---|---|---|---|---|
 | D1 | 1 Nodes and the operator's view: node identity, enrolment of servers, the Estate page on the Desk | specified (docs/phase13-slice1-nodes.md) | L | nothing | new package maluos-estate; the kernel half (db/188, the estate endpoints) needs the owner's approval first |
 | D2 | 2 The agent directory and delegation: Agent HR registration, the A2A task endpoint on every node with the authorisation envelope, the desk's personal agent, operator actions on remote nodes | specified (docs/phase13-slice2-delegation.md) | L | D1, C2 | nodes pull their tasks from the coordinator; the envelope is verified on the agent's host; the kernel half (db/189) needs the owner's approval first |
-| D3 | 3 Shared inference: the gateway as a backend for other nodes, admission control, desk contribution opt-in | planned | L | D1 | |
+| D3 | 3 Shared inference: the gateway as a backend for other nodes, admission control, desk contribution opt-in | planned; specified as G1-G5 below | L | D1 | |
 | D4 | 4 Federated memory: personal, departmental and enterprise memory over the existing scopes; the memory endpoint real | planned | L | D1 | the Agents app's Memory page waits for this |
 | D5 | 5 Events and durable work | planned | L | D2 | |
 | D6 | 6 Skills, resilience, federation between estates | planned | L | D2 to D5 | |
 | D7 | The three-machine proof | planned | M | each slice | |
+
+Shared GPUs (docs/phase13-shared-gpus.md, decided with the owner
+2026-10-25): a GPU on a networked MaluOS device served to the LAN through
+the gateway, managed by the Sovereign LLM Manager through one node API,
+shown in a forked System Manager. Community first; G4 is the paid
+`scheduler` later. A DGX Spark is arm64 and joins as a non-MaluOS node;
+an RTX x86 box is the MaluOS case.
+
+| # | Slice | Status | Effort | Depends on | Notes |
+|---|---|---|---|---|---|
+| G1 | GPU facts: the `nvidia` component, `maluctl gpu status --json` (NVML, amdgpu/i915 sysfs), `gpus` in the session's host state and the D1 report; the fork of gnome-system-monitor 49.1 as maluos-system-monitor with the GPUs tab (local half: live GPUs, the sharing switch, the contribution rule by chassis) | planned | M + M | nothing | tabs logic-free: JSON over D-Bus from the session, `maluctl` for actions |
+| G2 | The node API on the gateway (`/node/v1` status, health, queue with cancel/priority/pause, runs with `since_seq`, models, keys), async jobs, the Anthropic face; `maluctl gateway expose` and `key issue`; the `remote` backend kind and `backend add URL --key` on a desk | planned | L | G1 for the facts | docs/inference-node-api.md (surface 1, lifted from the server design §6) written first; pairing by hand, no coordinator |
+| G3 | The node service's faces in maluos-local-llm-server so the Mac and the DGX Spark speak the same API | planned | L | G2's API document | the owner's other repository |
+| G4 | Phase 13 slice 3 proper: `inference` facts in the heartbeat, `endpoints.inference` to desks, backends from the directory, the envelope on remote requests, admission estate-wide; servers share always, dedicated desktops opt-in, laptops opt-in and idle only | planned, paid `scheduler` in a later release | L | D1, D2, G2 | = D3; settles F5 for inference and F6 |
+| G5 | The MaluOS Network and Queue tabs in the fork: the local queue with cancel and priority, the Estate page's data, the estate's queue snapshot and operator actions | planned | M | G2 (local half); D1, D2 (estate half) | "Open in Sovereign LLM Manager" for history, usage, keys, policies |
 
 ## E. Phase 11, the installer, and the rest
 
@@ -103,8 +118,8 @@ owner. Each slice ends with its test on the three-machine proof.
 | F2 | Which key signs the public apps catalogue: the release key, taken by default in slice 9 (a separate key would need maluos-keyring to ship it) | docs/phase12-desktop.md, slice 9 status | nothing now |
 | F3 | Lid switch behaviour with the new power defaults | docs/phase12-desktop.md, slice 7 | nothing yet |
 | F4 | Office catalogue location in the kernel (which table decides what desks see) | docs/desk-enrolment.md | C1 |
-| F5 | Edition boundary for estate features | docs/phase13-estate.md, open questions | E4 |
-| F6 | Desk inference contribution rules | docs/phase13-estate.md, open questions | D3 |
+| F5 | Edition boundary for estate features | docs/phase13-estate.md, open questions; for inference decided 2026-10-25 (Community G1-G3, G5; paid `scheduler` G4), docs/phase13-shared-gpus.md | E4 |
+| F6 | Desk inference contribution rules | decided 2026-10-25: servers always, dedicated desktops opt-in, laptops opt-in and idle only (docs/phase13-shared-gpus.md) | nothing |
 | F7 | Phase 13 slice 3 before 4, or 4 before 3 | docs/phase13-estate.md, open questions | D3, D4 |
 | F8 | Pricing and editions | docs/phase9-editions.md | E4 |
 
