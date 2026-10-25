@@ -92,7 +92,7 @@ an RTX x86 box is the MaluOS case.
 
 | # | Slice | Status | Effort | Depends on | Notes |
 |---|---|---|---|---|---|
-| G1 | GPU facts: the `nvidia` component, `maluctl gpu status --json` (NVML, amdgpu/i915 sysfs), `gpus` in the session's host state and the D1 report; the fork of gnome-system-monitor 49.1 as maluos-system-monitor with the GPUs tab (local half: live GPUs, the sharing switch, the contribution rule by chassis) | planned | M + M | nothing | tabs logic-free: JSON over D-Bus from the session, `maluctl` for actions |
+| G1 | GPU facts: the `nvidia` component, `maluctl gpu status --json` (NVML, amdgpu/i915 sysfs), `gpus` in the session's host state and the D1 report; the fork of gnome-system-monitor 49.1 as maluos-system-monitor with the GPUs tab (local half: live GPUs, the sharing switch, the contribution rule by chassis) | built 2026-10-25 (docs/phase13-shared-gpus.md, Status); the boot test and the desktop image rebuild are next | M + M | nothing | tabs logic-free: JSON over D-Bus from the session, `maluctl` for actions |
 | G2 | The node API on the gateway (`/node/v1` status, health, queue with cancel/priority/pause, runs with `since_seq`, models, keys), async jobs, the Anthropic face; `maluctl gateway expose` and `key issue`; the `remote` backend kind and `backend add URL --key` on a desk | planned | L | G1 for the facts | docs/inference-node-api.md (surface 1, lifted from the server design §6) written first; pairing by hand, no coordinator |
 | G3 | The node service's faces in maluos-local-llm-server so the Mac and the DGX Spark speak the same API | planned | L | G2's API document | the owner's other repository |
 | G4 | Phase 13 slice 3 proper: `inference` facts in the heartbeat, `endpoints.inference` to desks, backends from the directory, the envelope on remote requests, admission estate-wide; servers share always, dedicated desktops opt-in, laptops opt-in and idle only | planned, paid `scheduler` in a later release | L | D1, D2, G2 | = D3; settles F5 for inference and F6 |
@@ -123,12 +123,12 @@ an RTX x86 box is the MaluOS case.
 | F7 | Phase 13 slice 3 before 4, or 4 before 3 | docs/phase13-estate.md, open questions | D3, D4 |
 | F8 | Pricing and editions | docs/phase9-editions.md | E4 |
 
-## G. Housekeeping
+## H. Housekeeping
 
 | # | Task | Status | Notes |
 |---|---|---|---|
-| G1 | Proxmox host memory: balloon floors on the other VMs, KSM check | with the owner | commands given 2026-10-23; the dev VM has its cap and floor |
-| G2 | Cloudflare transform rule for download.maluos.com | with the owner | from the Phase 10 release work |
-| G3 | packages/maluos-meta/debian/docs/claude-log/ out of the repo | done | A8 |
-| G4 | Lintian back on in the local package build (SKIP_LINTIAN=1 since slice 7 because of maludb-os-core's node_modules) | idea | exclude that package from lintian instead |
-| G5 | Memory notes and docs kept current after each release | ongoing | |
+| H1 | Proxmox host memory: balloon floors on the other VMs, KSM check | with the owner | commands given 2026-10-23; the dev VM has its cap and floor |
+| H2 | Cloudflare transform rule for download.maluos.com | with the owner | from the Phase 10 release work |
+| H3 | packages/maluos-meta/debian/docs/claude-log/ out of the repo | done | A8 |
+| H4 | Lintian back on in the local package build (SKIP_LINTIAN=1 since slice 7 because of maludb-os-core's node_modules) | idea | exclude that package from lintian instead |
+| H5 | Memory notes and docs kept current after each release | ongoing | |

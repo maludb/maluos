@@ -214,3 +214,47 @@ Answered by the owner 2026-10-25 unless marked open.
 4. **Object storage: skipped** for this round; GPUs only.
 5. **Contribution: servers always; dedicated desktops opt-in; laptops
    opt-in and only while idle.**
+
+## Status
+
+**G1 built 2026-10-25** (packages, unit tests and the local self-test pass
+on the dev host; the image boot test and the desktop image rebuild are the
+next step):
+
+- maluos-firstboot 0.1.10: `/usr/lib/maluos/maluos_gpu.py` (NVIDIA through
+  nvidia-smi with a retry for an older binary without `compute_cap`; AMD and
+  Intel through /sys/class/drm with amdgpu's busy, VRAM, temperature and
+  power; virtual display adapters skipped; the chassis from `hostnamectl
+  chassis`, else systemd-detect-virt, else the DMI enclosure type; the
+  sharing rule by chassis; the switch's resolution in `share_state`) and
+  `maluctl gpu status [--json]`.
+- maluos-gateway 0.3.5: gateway.yaml `share:` (enabled, contribution),
+  `maluctl gateway share [status|on|off] [--when always|idle]` (root for
+  the switch; the status for anyone), `share` in `/v1/maluos/status`. The
+  sharing itself, the node API and `expose` are G2.
+- maluos-session 0.7.1: `host.gpus`, `host.chassis`,
+  `host.contribution_rule` and `gateway.share` in the session state.
+- maluos-system-monitor 49.1+maluos.1: GNOME System Monitor 49.1 with the
+  GPUs tab (packages/maluos-system-monitor, README.maluos.md lists the
+  patch surface: two new source files, the page in interface.ui, one icon,
+  marked hunks in interface.cpp, application.*, argv.*, meson and
+  POTFILES). The tab polls the session service every 2 s while current,
+  renders this computer's GPUs (model, driver, VRAM used of total,
+  temperature, power, compute capability, a load bar), the sharing switch
+  with the chassis rule, the contribution, the models loaded and the queue
+  from the gateway, and the office row; it appears only when the session
+  service answers, so on a plain GNOME desktop the application is upstream's.
+  `--show-gpus-tab`, `--maluos-self-test`, Alt+4. Replaces Ubuntu's
+  gnome-system-monitor in seeds/desktop.seed.
+- The `nvidia` component (seeds/nvidia.seed, docs/components.md): the
+  signed modules for the generic kernel, driver 595 with 580 as the
+  alternative, nvidia-smi, nvtop; off the medium.
+- Tests: tests/gpu-test.py (the reader's pure parts, the plugin, the share
+  resolution), tests/system-monitor-local-test.sh (the self-test under Xvfb
+  against tests/lib/fake_session.py: two GPUs, no GPU, no session), both in
+  CI; tests/qcow2-boot-test.sh reads the GPU facts on both profiles and
+  runs the fork's self-test on the desktop's live session.
+- Not in G1: the MaluOS Network and Queue tabs (G5), any sharing (G2), the
+  estate report's `gpus` (with D1, which is not built), translations of the
+  tab's strings, the laptop idle detection (G4 decides what "idle" means:
+  no session input for a threshold, on mains power).

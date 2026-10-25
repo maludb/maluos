@@ -66,7 +66,7 @@ it under the agent.
 """
 import http.client, json, os, pwd, re, socket, subprocess, sys, threading, time, urllib.parse
 
-VERSION = "0.7.0"
+VERSION = "0.7.1"
 BUS_NAME, OBJ, IFACE = "com.maluos.Session", "/com/maluos/Session", "com.maluos.Session1"
 GW = os.environ.get("MALUOS_GATEWAY_SOCKET", "/run/maluos/gateway.sock")
 VAULT = os.environ.get("MALUOS_VAULT_SOCKET", "/run/maluos/vault.sock")
@@ -163,10 +163,23 @@ def os_release():
     return d
 
 
+def gpu_state():
+    """The GPUs of this host and the chassis rule, by the same reader as `maluctl gpu status` (Phase 13 G1)."""
+    try:
+        sys.path.insert(0, "/usr/lib/maluos")
+        import maluos_gpu
+        st = maluos_gpu.status()
+        return st["gpus"], st["chassis"], st["contribution_rule"]
+    except Exception as e:
+        log(f"gpu: {e.__class__.__name__}: {str(e)[:120]}")
+        return [], "unknown", "opt-in"
+
+
 def host_state():
     osr = os_release()
+    gpus, chassis, rule = gpu_state()
     h = {"hostname": socket.gethostname(), "pretty_name": osr.get("PRETTY_NAME", "MaluOS"), "variant": osr.get("VARIANT", ""),
-         "user": pwd.getpwuid(os.getuid()).pw_name, "memory": None}
+         "user": pwd.getpwuid(os.getuid()).pw_name, "memory": None, "gpus": gpus, "chassis": chassis, "contribution_rule": rule}
     try:
         with open(PROVISIONED) as f:
             p = json.load(f)
@@ -194,7 +207,8 @@ def gateway_state():
         backends = [{"name": n, "healthy": bool(h), "kind": None, "cloud": False, "enabled": True} for n, h in (health.get("backends") or {}).items()]
     g.update({"ok": bool(health.get("ok")), "version": status.get("version") or health.get("version"), "uptime_s": status.get("uptime_s"),
               "backends": backends, "queue": status.get("queue") or {"queued": 0, "running": 0},
-              "expected_wait_s": status.get("expected_wait_s") or {}, "tiers": (status.get("catalog") or {}).get("tiers") or {}})
+              "expected_wait_s": status.get("expected_wait_s") or {}, "tiers": (status.get("catalog") or {}).get("tiers") or {},
+              "share": status.get("share")})
     me = ok(GW, "/v1/maluos/whoami")
     return g, me
 

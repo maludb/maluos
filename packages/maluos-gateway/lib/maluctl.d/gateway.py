@@ -19,6 +19,9 @@
   maluctl gateway usage [--since 7d] [--by principal|model|class|backend|user|day] [--raw]
   maluctl gateway ollama install [--version vX.Y.Z] | pull MODEL [--backend B] | warm MODEL [--backend B] | status
   maluctl gateway alerts [--since 7d]                  alert rows (budget, backend down/recovered, usage anomaly, restart)
+  maluctl gateway share [status]                     this host's GPU sharing switch and the chassis rule
+  maluctl gateway share on|off [--when always|idle]  share this host's GPU with the MaluOS network (root; the
+                                                     sharing itself arrives with slice G2, the switch is recorded now)
   maluctl gateway reload
 
 Callers use the gateway at the Unix socket /run/maluos/gateway.sock with any
@@ -134,6 +137,8 @@ def run(a):
         if st["catalog"]["aliases"]:
             print("aliases:     " + "; ".join(f"{k} -> {v}" for k, v in st["catalog"]["aliases"].items()))
         return 0
+    if cmd == "share":
+        return share(a)
     if cmd == "queue":
         st = api("GET", "/v1/maluos/status")
         rows = [dict(j, backend=n) for n, s in st["schedulers"].items() for j in s["jobs"]]
@@ -362,3 +367,55 @@ def run(a):
     if cmd == "reload":
         print(api("POST", "/v1/maluos/reload")); return 0
     print(__doc__); return 2
+
+
+
+CONF = os.environ.get("MALUOS_GATEWAY_CONFIG", "/etc/maluos/gateway.yaml")
+
+
+def share(a):
+    """The GPU sharing switch (Phase 13 G1): recorded in gateway.yaml `share:` and shown in the status; G2 acts on it."""
+    sub = a.pop(0) if a and not a[0].startswith("--") else "status"
+    if sub == "status":
+        st = api("GET", "/v1/maluos/status"); sh = st.get("share") or {}
+        rule = {"always": "a server: shares always", "opt-in": "a dedicated desktop: shares when its owner opts in",
+                "opt-in-idle": "a laptop: shares when its owner opts in, and only while idle"}.get(sh.get("rule"), sh.get("rule"))
+        print(f"share:       {'on' if sh.get('enabled') else 'off'}" + ("" if sh.get("configured") else " (by the chassis rule)")
+              + f"  contribution {sh.get('contribution')}  chassis {sh.get('chassis')} ({rule})"
+              + ("  exposed on the network" if sh.get("exposed") else "  not exposed (slice G2 brings `maluctl gateway expose`)"))
+        return 0
+    if sub not in ("on", "off"):
+        raise GwError("share: status, on or off")
+    when = None
+    it = iter(a)
+    for x in it:
+        if x == "--when":
+            when = next(it, None)
+            if when not in ("always", "idle"):
+                raise GwError("--when always|idle")
+        else:
+            raise GwError(f"share: unknown argument {x}")
+    if os.geteuid() != 0:
+        raise GwError("share on|off needs root (sudo maluctl gateway share ...)")
+    import yaml
+    conf = {}
+    if os.path.exists(CONF):
+        with open(CONF) as f:
+            conf = yaml.safe_load(f) or {}
+    sh = dict(conf.get("share") or {})
+    sh["enabled"] = sub == "on"
+    if when:
+        sh["contribution"] = when
+    conf["share"] = sh
+    with open(CONF, "w") as f:
+        f.write("# MaluOS inference gateway (maluos-gateway). database/tenant are set by first boot.\n"
+                "# See docs/phase6-slice2-gateway.md; the catalogue (tiers, aliases, classes, policies)\n"
+                "# lives in the database: maluctl gateway catalog.\n")
+        yaml.safe_dump(conf, f, sort_keys=True)
+    os.chmod(CONF, 0o644)
+    try:
+        api("POST", "/v1/maluos/reload")
+    except GwError:
+        pass
+    print(f"share {sub}" + (f", contribution {when}" if when else "") + " recorded in " + CONF)
+    return share(["status"]) if os.path.exists(SOCKET) else 0

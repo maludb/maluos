@@ -15,7 +15,10 @@ apt-get install -y -q --no-install-recommends \
     build-essential devscripts debhelper dh-python lintian dpkg-dev gnupg python3 python3-yaml python3-urwid openssl ca-certificates curl \
     mmdebstrap squashfs-tools xorriso qemu-utils dosfstools mtools gdisk rsync fdisk e2fsprogs \
     util-linux mount grub-common \
-    composer php-cli php-pgsql nodejs npm python3-venv python3-pip >/dev/null
+    composer php-cli php-pgsql nodejs npm python3-venv python3-pip \
+    meson ninja-build pkgconf libgtkmm-4.0-dev libgtop2-dev libadwaita-1-dev libjson-glib-dev libcatch2-dev librsvg2-dev libsystemd-dev \
+    gsettings-desktop-schemas-dev itstool docbook-to-man desktop-file-utils appstream polkitd \
+    xvfb dbus-daemon xauth python3-gi gir1.2-glib-2.0 >/dev/null        # the last two lines: maluos-system-monitor (Phase 13 G1) and its test
 export PATH=/usr/sbin:/sbin:$PATH
 
 if [ "$STEP" = packages ] || [ "$STEP" = all ] || [ "$STEP" = images ]; then
@@ -25,6 +28,9 @@ if [ "$STEP" = packages ] || [ "$STEP" = all ]; then
     python3 tests/install-plan-test.py          # the installer engine's pure parts (Phase 11 slice 2)
     python3 tests/install-screens-test.py       # the installer's screens driven in a pty (Phase 11 slice 3)
     python3 tests/apple-t2-test.py              # the Apple T2 round: the firmware renamer and importer, the vendored packages' checksums
+    python3 tests/gpu-test.py                   # Phase 13 G1: the GPU reader (nvidia-smi, sysfs, chassis, the sharing rule)
+    rm -rf build/gsm-root && dpkg-deb -x build/maluos-system-monitor_*_amd64.deb build/gsm-root \
+        && tests/system-monitor-local-test.sh build/gsm-root/usr/bin/gnome-system-monitor   # the GPUs tab against a fake session, under Xvfb
 fi
 [ "$STEP" = packages ] && exit 0
 

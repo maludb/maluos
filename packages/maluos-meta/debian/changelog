@@ -1,3 +1,13 @@
+maluos-meta (0.2.11) resolute; urgency=medium
+
+  * Phase 13 shared GPUs, slice G1: maluos-nvidia (seeds/nvidia.seed), the
+    NVIDIA driver for an RTX card (the signed modules for the generic
+    kernel, driver 595 with 580 as the alternative, nvidia-smi, nvtop);
+    maluos-desktop carries maluos-system-monitor (GNOME System Monitor
+    with the GPUs tab) in place of gnome-system-monitor.
+
+ -- Edward Honour <ed@maludb.org>  Sun, 25 Oct 2026 18:45:00 +0000
+
 maluos-meta (0.2.10) resolute; urgency=medium
 
   * maluos-apple-t2 (Phase 11, the Apple T2 round): the component for Intel

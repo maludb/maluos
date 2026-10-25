@@ -20,6 +20,10 @@ DEFAULTS = {
     "health": {"cooldown_s": 60, "probe_s": 10},      # a memory episode per call that carries a task reference (FR-42)
     "alerts": {"hooks_dir": "/etc/maluos/alert-hooks.d", "check_s": 30, "backend_down_s": 300, "backend_down_repeat_s": 3600,
                "usage_anomaly": {"enabled": True, "check_s": 300, "min_calls": 20, "factor": 3}},
+    # Sharing this host's GPU with the MaluOS network (Phase 13 G1; the sharing itself is G2): enabled null = the
+    # chassis rule (a server shares, a desktop or laptop only when its owner opts in); contribution null = the rule's
+    # (always on a server or desktop, idle on a laptop). `maluctl gateway share on|off [--when always|idle]`.
+    "share": {"enabled": None, "contribution": None},
     "ollama": {"url": "http://127.0.0.1:11434", "keep_alive": "30m", "max_concurrent": 1,
                "keep_warm": [], "pull": [], "install": False, "version": "v0.40.6"},
     # Seeded into the catalogue at provisioning when it is empty (operators edit the tables after).

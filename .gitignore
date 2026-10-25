@@ -18,3 +18,5 @@ build/logs/
 docs/claude-log/
 __pycache__/
 **/claude-log/
+packages/maluos-system-monitor/obj-*/
+packages/maluos-system-monitor/debian/gnome-system-monitor.1

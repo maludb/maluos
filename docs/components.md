@@ -152,6 +152,22 @@ nothing to provision. The installer adds the component itself on a T2 Mac
 when the medium carries it; the medium carries the component's Ubuntu
 dependencies in /maluos/apt/extra so the install is offline.
 
+### maluos-nvidia (seeds/nvidia.seed; Phase 13 shared GPUs, docs/phase13-shared-gpus.md)
+
+The NVIDIA driver for an RTX card in a MaluOS box: the Canonical-signed
+kernel modules for the generic kernel first (`linux-modules-nvidia-595-generic`,
+so Secure Boot needs no MOK enrolment and no DKMS build), the 595 driver
+branch with 580 as the alternative for a card the newer branch dropped,
+nvidia-smi (what `maluctl gpu status`, the session's host state and the
+System Monitor's GPUs tab read) and nvtop as a recommend. Ollama brings its
+own CUDA runtime, so no toolkit. No first-boot module: the driver loads at
+the next boot. Not on the install medium (the pool would grow by ~400 MB for
+every medium): the installer offers it from the network and
+`sudo apt install maluos-nvidia` adds it later. A DGX Spark is arm64 and is
+not a MaluOS device (the local LLM server runs there); an RTX card in an x86
+box is the MaluOS case. A host without the driver, or with an AMD or Intel
+GPU, is read through /sys/class/drm instead, with fewer numbers.
+
 ## Planned
 
 - The default applications and the integration plugin as components.

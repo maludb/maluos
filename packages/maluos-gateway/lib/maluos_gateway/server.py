@@ -802,6 +802,15 @@ class Gateway:
                 "X-MaluOS-Attempts": str(call.attempts or 1)}
 
     # -- status
+    def share_state(self):
+        """The GPU sharing switch as configured, resolved against the chassis rule by maluos_gpu (G1 shows it; G2 acts on it)."""
+        try:
+            import maluos_gpu
+            return maluos_gpu.share_state(self.cfg["share"], self.cfg["tcp"])
+        except Exception as e:
+            return {"enabled": False, "contribution": "always", "chassis": "unknown", "rule": "opt-in", "configured": False, "exposed": False,
+                    "error": f"{e.__class__.__name__}: {str(e)[:80]}"}
+
     def status(self):
         snaps = {n: s.snapshot() for n, s in self.schedulers.items()}
         local = [s for n, s in snaps.items() if not self.backends[n].is_cloud]
@@ -813,6 +822,7 @@ class Gateway:
                 "queue": {"queued": sum(s["queued"] for s in snaps.values()), "running": sum(s["running"] for s in snaps.values())},
                 "expected_wait_s": ew, "schedulers": snaps,
                 "engine_queue": {"enabled": bool(self.cfg["engine_queue"].get("enabled", True)), "inflight": self.engine_inflight},
+                "share": self.share_state(),
                 "catalog": {"tiers": {t: [f"{a['backend']}/{a['model']}" for a in sorted(self.catalog.aliases, key=lambda a: a["position"]) if a["tier"] == t]
                                       for t in self.catalog.tiers},
                             "aliases": {a["name"]: f"{a['backend']}/{a['model']}" for a in self.catalog.aliases if a["tier"] is None},

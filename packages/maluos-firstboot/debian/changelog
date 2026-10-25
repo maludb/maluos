@@ -1,3 +1,15 @@
+maluos-firstboot (0.1.10) resolute; urgency=medium
+
+  * Phase 13, shared GPUs, slice G1 (docs/phase13-shared-gpus.md): the GPU
+    reader /usr/lib/maluos/maluos_gpu.py (NVIDIA through nvidia-smi, AMD
+    and Intel through /sys/class/drm, virtual display adapters skipped),
+    the chassis kind and the sharing rule it implies (a server always, a
+    dedicated desktop opt-in, a laptop opt-in and idle only), and
+    `maluctl gpu status [--json]`. The session's host state and the
+    gateway's sharing switch read the same module.
+
+ -- Edward Honour <ed@maludb.org>  Sun, 25 Oct 2026 18:45:00 +0000
+
 maluos-firstboot (0.1.9) resolute; urgency=medium
 
   * The enroll section of firstboot.yaml (Phase 11 slice 2; written by the

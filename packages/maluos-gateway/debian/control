@@ -10,7 +10,7 @@ Rules-Requires-Root: no
 Package: maluos-gateway
 Architecture: all
 Depends: ${misc:Depends}, adduser, python3 (>= 3.12), python3-aiohttp, python3-psycopg, python3-yaml,
- systemd (>= 250), curl, zstd, maluos-firstboot (>= 0.1.5), maluos-vault (>= 0.1.0)
+ systemd (>= 250), curl, zstd, maluos-firstboot (>= 0.1.10), maluos-vault (>= 0.1.0)
 Recommends: postgresql-18-maludb-core, maludb-mc2dbd
 Description: MaluOS inference gateway: one door to local and cloud models
  A daemon on a Unix socket (and optionally a token-protected TCP port) that

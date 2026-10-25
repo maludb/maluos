@@ -1,0 +1,45 @@
+Source: maluos-system-monitor
+Section: gnome
+Priority: optional
+Maintainer: Edward Honour <ed@maludb.org>
+Build-Depends: appstream <!nocheck>,
+               debhelper-compat (= 13),
+               desktop-file-utils <!nocheck>,
+               docbook-to-man,
+               gsettings-desktop-schemas-dev,
+               itstool,
+               libadwaita-1-dev (>= 1.6~beta),
+               libcatch2-dev,
+               libglib2.0-dev,
+               libgtk-4-dev (>= 4.12.0),
+               libgtkmm-4.0-dev,
+               libgtop2-dev (>= 2.41.2),
+               libjson-glib-dev (>= 1.6),
+               librsvg2-dev,
+               libsystemd-dev [linux-any],
+               meson (>= 0.57.0),
+               pkgconf,
+               polkitd,
+Standards-Version: 4.7.0
+Homepage: https://github.com/maludb/maluos
+Rules-Requires-Root: no
+
+Package: maluos-system-monitor
+Architecture: any
+Depends: ${misc:Depends},
+         ${shlibs:Depends}
+Recommends: gvfs, maluos-desktop-session (>= 0.7.1), maluos-firstboot (>= 0.1.10)
+Suggests: pkexec
+Provides: gnome-system-monitor
+Conflicts: gnome-system-monitor
+Replaces: gnome-system-monitor
+Description: GNOME System Monitor with the MaluOS tabs (GPUs, MaluOS Network, Queue)
+ GNOME's process viewer and system resource monitor (Processes, Resources,
+ File Systems), carried by MaluOS with its own tabs: GPUs (this computer's
+ GPUs, the switch that shares them with the MaluOS network, the models
+ loaded and the queue; the network's GPUs once the desk is enrolled), and,
+ in later slices, MaluOS Network and Queue. The tabs render what the MaluOS
+ session service publishes and compute nothing themselves; they appear only
+ when that service answers, so on a plain GNOME desktop this is System
+ Monitor as upstream ships it. Replaces Ubuntu's gnome-system-monitor
+ package (same application id, same files).

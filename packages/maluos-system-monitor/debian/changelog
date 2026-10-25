@@ -1,0 +1,10 @@
+maluos-system-monitor (49.1+maluos.1) resolute; urgency=medium
+
+  * GNOME System Monitor 49.1 (Ubuntu 26.04's 49.1-2 packaging) forked for
+    MaluOS, Phase 13 shared GPUs slice G1 (docs/phase13-shared-gpus.md):
+    the GPUs tab (src/maluos-gpus.cpp), fed by the MaluOS session service
+    over D-Bus and acting only through `pkexec maluctl gateway share`;
+    `--show-gpus-tab` and `--maluos-self-test`; Alt+4. The patch surface
+    is listed in README.maluos.md. Replaces gnome-system-monitor.
+
+ -- Edward Honour <ed@maludb.org>  Sun, 25 Oct 2026 18:45:00 +0000

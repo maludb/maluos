@@ -1,3 +1,15 @@
+maluos-gateway (0.3.5) resolute; urgency=medium
+
+  * Phase 13, shared GPUs, slice G1: the GPU sharing switch. gateway.yaml
+    `share:` (enabled, contribution always|idle; unset means the chassis
+    rule from maluos_gpu: a server shares, a desktop or laptop when its
+    owner opts in, a laptop only while idle), `maluctl gateway share
+    [status|on|off] [--when always|idle]`, and `share` in
+    /v1/maluos/status (enabled, contribution, chassis, rule, configured,
+    exposed). The sharing itself (the node API, `expose`) is slice G2.
+
+ -- Edward Honour <ed@maludb.org>  Sun, 25 Oct 2026 18:45:00 +0000
+
 maluos-gateway (0.3.4) resolute; urgency=medium
 
   * Phase 12 slice 9. A refused credential lookup files its grant request

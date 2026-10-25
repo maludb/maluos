@@ -1,0 +1,11 @@
+# maluos-nvidia: the NVIDIA driver for an RTX card in a MaluOS box (Phase 13, shared
+# GPUs, slice G1; docs/phase13-shared-gpus.md). The prebuilt, Canonical-signed kernel
+# modules first, so Secure Boot needs no MOK enrolment and no DKMS build; the 595
+# branch (Blackwell, RTX 50) with the 580 branch as the alternative for a card the
+# newer branch dropped. nvidia-smi (nvidia-utils) is what maluos_gpu reads. Ollama
+# brings its own CUDA runtime, so no toolkit. Kept off the install medium (the pool
+# would grow by ~400 MB for every medium): the installer offers it from the network.
+linux-modules-nvidia-595-generic | linux-modules-nvidia-580-generic | nvidia-dkms-595
+nvidia-driver-595 | nvidia-driver-580
+maluos-firstboot
+?nvtop

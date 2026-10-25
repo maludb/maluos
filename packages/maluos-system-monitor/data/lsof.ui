@@ -1,0 +1,204 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+  <object class="AdwWindow" id="lsof_dialog">
+    <property name="title" translatable="1" context="Window title for Search for Open Files dialog">Search for Open Files</property>
+    <property name="default-width">575</property>
+    <property name="default-height">400</property>
+    <property name="destroy-with-parent">True</property>
+    <property name="content">
+      <object class="AdwToolbarView">
+        <child type="top">
+          <object class="AdwHeaderBar">
+            <child type="start">
+              <object class="GtkToggleButton" id="search_button">
+                <property name="icon-name">edit-find-symbolic</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child type="top">
+          <object class="GtkSearchBar" id="search_bar">
+            <property name="search-mode-enabled"
+                      bind-source="search_button"
+                      bind-property="active"
+                      bind-flags="bidirectional"/>
+            <property name="child">
+              <object class="GtkBox">
+                <property name="orientation">vertical</property>
+                <child>
+                  <object class="GtkSearchEntry" id="search_entry">
+                    <property name="placeholder-text" translatable="1">Filter files by name</property>
+                    <property name="width-request">300</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkCheckButton" id="case_button">
+                    <property name="label" translatable="yes">Case Insensitive</property>
+                  </object>
+                </child>
+              </object>
+            </property>
+          </object>
+        </child>
+        <property name="content">
+          <object class="GtkBox">
+            <property name="orientation">vertical</property>
+            <child>
+              <object class="GtkScrolledWindow">
+                <property name="vexpand">True</property>
+                <child>
+                  <object class="GtkColumnView" id="lsof_view">
+                    <property name="model">
+                      <object class="GtkNoSelection">
+                        <property name="model">
+                          <object class="GtkSortListModel">
+                            <property name="model">
+                              <object class="GListStore" id="lsof_store"/>
+                            </property>
+                            <binding name="sorter">
+                              <lookup name="sorter">lsof_view</lookup>
+                            </binding>
+                          </object>
+                        </property>
+                      </object>
+                    </property>
+                    <child>
+                      <object class="GtkColumnViewColumn">
+                        <property name="title" translatable="yes">Process</property>
+                        <property name="expand">True</property>
+                        <property name="sorter">
+                          <object class="GtkStringSorter">
+                            <property name="expression">
+                              <lookup name="process" type="LsofData"/>
+                            </property>
+                          </object>
+                        </property>
+                        <property name="factory">
+                          <object class="GtkBuilderListItemFactory">
+                            <property name="bytes"><![CDATA[
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+<template class="GtkListItem">
+<property name="child">
+  <object class="GtkBox">
+    <property name="orientation">horizontal</property>
+    <property name="spacing">6</property>
+    <child>
+      <object class="GtkImage">
+        <binding name="paintable">
+          <lookup name="paintable" type="LsofData">
+            <lookup name="item">GtkListItem</lookup>
+          </lookup>
+        </binding>
+      </object>
+    </child>
+    <child>
+      <object class="GtkLabel">
+        <binding name="label">
+          <lookup name="process" type="LsofData">
+            <lookup name="item">GtkListItem</lookup>
+          </lookup>
+        </binding>
+      </object>
+  </child>
+  </object>
+</property>
+</template>
+</interface>
+                         ]]></property>
+                          </object>
+                        </property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkColumnViewColumn">
+                        <property name="title" translatable="yes">PID</property>
+                        <property name="expand">True</property>
+                        <property name="sorter">
+                          <object class="GtkNumericSorter">
+                            <property name="expression">
+                              <lookup name="pid" type="LsofData"/>
+                            </property>
+                          </object>
+                        </property>
+                        <property name="factory">
+                          <object class="GtkBuilderListItemFactory">
+                            <property name="bytes"><![CDATA[
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+<template class="GtkListItem">
+<property name="child">
+  <object class="GtkLabel">
+    <property name="xalign">0</property>
+    <binding name="label">
+      <lookup name="pid" type="LsofData">
+        <lookup name="item">GtkListItem</lookup>
+      </lookup>
+    </binding>
+  </object>
+</property>
+</template>
+</interface>
+                         ]]></property>
+                          </object>
+                        </property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkColumnViewColumn">
+                        <property name="title" translatable="yes">Filename</property>
+                        <property name="expand">True</property>
+                        <property name="sorter">
+                          <object class="GtkStringSorter">
+                            <property name="expression">
+                              <lookup name="filename" type="LsofData"/>
+                            </property>
+                          </object>
+                        </property>
+                        <property name="factory">
+                          <object class="GtkBuilderListItemFactory">
+                            <property name="bytes"><![CDATA[
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+<template class="GtkListItem">
+<property name="child">
+  <object class="GtkLabel">
+    <property name="xalign">0</property>
+    <binding name="label">
+      <lookup name="filename" type="LsofData">
+        <lookup name="item">GtkListItem</lookup>
+      </lookup>
+    </binding>
+  </object>
+</property>
+</template>
+</interface>
+                         ]]></property>
+                          </object>
+                        </property>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+              </object>
+            </child>
+          </object>
+        </property>
+      </object>
+    </property>
+    <child>
+      <object class="GtkShortcutController">
+        <property name="scope">managed</property>
+        <child>
+          <object class="GtkShortcut" id="shortcut">
+            <property name="trigger">Escape</property>
+            <property name="action">action(window.close)</property>
+          </object>
+        </child>
+      </object>
+    </child>
+    <style>
+      <class name="view"/>
+    </style>
+  </object>
+</interface>
