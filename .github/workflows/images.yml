@@ -17,7 +17,7 @@ on:
         type: boolean
         default: false
       live:
-        description: also build the live environment and boot-test the installer medium on BIOS and UEFI (Phase 11; adds about 15 minutes)
+        description: also build the live environment, boot-test the installer medium on BIOS and UEFI and run the unattended install test (Phase 11; adds about 45 minutes under TCG)
         type: boolean
         default: false
 concurrency:
@@ -72,6 +72,9 @@ jobs:
           sudo apt-get install -y -q mtools >/dev/null
           WORK=$PWD/build/test-live tests/live-iso-boot-test.sh -p server
           WORK=$PWD/build/test-live tests/live-iso-boot-test.sh -p server --uefi
+      - name: Live install test (server, BIOS; Phase 11 slice 2)
+        if: ${{ inputs.live }}
+        run: WORK=$PWD/build/test-install SSHPORT=2226 INSTALL_TIMEOUT=5400 tests/live-install-test.sh -p server
       - name: Live medium boot test (desktop, BIOS and UEFI)
         if: ${{ inputs.live && inputs.desktop }}
         run: |
@@ -89,6 +92,7 @@ jobs:
             build/test-*/boot-serial.log
             build/test-*/verify.log
             build/test-live/*.log
+            build/test-install/*.log
             build/image/*.log
           retention-days: 7
           compression-level: 0

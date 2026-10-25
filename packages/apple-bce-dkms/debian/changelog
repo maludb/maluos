@@ -1,0 +1,7 @@
+apple-bce-dkms (0.2.9+git20260624.c7448ca-1) resolute; urgency=medium
+
+  * The t2linux apple-bce driver (aur branch, commit c7448ca of 2026-06-24)
+    packaged for DKMS: builds against Ubuntu 26.04's kernel 7.0 unchanged.
+    Phase 11, the Apple T2 round.
+
+ -- Edward Honour <ed@maludb.org>  Sat, 24 Oct 2026 22:00:00 +0000

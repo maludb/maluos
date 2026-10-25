@@ -1,0 +1,55 @@
+#!/usr/bin/python3
+"""maluos-apple-firmware: the Mac's Wi-Fi and Bluetooth firmware into MaluOS.
+
+  maluos-apple-firmware import [--auto] [--tar FILE] [--root DIR] [--no-reload]
+      --auto (the default): find firmware-raw.tar.gz, written by firmware.sh run in macOS,
+      on a FAT partition of this machine and import it; --tar imports a given tarball
+      (firmware-raw.tar.gz from the EFI partition, or firmware.tar from Downloads);
+      --root installs into another root (the installer's /target). Exit 2: nothing found.
+  maluos-apple-firmware copy --to DIR     what this system imported, into another root
+  maluos-apple-firmware status            the model, the Broadcom devices, what is imported
+  maluos-apple-firmware macos-script      the path of firmware.sh to run in macOS
+"""
+import os, sys
+sys.path.insert(0, "/usr/lib/maluos")
+from maluos_apple_t2 import firmware as fw   # noqa: E402
+
+SCRIPT = "/usr/share/maluos-apple-t2/firmware.sh"
+
+
+def main(argv):
+    if not argv or argv[0] in ("-h", "--help"):
+        print(__doc__.strip()); return 0
+    cmd, rest = argv[0], argv[1:]
+    opts = {"--root": "/", "--tar": None, "--to": None}
+    flags = set()
+    it = iter(rest)
+    for a in it:
+        if a in opts:
+            opts[a] = next(it, None)
+        elif a in ("--auto", "--no-reload"):
+            flags.add(a)
+        else:
+            sys.exit(f"maluos-apple-firmware: unknown option {a}\n{__doc__}")
+    if cmd == "import":
+        if os.geteuid() != 0:
+            sys.exit("maluos-apple-firmware: run as root")
+        if opts["--tar"]:
+            fw.import_tarball(opts["--tar"], root=opts["--root"], source=opts["--tar"])
+            if "--no-reload" not in flags and os.path.realpath(opts["--root"]) == "/":
+                fw.reload_drivers()
+            return 0
+        return fw.import_auto(root=opts["--root"], reload="--no-reload" not in flags)
+    if cmd == "copy":
+        if not opts["--to"]:
+            sys.exit("copy needs --to DIR")
+        return 0 if fw.copy_imported("/", opts["--to"]) else 2
+    if cmd == "status":
+        print("\n".join(fw.status(opts["--root"]))); return 0
+    if cmd == "macos-script":
+        print(SCRIPT); return 0
+    sys.exit(f"maluos-apple-firmware: unknown command {cmd}\n{__doc__}")
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

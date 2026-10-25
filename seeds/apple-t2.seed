@@ -1,0 +1,21 @@
+# maluos-apple-t2: what an Intel Mac with the T2 chip (2018 on) needs beyond
+# Ubuntu 26.04's kernel, which already carries the Touch Bar (appletbdrm,
+# hid-appletb-kbd/bl), apple-gmux for the T2, the CS8409 codec and brcmfmac.
+# The installer adds this component on a T2 Mac (docs/phase11-apple-t2.md);
+# the live medium carries the driver parts (image/profiles/live.pkgs). The
+# PipeWire DSP t2-dsp stays in the repository, off the medium: it would pull
+# PipeWire and the LV2 plugins (150 MB) onto every medium for a desktop nicety.
+maluos-apple-t2-support
+apple-bce-dkms
+applesmc-t2
+bcm5974-t2
+apple-t2-audio-config
+dkms
+linux-headers-generic
+mesa-vulkan-drivers
+libvulkan1
+?tiny-dfr
+?t2fanrd
+?apple-firmware-script
+?apfs-dkms
+?vulkan-tools

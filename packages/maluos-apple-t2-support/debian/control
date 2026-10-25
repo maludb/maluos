@@ -1,0 +1,21 @@
+Source: maluos-apple-t2-support
+Section: admin
+Priority: optional
+Maintainer: Edward Honour <ed@maludb.org>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.7.0
+Homepage: https://maluos.com
+Rules-Requires-Root: no
+
+Package: maluos-apple-t2-support
+Architecture: all
+Depends: ${misc:Depends}, python3 (>= 3.12), kmod, pciutils
+Recommends: apple-bce-dkms
+Description: MaluOS support for Intel Macs with the T2 chip
+ What MaluOS adds around the drivers on a 2018-or-later Intel Mac: the
+ import of the Mac's own Wi-Fi and Bluetooth firmware from its EFI
+ partition (maluos-apple-firmware, run at boot and by the installer), the
+ T2 bridge driver in the initrd, the Touch Bar and fan daemons gated to
+ Apple hardware, and the t2linux firmware script for macOS. Part of the
+ apple-t2 component (seeds/apple-t2.seed), which the installer selects on
+ a T2 Mac; also on the live medium.

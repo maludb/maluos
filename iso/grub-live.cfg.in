@@ -4,24 +4,44 @@ set default=@DEFAULT@
 
 loadfont unicode
 
+# Apple Macs with the T2 chip: the kernel options t2linux documents, decided from the firmware's SMBIOS
+set apple_args=""
+if [ "$grub_platform" = "efi" ]; then
+    if smbios --type 1 --get-string 4 --set sys_vendor; then
+        if regexp -- '^Apple' "$sys_vendor"; then set apple_args="intel_iommu=on iommu=pt pm_async=off "; fi
+    fi
+fi
+
 set menu_color_normal=white/black
 set menu_color_highlight=black/light-gray
 
 menuentry "Start the MaluOS @VARIANT@ installer" {
     set gfxpayload=keep
-    linux  /casper/vmlinuz boot=casper layerfs-path=maluos-live.squashfs fsck.mode=skip quiet splash ---
+    linux  /casper/vmlinuz boot=casper layerfs-path=maluos-live.squashfs fsck.mode=skip quiet splash $apple_args---
     initrd /casper/initrd
 }
 menuentry "Start the installer with the serial console" {
     set gfxpayload=text
-    linux  /casper/vmlinuz boot=casper layerfs-path=maluos-live.squashfs fsck.mode=skip console=ttyS0,115200n8 @EXTRA_ARGS@---
+    linux  /casper/vmlinuz boot=casper layerfs-path=maluos-live.squashfs fsck.mode=skip console=ttyS0,115200n8 @EXTRA_ARGS@$apple_args---
+    initrd /casper/initrd
+}
+menuentry "Install MaluOS @VARIANT@ unattended (erases the first disk; login maluos, password change required)" {
+    set gfxpayload=text
+    linux  /casper/vmlinuz boot=casper layerfs-path=maluos-live.squashfs fsck.mode=skip maluos.plan=/maluos/plan/@PROFILE@-unattended.yaml $apple_args---
     initrd /casper/initrd
 }
 menuentry "Rescue shell" {
     set gfxpayload=text
-    linux  /casper/vmlinuz boot=casper layerfs-path=maluos-live.squashfs fsck.mode=skip maluos.rescue=1 ---
+    linux  /casper/vmlinuz boot=casper layerfs-path=maluos-live.squashfs fsck.mode=skip maluos.rescue=1 $apple_args---
     initrd /casper/initrd
 }
+if [ -e /maluos/plan/test.yaml ]; then
+menuentry "Test install (the build's test plan, serial console)" {
+    set gfxpayload=text
+    linux  /casper/vmlinuz boot=casper layerfs-path=maluos-live.squashfs fsck.mode=skip console=ttyS0,115200n8 maluos.plan=/maluos/plan/test.yaml @TEST_ARGS@$apple_args---
+    initrd /casper/initrd
+}
+fi
 grub_platform
 if [ "$grub_platform" = "efi" ]; then
 menuentry 'Boot from next volume' {

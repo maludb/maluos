@@ -1,0 +1,24 @@
+Source: apple-bce-dkms
+Section: kernel
+Priority: optional
+Maintainer: Edward Honour <ed@maludb.org>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.7.0
+Homepage: https://github.com/t2linux/apple-bce-drv
+Rules-Requires-Root: no
+
+Package: apple-bce-dkms
+Architecture: all
+Depends: ${misc:Depends}, dkms
+Recommends: linux-headers-generic
+Provides: apple-bce
+Conflicts: apple-bce
+Replaces: apple-bce
+Description: Apple T2 bridge driver (BCE, VHCI, audio) as a DKMS module
+ The driver for the T2 security chip's Buffer Copy Engine in Intel Macs
+ from 2018 on: the virtual USB host controller behind the internal
+ keyboard, trackpad, Touch Bar and camera, and the T2 audio interface.
+ Without it a T2 Mac has no internal keyboard under Linux. Built from the
+ t2linux project's apple-bce-drv (the aur branch, which suspends and
+ resumes) for every installed kernel by DKMS. Part of the MaluOS apple-t2
+ component; the installer adds it on a T2 Mac.

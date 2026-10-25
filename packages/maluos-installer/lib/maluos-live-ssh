@@ -1,0 +1,53 @@
+#!/bin/sh
+# maluos-live-ssh: the SSH server in the live environment for a remote install (Phase 11 slice 2).
+# Runs only when maluos.ssh= is on the kernel command line:
+#   maluos.ssh=https://host/keys           an authorized_keys file fetched after the network is up (two minutes of retries)
+#   maluos.ssh="ssh-ed25519 AAAA… name"    one key line (quoted on the command line)
+#   maluos.ssh=media                        /maluos/ssh/authorized_keys on the medium (iso/build-live-iso.sh --ssh-key)
+# The keys go to the live user maluos, sshd starts with password authentication off, and the address is
+# printed on the console and left in /run/maluos-install/ssh-address for the installer's banner.
+set -u
+USER_NAME=maluos
+HOME_DIR=$(getent passwd "$USER_NAME" | cut -d: -f6); [ -n "$HOME_DIR" ] || HOME_DIR=/home/$USER_NAME
+mkdir -p /run/maluos-install
+spec=$(tr ' ' '\n' < /proc/cmdline | sed -n 's/^maluos\.ssh=//p' | head -1)
+# a quoted key line survives as several tokens: take the whole quoted value from the raw line
+case "$(cat /proc/cmdline)" in *'maluos.ssh="'*) spec=$(sed 's/.*maluos\.ssh="\([^"]*\)".*/\1/' /proc/cmdline) ;; esac
+[ -n "$spec" ] || exit 0
+keys=""
+case "$spec" in
+    http://*|https://*)
+        for wait in 0 5 10 20 30 55; do
+            sleep $wait
+            keys=$(curl -fsSL --max-time 20 "$spec" 2>/dev/null) && [ -n "$keys" ] && break
+            keys=""
+        done
+        [ -n "$keys" ] || { echo "maluos-live-ssh: could not fetch $spec" > /dev/console; exit 1; } ;;
+    media)
+        [ -f /cdrom/maluos/ssh/authorized_keys ] || { echo "maluos-live-ssh: no /maluos/ssh/authorized_keys on the medium" > /dev/console; exit 1; }
+        keys=$(cat /cdrom/maluos/ssh/authorized_keys) ;;
+    *)  keys=$spec ;;
+esac
+install -d -m 0700 -o "$USER_NAME" -g "$USER_NAME" "$HOME_DIR/.ssh"
+printf '%s\n' "$keys" > "$HOME_DIR/.ssh/authorized_keys"
+chmod 0600 "$HOME_DIR/.ssh/authorized_keys"; chown "$USER_NAME:$USER_NAME" "$HOME_DIR/.ssh/authorized_keys"
+mkdir -p /etc/ssh/sshd_config.d
+cat > /etc/ssh/sshd_config.d/10-maluos-live.conf <<'EOF'
+# The live environment's SSH server (maluos.ssh= on the kernel command line): keys only.
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitRootLogin no
+EOF
+ssh-keygen -A >/dev/null 2>&1 || true
+systemctl unmask ssh.service ssh.socket >/dev/null 2>&1 || true
+systemctl start ssh.service >/dev/null 2>&1 || systemctl start ssh.socket
+# the address, once there is one
+addr=""
+for i in $(seq 1 60); do
+    addr=$(ip -4 -o addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -1)
+    [ -n "$addr" ] && break
+    sleep 2
+done
+printf '%s\n' "$addr" > /run/maluos-install/ssh-address
+echo "maluos-live-ssh: ssh ${USER_NAME}@${addr:-<no address yet>}  (keys from ${spec%%\"*})" > /dev/console
+exit 0

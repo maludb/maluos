@@ -1,3 +1,14 @@
+maluos-meta (0.2.10) resolute; urgency=medium
+
+  * maluos-apple-t2 (Phase 11, the Apple T2 round): the component for Intel
+    Macs with the T2 chip, from seeds/apple-t2.seed (the bridge driver, the
+    SMC and trackpad drivers, the audio profiles, DKMS and the headers,
+    Vulkan; recommends the Touch Bar and fan daemons, the firmware script,
+    APFS; the PipeWire DSP t2-dsp stays in the repository, off the medium).
+    The installer adds it on a T2 Mac.
+
+ -- Edward Honour <ed@maludb.org>  Sat, 24 Oct 2026 22:30:00 +0000
+
 maluos-meta (0.2.8) resolute; urgency=medium
 
   * maluos-live (Phase 11 slice 1): the live environment of the installer

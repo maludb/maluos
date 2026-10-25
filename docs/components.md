@@ -136,6 +136,22 @@ HR, Projects) and the integration plugin, which the kernel installs from
 git; the Claude CLI for the agent harness; Hermes. These follow as the next
 slice, vendored for offline installs.
 
+### maluos-apple-t2 (seeds/apple-t2.seed; the Apple T2 round, docs/phase11-apple-t2.md)
+
+Hardware support rather than software: what an Intel Mac with the T2 chip
+needs beyond Ubuntu 26.04's kernel. The T2 bridge driver (apple-bce-dkms,
+built from source), the SMC and trackpad drivers patched for the T2
+(vendored t2linux DKMS packages), DKMS with the kernel headers so kernel
+updates rebuild them, the T2 audio profiles, Vulkan for the Radeon; as
+recommends the Touch Bar function row (tiny-dfr), the fan daemon
+(t2fanrd), the firmware script and the APFS driver; the PipeWire DSP
+(t2-dsp) is in the repository, off the medium. maluos-apple-t2-support adds the import of the Mac's own Wi-Fi and
+Bluetooth firmware (maluos-apple-firmware), gates the daemons to Apple
+hardware and puts the bridge driver in the initrd. No first-boot module:
+nothing to provision. The installer adds the component itself on a T2 Mac
+when the medium carries it; the medium carries the component's Ubuntu
+dependencies in /maluos/apt/extra so the install is offline.
+
 ## Planned
 
 - The default applications and the integration plugin as components.

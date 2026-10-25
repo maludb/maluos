@@ -1,0 +1,7 @@
+lib/maluos_apple_t2 usr/lib/maluos
+bin/maluos-apple-firmware usr/bin
+systemd/maluos-apple-firmware.service usr/lib/systemd/system
+systemd/apple-only.conf usr/lib/systemd/system/tiny-dfr.service.d
+systemd/t2fanrd-apple-only.conf usr/lib/systemd/system/t2fanrd.service.d
+dracut/50-maluos-apple-t2.conf usr/lib/dracut/dracut.conf.d
+share/firmware.sh usr/share/maluos-apple-t2

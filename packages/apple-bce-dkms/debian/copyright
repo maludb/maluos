@@ -1,0 +1,14 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: apple-bce-drv
+Source: https://github.com/t2linux/apple-bce-drv
+
+Files: *
+Copyright: 2018-2026 MCMrARM and the t2linux contributors
+License: GPL-2
+ The module declares MODULE_LICENSE("GPL"). On Debian systems the full text
+ of the GNU General Public License version 2 is in
+ /usr/share/common-licenses/GPL-2.
+
+Files: debian/*
+Copyright: 2026 Edward Honour <ed@maludb.org>
+License: GPL-2

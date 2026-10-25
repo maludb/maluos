@@ -1,0 +1,22 @@
+#!/bin/sh
+# apple-bce-dkms: register the source with DKMS and build it for every kernel that has headers
+# (the live image at build time, the target at install time, every kernel update through the hooks).
+set -e
+NAME=apple-bce
+VERSION=0.2.9+git20260624.c7448ca
+case "$1" in
+    configure)
+        if [ -x /usr/lib/dkms/common.postinst ]; then
+            /usr/lib/dkms/common.postinst "$NAME" "$VERSION"
+        else
+            dkms add -m "$NAME" -v "$VERSION" || true
+            for k in /lib/modules/*/build; do
+                [ -d "$k" ] || continue
+                kver=$(basename "$(dirname "$k")")
+                dkms install -m "$NAME" -v "$VERSION" -k "$kver" || true
+            done
+        fi
+        ;;
+esac
+#DEBHELPER#
+exit 0

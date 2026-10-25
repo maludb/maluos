@@ -1,3 +1,75 @@
+maluos-installer (0.3.1) resolute; urgency=medium
+
+  * engine.run: the environment merge raised TypeError when a step passed
+    DEBIAN_FRONTEND itself (the components sub-step; first hit by the
+    apple-t2 component in the Apple round).
+
+ -- Edward Honour <ed@maludb.org>  Sat, 24 Oct 2026 23:55:00 +0000
+
+maluos-installer (0.3.0) resolute; urgency=medium
+
+  * Phase 11, the Apple T2 round. The facts know the Mac (model, the T2 chip,
+    the bridge device) and every disk's partition table, free regions and
+    sector size. storage.target free keeps the disk's partitions and installs
+    into the largest free region, sharing the disk's EFI partition (UEFI only;
+    sfdisk --append with explicit starts in the disk's sectors; a resume
+    deletes the partitions it appended). On a T2 Mac the apple-t2 component is
+    added when the medium carries it, the kernel gets intel_iommu=on iommu=pt
+    pm_async=off, the initrd is rebuilt with apple-bce, and the Mac's Wi-Fi
+    and Bluetooth firmware is imported (the apple sub-step). The on-media
+    repository gains the extra pool of Ubuntu packages. The screens offer the
+    free space on a disk that has some beside an EFI partition and pre-select
+    the component on a Mac. efibootmgr uses the shared ESP's number and a
+    Mac's refusal is a warning (EFI/BOOT boots the disk). Telemetry carries
+    the Mac's model and the target.
+
+ -- Edward Honour <ed@maludb.org>  Sat, 24 Oct 2026 22:30:00 +0000
+
+maluos-installer (0.2.0) resolute; urgency=medium
+
+  * Phase 11 slice 3: the screens. A medium booted without a plan shows the
+    installer's urwid screens on the console (and `sudo maluos-install` on a
+    serial line or over SSH): language and time zone, keyboard, network,
+    storage with the guided layouts, LUKS and a typed confirmation of the
+    disk, identity with the password's strength and SSH keys by paste or
+    github:NAME, components from the medium's catalogue, first boot with the
+    tenant, the administrator and an enrolment, "Help improve MaluOS" with
+    the report shown, the summary with Save the plan, progress with the
+    engine's events, done. Every screen writes to one plan (the contract of
+    docs/install-plan.md), validated on every Continue; Install runs the
+    engine in a thread. --screens [--plan FILE] prefills from a plan;
+    --screens --no-hardware --save-plan OUT runs the screens without a
+    machine (tests/install-screens-test.py drives them in a pty). The engine
+    gained an event sink. Depends on python3-urwid, openssl, kbd.
+  * The identity step generates the SSH host keys in the target when the
+    plan enables the SSH server: the images ship none, and a desktop with
+    cloud-init off had no sshd without them.
+
+ -- Edward Honour <ed@maludb.org>  Sat, 24 Oct 2026 17:10:00 +0000
+
+maluos-installer (0.1.0) resolute; urgency=medium
+
+  * Phase 11 slice 2: the engine and the unattended install. maluos-install
+    --plan executes an install plan (docs/install-plan.md): every step checked
+    before the disk is touched (--check prints the plan as understood;
+    --dry-run prints every command); storage (GPT, BIOS boot, ESP, /boot when
+    separate, direct or LVM, ext4 or xfs, LUKS2 with argon2id), unpack (sha256
+    against the medium's SHA256SUMS, unsquashfs -xattrs), configure (swap
+    file, fstab and crypttab by UUID, hostname, locale, netplan, the user and
+    SSH policy, the on-media repository, components from the catalogue,
+    firstboot.yaml with enroll, cloud-init kept or disabled, grub defaults,
+    the initrd for an encrypted root, machine-id), bootloader (the target's
+    grub in the chroot for BIOS and UEFI with the signed shim; the NVRAM
+    entry MaluOS first), finish (the log, the redacted plan and the journal
+    into the target; one telemetry report when telemetry.send is true; the
+    plan's action). Events on the log and, with --json, on stdout; a journal
+    under /run/maluos-install makes --resume continue at the first sub-step
+    not done. The console unit runs maluos.plan= or /maluos/plan/default.yaml.
+    maluos-live-ssh.service (maluos.ssh=) for a remote install. --apt-check
+    for tests/iso-apt-check.sh. --telemetry-preview.
+
+ -- Edward Honour <ed@maludb.org>  Sat, 24 Oct 2026 13:10:00 +0000
+
 maluos-installer (0.0.1) resolute; urgency=medium
 
   * Phase 11 slice 1: the live medium's stub. maluos-install prints the

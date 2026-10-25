@@ -14,3 +14,11 @@ grub-efi-amd64-bin
 shim-signed
 grub2-common
 zstd
+# Apple T2 Macs (Phase 11, the Apple T2 round): the bridge driver (keyboard,
+# trackpad) and the trackpad driver built by DKMS into the live image, with the
+# firmware import for the Mac's Wi-Fi. The whole component goes on a target.
+maluos-apple-t2-support
+apple-bce-dkms
+bcm5974-t2
+dkms
+linux-headers-generic

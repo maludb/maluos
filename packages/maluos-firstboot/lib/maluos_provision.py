@@ -297,6 +297,62 @@ def run_components(cfg, db, tenant):
     return results
 
 
+def _scrub_enroll_code():
+    """The one-time code is used once: blank it in firstboot.yaml, keeping the rest of the file."""
+    try:
+        lines = open(CONFIG).read().splitlines(True)
+    except OSError:
+        return
+    out, in_enroll = [], False
+    for line in lines:
+        if re.match(r"^enroll:", line):
+            in_enroll = True
+        elif re.match(r"^\S", line):
+            in_enroll = False
+        if in_enroll and re.match(r"^\s+code:", line):
+            line = re.sub(r"^(\s+code:).*$", r'\1 ""   # used on the first boot', line.rstrip("\n")) + "\n"
+        out.append(line)
+    with open(CONFIG, "w") as f:
+        f.writelines(out)
+
+
+def run_enroll(cfg):
+    """firstboot.yaml's enroll section (written by the installer from the plan): office -> maluctl office enroll;
+    estate -> Phase 13 slice 1, not on this release. Returns the outcome for `maluctl status`, or None."""
+    e = cfg.get("enroll") or {}
+    kind = (e.get("kind") or "").strip()
+    if not kind:
+        return None
+    url, code, name, owner = e.get("url") or "", e.get("code") or "", e.get("name") or "", e.get("owner") or ""
+    if kind == "estate":
+        log("enroll: estate enrolment is not available on this release (Phase 13 slice 1); the key is left in place")
+        return {"kind": kind, "url": url, "error": "estate enrolment is not available on this release"}
+    if kind != "office":
+        return {"kind": kind, "url": url, "error": f"unknown enrolment kind {kind!r}"}
+    if not os.path.exists("/usr/lib/maluos/maluctl.d/office.py"):
+        return {"kind": kind, "url": url, "error": "maluos-desk is not installed (no `maluctl office`)"}
+    if not code:
+        return {"kind": kind, "url": url, "error": "no code (used already, or none given)"}
+    argv = ["maluctl", "office", "enroll", url, "--code", code]
+    if name:
+        argv += ["--name", name]
+    if owner:
+        argv += ["--owner", owner]
+    log(f"enroll: office {url} as {name or 'this host'}" + (f" for {owner}" if owner else ""))
+    try:
+        r = subprocess.run(argv, capture_output=True, text=True, timeout=180)
+        out = (r.stdout + r.stderr).strip()
+        ok = r.returncode == 0
+    except (OSError, subprocess.SubprocessError) as ex:
+        out, ok = repr(ex), False
+    _scrub_enroll_code()
+    log(f"enroll: {'ok' if ok else 'FAILED'}: {out[-300:]}")
+    res = {"kind": kind, "url": url, "name": name, "owner": owner, "ok": ok, "output": out[-400:]}
+    if not ok:
+        res["error"] = out.splitlines()[-1][:200] if out else "enrolment failed"
+    return res
+
+
 def provision(force=False):
     if os.geteuid() != 0:
         sys.exit("must run as root")
@@ -313,12 +369,13 @@ def provision(force=False):
     ops = operator_users(cfg.get("operators", "auto"))
     ensure_operators(db, tenant, ops)
     components = run_components(cfg, db, tenant)
+    enroll = run_enroll(cfg)
     os.makedirs(STATE_DIR, exist_ok=True)
     summary = {"provisioned_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                "database": db, "maludb_core": version, "tenant": tenant,
                "admin_principal": cfg["admin_principal"]["ref"], "listener": url,
                "listener_user": listener_user, "token_file": TOKEN_FILE if os.path.exists(TOKEN_FILE) else None,
-               "operators": ops, "components": components}
+               "operators": ops, "components": components, "enroll": enroll}
     with open(DONE, "w") as f:
         json.dump(summary, f, indent=2); f.write("\n")
     log("done: " + json.dumps(summary))

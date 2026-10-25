@@ -1,6 +1,9 @@
 bin/maluos-install                                   usr/bin
+lib/maluos_installer                                 usr/lib/maluos
+lib/maluos-live-ssh                                  usr/lib/maluos-installer
 systemd/maluos-installer.service                     usr/lib/systemd/system
 systemd/maluos-rescue.service                        usr/lib/systemd/system
+systemd/maluos-live-ssh.service                      usr/lib/systemd/system
 systemd/serial-getty@.service.d/maluos-live.conf     usr/lib/systemd/system/serial-getty@.service.d
 etc/casper.conf                                      usr/share/maluos-installer
 etc/maluos-cdrom.sources                             etc/apt/sources.list.d

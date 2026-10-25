@@ -1,0 +1,18 @@
+# The medium's unattended desktop plan: the same as the server's for the
+# desktop image. Erases the first fixed disk. Login maluos, password maluos,
+# which the first login must change. The desktop keeps cloud-init off and the
+# SSH server off (the plan's defaults for the desktop image).
+maluos-install:
+  version: 1
+  source: {image: maluos-desktop}
+  locale: {language: en_US.UTF-8, keyboard: {layout: us}, timezone: UTC}
+  network: {mode: dhcp}
+  storage: {disk: first, erase: true, layout: lvm, root_size: 50G, encrypt: false}
+  identity:
+    hostname: maluos
+    user: {name: maluos, password: "$6$JiuKZtdHT5qsUZfT$XMdWgSWDGNbNCtLnJ7YVd3pr0SSI.zZmZs3T8mR9.7R0.frTG//sPI77goxj2/r7g.0f7K233qAJPYKTJoklL/", password_change_required: true}
+    ssh: {server: false}
+  firstboot: {tenant: maluos, admin: {principal: human:admin}}
+  bootloader: {timeout: 0}
+  telemetry: {send: false}
+  finish: {action: reboot}

@@ -1,0 +1,18 @@
+# The medium's unattended server plan (docs/install-plan.md, example 1).
+# Erases the first fixed disk. Login maluos, password maluos, which the first
+# login must change. Copied onto the medium as /maluos/plan/server-unattended.yaml
+# by iso/build-live-iso.sh; the menu entry "Install MaluOS Server unattended" runs it.
+maluos-install:
+  version: 1
+  source: {image: maluos-server}
+  locale: {language: en_US.UTF-8, keyboard: {layout: us}, timezone: UTC}
+  network: {mode: dhcp}
+  storage: {disk: first, erase: true, layout: lvm, root_size: 50G, encrypt: false}
+  identity:
+    hostname: maluos
+    user: {name: maluos, password: "$6$JiuKZtdHT5qsUZfT$XMdWgSWDGNbNCtLnJ7YVd3pr0SSI.zZmZs3T8mR9.7R0.frTG//sPI77goxj2/r7g.0f7K233qAJPYKTJoklL/", password_change_required: true}
+    ssh: {server: true, password_auth: true}
+  firstboot: {tenant: maluos, admin: {principal: human:admin}}
+  bootloader: {cmdline: "console=tty1 console=ttyS0,115200"}
+  telemetry: {send: false}
+  finish: {action: reboot}

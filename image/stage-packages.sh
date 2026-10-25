@@ -48,6 +48,12 @@ $APT install $(grep -vE '^\s*(#|$)' /tmp/stage/profile.pkgs)
 
 # PostgreSQL cluster port: the build chroot shares the host's network namespace,
 # so pg_createcluster skips 5432 when the host runs PostgreSQL. Pin it.
+# DKMS modules (the live image's apple-bce and bcm5974 for T2 Macs) for every kernel in the image, whatever
+# the build host runs: a module's postinst builds for the running kernel alone
+if command -v dkms >/dev/null; then
+    for k in /lib/modules/*/build; do [ -d "$k" ] && dkms autoinstall -k "$(basename "$(dirname "$k")")" || true; done
+    dkms status || true
+fi
 for f in /etc/postgresql/*/main/postgresql.conf; do
     [ -f "$f" ] && sed -i 's/^port = .*/port = 5432/' "$f"
 done

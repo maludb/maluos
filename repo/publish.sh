@@ -1,5 +1,5 @@
 #!/bin/bash
-# Add build/*.deb (and vendor/maludb/*.deb, and any .deb paths given) to the aptly
+# Add build/*.deb (and vendor/*/*.deb, and any .deb paths given) to the aptly
 # repo and (re)publish. Two published trees of the same repository:
 #   <publish root>/dists,pool         signed by the development key: image builds, tests
 #   <publish root>/public/dists,pool  signed by the production key (--public): what
@@ -14,7 +14,7 @@ BUILD=${BUILD_DIR:-$ROOT/build}
 PUBLIC=0; extra=()
 for a in "$@"; do case "$a" in --public) PUBLIC=1;; *) extra+=("$a");; esac; done
 
-debs=( "$BUILD"/*.deb "$ROOT"/vendor/maludb/*.deb "${extra[@]}" )
+debs=( "$BUILD"/*.deb "$ROOT"/vendor/*/*.deb "${extra[@]}" )
 aptly repo add -force-replace "$MALUOS_APTLY_REPO" "${debs[@]}"
 
 publish_tree() {   # prefix ("." for the root) and signing uid; aptly takes the prefix positionally

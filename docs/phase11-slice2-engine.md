@@ -3,8 +3,9 @@
 Specified 2026-10-23 from docs/phase11-installer.md (decisions 2, 4, 5,
 8; the owner's answers 1, 2, 3 and 4), docs/install-plan.md (the plan
 is the contract; this page is what executes it) and slice 1
-(docs/phase11-slice1-live.md, the media it runs from). Nothing here is
-built. It is sequenced after slice 1 in docs/roadmap.md (E1).
+(docs/phase11-slice1-live.md, the media it runs from). Built 2026-10-24:
+the status at the end of this document says what the first rounds
+settled against the text below.
 
 ## What the slice delivers
 
@@ -337,3 +338,45 @@ stick) is the owner's, once per slice from here to the switch.
 
 About the size of Phase 12 slice 7; four or five install rounds on the
 dev VM, with KVM, before CI sees it.
+
+## Status (2026-10-24)
+
+Built the day after slice 1: maluos-installer 0.1.0, maluos-firstboot
+0.1.9, the plans, the catalogue, the tests, the Worker. What the build and
+the first install rounds decided, against the decisions above:
+
+| Item | Where | Notes |
+|---|---|---|
+| The engine | packages/maluos-installer/lib/maluos_installer | As decision 1: plan.py, disks.py, engine.py, steps/, telemetry.py; installed under /usr/lib/maluos like maluos-firstboot's modules, run from the repository tree by the ISO build and the unit test. `--check` with `--no-hardware` is what the ISO build runs (a 64 GB UEFI machine stands in for the disk facts). |
+| The layouts | steps/storage.py | As decision 3, with sfdisk's GPT type GUIDs and the "Linux root (x86-64)" type for a plain root. A plan's `root_size` larger than a small disk takes the disk instead of failing (the media's 50G on a 16 GB machine). `--dry-run` prints every command with the machine's real disk facts. |
+| The bootloader | steps/bootloader.py | The EFI directory stays `ubuntu`: Ubuntu's signed grub has `/EFI/ubuntu` as its built-in prefix and would otherwise search the medium for `/.disk/info` and load the installer's menu again. Only the NVRAM entry carries the plan's label, written with `efibootmgr -c` after `grub-install --no-nvram`, and `EFI/BOOT/BOOTX64.EFI` is written too. The summary line names the signed chain. |
+| The initrd | steps/configure.py | The target images use dracut, not initramfs-tools, in its generic mode (LVM and systemd-cryptsetup are in every initrd). An encrypted root gets `rd.luks.name=UUID=NAME rd.luks.options=discard` on the kernel command line beside the crypttab and a `dracut --regenerate-all` in the chroot (for the keyboard map at the prompt); an unencrypted install rebuilds nothing. |
+| apt | steps/configure.py | The on-media repository and `maluos-iso.sources` exactly as the late-commands; the network `maluos.sources` is left as the image ships it, since nothing on first boot would turn it back on and apt tolerates it unreachable (tests/iso-apt-check.sh checks that). |
+| cloud-init | steps/configure.py | Kept with a NoCloud seed whose user-data says `users: []` and `preserve_hostname: true` (else cloud.cfg's default user `ubuntu` appears), and `network: {config: disabled}` since the installer wrote the netplan file. `false` writes /etc/cloud/cloud-init.disabled. |
+| The medium | iso/build-live-iso.sh, iso/plans/, iso/catalog.py, iso/grub-live.cfg.in | The profile's unattended plan and the catalogue onto the medium, every plan checked with the engine before assembly; the "Install MaluOS … unattended" entry; `--test-install` writes the test plan (the unattended plan with the test key, the SSH server on, the serial console, no forced password change: sshd refuses a non-interactive command for an expired password and the test drives the system over SSH) and makes it the default; `--test-ssh` boots with `maluos.ssh=media`; slice 1's `--test` is unchanged. The test plan is the plan, with `finish: reboot`; QEMU's `-no-reboot` ends the install VM, so no `finish: none` variant was needed. |
+| Eject | steps/finish.py | casper ejects the medium when the live system reboots (`noeject` keeps it); `finish.eject` adds nothing on top today. |
+| The SSH option | lib/maluos-live-ssh, maluos-live-ssh.service | `maluos.ssh=URL`, a quoted key line, or `media` (the `--ssh-key` file on the medium); the address goes to the console and to the installer's banner. |
+| Enrolment | maluos-firstboot 0.1.9 | The `enroll` section runs `maluctl office enroll` after provisioning (with `--owner`, the plan's user, which the installer adds), blanks the code in the file, records the outcome; `maluctl status` shows an `enrolment:` line and `maluctl firstboot status` is the same command. `estate` reports "not available on this release". |
+| Telemetry | telemetry.py, telemetry/ | The document as specified; `--telemetry-preview` prints it. The Worker, its wrangler.toml and a README are in telemetry/ for the owner to deploy (bucket, lifecycle rule, custom domain). |
+| Tests | tests/install-plan-test.py, tests/live-install-test.sh, tests/lib/serial-answer.py, tests/iso-apt-check.sh | 22 unit tests (the schema, the four layouts on 16, 64 and 2000 GB, the refusals, the references and redaction, the telemetry document, the journal's resume) in the packages workflow; the install test with `--uefi`, `-p`, `--ssh`, `--encrypt`, `--layout`, `--fs` and `--boot-only` (verify an installed disk again); the apt replay replays the engine's own apt sub-step (`--apt-check`). |
+
+| Round (2026-10-24, TCG on the dev VM, which has no /dev/kvm) | Result |
+|---|---|
+| server BIOS, lvm ext4 | install finished in 10 min (storage 19 s, unpack 425 s, configure 101 s, bootloader 48 s, finish 22 s); the disk booted (the initrd found the LV after 30 s of emulated udev), first boot provisioned in 24 min; 41 ok / 0 FAIL after the test's own fixes (sudo needs the plan's password: `sudo -S`; lsblk escapes "BIOS boot" in raw mode; the journal is copied mid-finish, so finish is `start` in the copy) |
+| server UEFI, lvm ext4 | install finished in 9 min; booted through shim and the signed grub, `efibootmgr` shows MaluOS first, EFI/ubuntu and the EFI/BOOT fallback on the ESP; 44 ok / 0 FAIL (the journal check corrected as above) |
+| desktop BIOS, direct xfs | install finished in 10 min and the disk booted to the greeter, but sshd found no host keys: the images ship none (cloud-init makes them on a server's first boot, and the desktop has cloud-init off). The identity sub-step now runs `ssh-keygen -A` in the target when `ssh.server` is true; the round is rerun with the fix (round 6) |
+| server BIOS, lvm ext4, encrypted | PASS, 45 ok / 0 FAIL: LUKS2 format 45 s and the dracut rebuild 6.5 min under TCG; the prompt on the serial console answered by tests/lib/serial-answer.py, systemd-cryptsetup opened maluos-pv, the LV root came up, `cryptsetup status` active, `rd.luks.name` on the kernel command line, no passphrase in the evidence; two file capabilities survived the unpack |
+| server BIOS, direct ext4, over SSH | PASS, 41 ok / 0 FAIL: the live environment started sshd from the key on the medium (`maluos.ssh=media`), the plan ran from an SSH session with `--json` (the event stream in the test's log), root on partition 3 |
+| desktop BIOS, direct xfs (round 6, with the host-key fix) | PASS, 41 ok / 0 FAIL: root on partition 3, xfs, cloud-init disabled, sshd up with the generated host keys, first boot provisioned (the desktop image carries the server stack) |
+| the UEFI disk re-verified (`--boot-only`) | PASS, 45 ok / 0 FAIL with the corrected journal check |
+
+Verified from the "to verify" list: the signed grub needs the `ubuntu`
+directory (above); `unsquashfs -xattrs` onto the mounted root is what runs (the install test
+counts the file capabilities with `getcap -r /usr`: the server image's two
+survive); dracut is the target's
+initrd builder and its generic initrd carries LVM and cryptsetup; the
+NoCloud seed with `instance-id` alone makes cloud-init run `modules:config`
+four minutes into the first boot under TCG without a network datasource
+search. Every planned round passed (the four layouts across them, BIOS and UEFI,
+encrypted, over SSH, both images). Not yet done: the real-machine round
+(the owner's) and the CI run.

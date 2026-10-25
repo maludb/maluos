@@ -8,13 +8,15 @@ Homepage: https://maluos.com
 
 Package: maluos-installer
 Architecture: all
-Depends: ${misc:Depends}, python3 (>= 3.12), casper, initramfs-tools, plymouth, plymouth-theme-spinner, maluos-branding (>= 0.4.0), mokutil, iproute2, squashfs-tools
+Depends: ${misc:Depends}, python3 (>= 3.12), python3-yaml, casper, initramfs-tools, plymouth, plymouth-theme-spinner, maluos-branding (>= 0.4.0), mokutil, iproute2, squashfs-tools, python3-urwid, openssl, kbd, dosfstools, e2fsprogs, xfsprogs, lvm2, cryptsetup, efibootmgr, pciutils, curl, openssh-server
 Description: MaluOS installer (the live medium's own)
- The installer the MaluOS medium boots into (Phase 11). This version is
- the live environment's stub: it owns the console, prints the banner and
- the medium's facts (the images, their checksums, the kernel and initrd,
- the firmware, the network) and leaves a shell; the engine, the unattended
- plan and the screens come in the next slices under the same name. The
- package also carries the live configuration: casper.conf (the live user
- maluos), the console units, the on-media apt source. It is never
- installed on a target.
+ The installer the MaluOS medium boots into (Phase 11). maluos-install
+ executes an install plan (docs/install-plan.md): guided layouts (direct or
+ LVM, ext4 or xfs, LUKS optional), the image verified and unpacked, the
+ target configured, the bootloader for BIOS and UEFI with Secure Boot, the
+ first-boot file seeded, one telemetry report when the plan says so. A plan
+ comes from maluos.plan= on the kernel command line (the medium's unattended
+ plans, a URL, a labelled disk), from /maluos/plan/default.yaml, or over SSH
+ (maluos.ssh=). A journal makes a failed install resumable. The package also
+ carries the live configuration: casper.conf (the live user maluos), the
+ console units, the on-media apt source. It is never installed on a target.

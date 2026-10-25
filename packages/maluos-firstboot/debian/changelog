@@ -1,3 +1,15 @@
+maluos-firstboot (0.1.9) resolute; urgency=medium
+
+  * The enroll section of firstboot.yaml (Phase 11 slice 2; written by the
+    MaluOS installer from the install plan): kind office runs `maluctl office
+    enroll URL --code CODE --name NAME --owner USER` after provisioning and
+    blanks the one-time code in the file once used; kind estate reports that
+    estate enrolment is not available on this release (Phase 13 slice 1) and
+    leaves the key. The outcome is in the state file; `maluctl status` (and
+    `maluctl firstboot status`) show an enrolment line.
+
+ -- Edward Honour <ed@maludb.org>  Sat, 24 Oct 2026 13:20:00 +0000
+
 maluos-firstboot (0.1.8) resolute; urgency=medium
 
   * maluctl update auto (Phase 12 slice 7, the Upgrade Manager's switches):

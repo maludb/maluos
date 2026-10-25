@@ -1,21 +1,42 @@
 #!/usr/bin/python3
-"""maluos-install: the MaluOS installer (Phase 11). Slice 1: the live medium's stub.
+"""maluos-install: the MaluOS installer (Phase 11). Slice 2: the engine and the unattended install; slice 3: the screens.
 
-  maluos-install                 the banner, the medium's facts, then a root shell (the installer's console unit)
-  maluos-install --check-media   the facts only: the medium, the images and the target's checksum, the kernel
-                                 and initrd, the firmware, the network; exit 0 when the medium is sound
+  sudo maluos-install                     the screens (what the console unit runs without maluos.plan=)
+  sudo maluos-install --screens [--plan FILE]      the screens, prefilled from a plan when one is given
+  maluos-install --screens --no-hardware --media DIR --save-plan OUT    the screens without a machine (the pty test)
+  sudo maluos-install --plan FILE|URL [--check | --dry-run] [--json]
+        install from a plan (docs/install-plan.md). --check validates and prints the plan as understood
+        without touching a disk; --dry-run prints every command and runs none (the disk facts are real).
+  sudo maluos-install --resume --plan FILE
+        after a failed step fixed in the shell: continue from the journal (storage and unpack are
+        all-or-nothing; configure and bootloader resume at the first sub-step not done).
+  maluos-install --telemetry-preview --plan FILE
+        the report that would be sent, nothing sent.
+  maluos-install --check-media          the medium's facts (slice 1); exit 0 when the medium is sound
+  maluos-install --apt-check TARGET --media MEDIA
+        the configure step's apt part against TARGET (tests/iso-apt-check.sh), nothing else
   maluos-install --version
 
-With maluos.test=1 on the kernel command line the console unit prints the
-facts to /dev/console (the serial line of a test) and powers the machine off.
-The engine, the plan and the screens come in the next slices under this name.
+Without arguments this is the live medium's console: maluos.plan= on the kernel
+command line (a path on the medium, a URL, or LABEL=NAME:/path) or
+/maluos/plan/default.yaml runs the engine; otherwise the screens. maluos.test=1
+without a plan keeps slice 1's medium check and powers off.
 """
-import hashlib, json, os, re, subprocess, sys
+import hashlib, json, os, shlex, subprocess, sys, time
 
-VERSION = "0.0.1"
-CDROM = "/cdrom"
+sys.path.insert(0, "/usr/lib/maluos")
+if os.path.isdir(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lib", "maluos_installer")):
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lib"))   # run from the repository
+
+from maluos_installer import VERSION, plan as planmod, disks, engine, telemetry
+from maluos_installer.steps import finish as finish_step, configure as configure_step
+
+CDROM = os.environ.get("MALUOS_INSTALL_MEDIA", "/cdrom")
+LAST_ACTION = None   # what the finish step did, for the console unit
+TARGET = os.environ.get("MALUOS_INSTALL_TARGET", "/target")
 
 
+# --- slice 1: the medium's facts -------------------------------------------------------------
 def os_release():
     d = {}
     try:
@@ -29,9 +50,16 @@ def os_release():
 
 def cmdline():
     try:
-        return open("/proc/cmdline").read().split()
-    except OSError:
+        return shlex.split(open("/proc/cmdline").read())
+    except (OSError, ValueError):
         return []
+
+
+def cmdline_value(key):
+    for tok in cmdline():
+        if tok.startswith(key + "="):
+            return tok[len(key) + 1:]
+    return None
 
 
 def sh(*argv, timeout=60):
@@ -48,7 +76,7 @@ def mb(path):
         return 0.0
 
 
-def sha256(path, out=None):
+def sha256(path):
     h = hashlib.sha256()
     with open(path, "rb") as f:
         while True:
@@ -59,34 +87,47 @@ def sha256(path, out=None):
     return h.hexdigest()
 
 
+def disk_info(media=CDROM):
+    try:
+        return open(f"{media}/.disk/info").read().strip()
+    except OSError:
+        return ""
+
+
+def medium_variant(media=CDROM):
+    info = disk_info(media).lower()
+    if "desktop" in info:
+        return "desktop"
+    if "server" in info:
+        return "server"
+    d = os.path.join(media, "maluos/images")
+    names = os.listdir(d) if os.path.isdir(d) else []
+    return "desktop" if any("desktop" in n for n in names) else "server"
+
+
 def banner(out):
     osr = os_release()
-    info = ""
+    info = disk_info()
+    out(f"\n  {osr.get('PRETTY_NAME') or 'MaluOS'} installer {VERSION}" + (f"  ·  {info}" if info else "") + "\n")
     try:
-        info = open(f"{CDROM}/.disk/info").read().strip()
+        addr = open("/run/maluos-install/ssh-address").read().strip()
+        if addr:
+            out(f"  Remote install: ssh maluos@{addr}  (then: sudo maluos-install --plan …)\n")
     except OSError:
         pass
-    out(f"\n  {osr.get('PRETTY_NAME') or 'MaluOS'} installer {VERSION}" + (f"  ·  {info}" if info else "") + "\n")
 
 
 def check_media(out):
     """The facts, one line each; returns True when the medium is sound."""
     ok = True
-    # the medium
     mnt = sh("findmnt", "-rn", "-o", "SOURCE,FSTYPE,LABEL", CDROM).split()
-    info = ""
-    try:
-        info = open(f"{CDROM}/.disk/info").read().strip()
-    except OSError:
-        pass
+    info = disk_info()
     if mnt and info:
         out(f"medium: {CDROM} ({mnt[2] if len(mnt) > 2 and mnt[2] else mnt[0]}) · {info}")
     else:
         out(f"medium: {CDROM} not mounted or no .disk/info"); ok = False
-    # the live image
     live = f"{CDROM}/casper/maluos-live.squashfs"
     out(f"live: maluos-live.squashfs {mb(live):.0f} MB" if os.path.exists(live) else "live: maluos-live.squashfs missing")
-    # the targets and their checksums
     sums = {}
     try:
         for line in open(f"{CDROM}/maluos/SHA256SUMS"):
@@ -103,13 +144,13 @@ def check_media(out):
         path = f"{imgdir}/{t}"
         want = sums.get(f"images/{t}")
         if want:
-            got = sha256(path)
-            good = got == want
+            good = sha256(path) == want
             out(f"target: {t} {mb(path):.0f} MB sha256 {'ok' if good else 'MISMATCH'}")
             ok = ok and good
         else:
             out(f"target: {t} {mb(path):.0f} MB sha256 not listed"); ok = False
-    # the kernel and the initrd
+    plans = sorted(f for f in (os.listdir(f"{CDROM}/maluos/plan") if os.path.isdir(f"{CDROM}/maluos/plan") else []) if f.endswith((".yaml", ".json")))
+    out("plans: " + (", ".join(plans) if plans else "none on the medium"))
     out(f"kernel: {os.uname().release}")
     initrd = f"{CDROM}/casper/initrd"
     if os.path.exists(initrd):
@@ -120,32 +161,240 @@ def check_media(out):
         ok = ok and casper
     else:
         out("initrd: /casper/initrd missing"); ok = False
-    # the firmware
-    if os.path.isdir("/sys/firmware/efi"):
-        sb = sh("mokutil", "--sb-state").strip().replace("SecureBoot ", "Secure Boot ") or "Secure Boot state unknown"
-        out(f"firmware: UEFI, {sb.splitlines()[0] if sb else sb}")
-    else:
-        out("firmware: BIOS")
-    # the network: NetworkManager is still asking for a lease when the console unit starts; wait a little for one
-    import time
+    fw = disks.firmware()
+    out(f"firmware: UEFI, Secure Boot {fw['secure_boot']}" if fw["mode"] == "uefi" else "firmware: BIOS")
     deadline = time.time() + 45
     while True:
-        try:
-            links = json.loads(sh("ip", "-j", "addr") or "[]")
-        except ValueError:
-            links = []
-        nets, addressed = [], False
-        for l in links:
-            if l.get("ifname") == "lo":
-                continue
-            a4 = [a["local"] for a in l.get("addr_info") or [] if a.get("family") == "inet"]
-            addressed = addressed or bool(a4)
-            nets.append(f"{l.get('ifname')} {' '.join(a4) if a4 else '(no address)'}")
+        nets = disks.wired_interfaces()
+        addressed = any(a for _, _, a in nets)
         if addressed or time.time() > deadline:
             break
         time.sleep(2)
-    out("network: " + (", ".join(nets) if nets else "no interfaces"))
+    out("network: " + (", ".join(f"{n} {' '.join(a) if a else '(no address)'}" for n, _, a in nets) or "no interfaces"))
     return ok
+
+
+# --- the plan ------------------------------------------------------------------------------
+def wait_for_network(log, timeout=120):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if "default" in sh("ip", "-4", "route", "show", "default"):
+            return True
+        time.sleep(3)
+    log("no default route after two minutes; trying anyway")
+    return False
+
+
+def read_plan_source(src, log):
+    """A path, a URL, 'LABEL=NAME:/path' or a media-relative path -> the plan's text."""
+    if src.startswith(("http://", "https://")):
+        wait_for_network(log)
+        return planmod.fetch_url(src, log=log)
+    if src.startswith("LABEL="):
+        label, _, rel = src[6:].partition(":")
+        root = planmod.mount_label(label)
+        return open(os.path.join(root, rel.lstrip("/"))).read()
+    for cand in (src, os.path.join(CDROM, src.lstrip("/"))):
+        if os.path.exists(cand):
+            return open(cand).read()
+    raise planmod.PlanError(f"no plan at {src}")
+
+
+class Options:
+    def __init__(self, argv):
+        self.plan = self.media = self.target = self.apt_check = self.save_plan = None
+        self.check = self.dry_run = self.resume = self.json = self.preview = self.no_hardware = self.screens = False
+        it = iter(argv)
+        for a in it:
+            if a == "--plan": self.plan = next(it, None)
+            elif a == "--media": self.media = next(it, None)
+            elif a == "--target": self.target = next(it, None)
+            elif a == "--apt-check": self.apt_check = next(it, None)
+            elif a == "--check": self.check = True
+            elif a == "--dry-run": self.dry_run = True
+            elif a == "--resume": self.resume = True
+            elif a == "--json": self.json = True
+            elif a == "--telemetry-preview": self.preview = True
+            elif a == "--no-hardware": self.no_hardware = True
+            elif a == "--screens": self.screens = True
+            elif a == "--save-plan": self.save_plan = next(it, None)
+            else:
+                raise SystemExit(f"maluos-install: unknown option {a}\n{__doc__}")
+
+
+def load_plan(src, media, log, resolve=True):
+    text = read_plan_source(src, log)
+    plan = planmod.load(text, medium_variant(media))
+    if resolve:
+        planmod.resolve_refs(plan, media, log=log)
+    return plan
+
+
+def fake_facts():
+    """For --check --no-hardware (the ISO build): one 64 GB disk, UEFI, 8 GB of memory."""
+    # the table: an EFI partition and a 20 GB "macOS" with the rest free, so a plan with storage.target free checks too
+    g = 1 << 30; m = 1 << 20
+    table = {"label": "gpt", "esp": {"n": 1, "node": "/dev/sda1", "size": 300 * m},
+             "parts": [{"n": 1, "node": "/dev/sda1", "start": m, "size": 300 * m, "type": "C12A7328-F81F-11D2-BA4B-00A0C93EC93B", "name": "EFI"},
+                       {"n": 2, "node": "/dev/sda2", "start": 301 * m, "size": 20 * g, "type": "7C3457EF-0000-11AA-AA11-00306543ECAC", "name": "macOS"}],
+             "free": [{"start": 301 * m + 20 * g, "size": 64 * g - 301 * m - 20 * g - m}]}
+    return {"disks": [{"path": "/dev/sda", "name": "sda", "size": 64 << 30, "bus": "sata", "removable": False, "rotational": False,
+                       "model": "build host", "serial": "", "wwn": "", "medium": False, "in_use": False, "sector": 512, "table": table}],
+            "medium": None, "firmware": "uefi", "secure_boot": "unknown", "memory_mb": 8192,
+            "cpu": {"model": "build host", "cores": 1}, "gpu": "none", "virtual": "none",
+            "apple": {"mac": False, "model": "", "t2": False, "bce": False}}
+
+
+def run_plan(opts, console=None, test=False, unattended=True):
+    """Load, check, apply. Returns an exit code; prints the console markers."""
+    media = opts.media or CDROM
+    target = opts.target or TARGET
+    lines = []
+    def log(m):
+        lines.append(m); print(f"maluos-install: {m}", flush=True)
+    try:
+        plan = load_plan(opts.plan, media, log)
+    except planmod.PlanError as e:
+        print(f"maluos-install: FAILED at plan: {e}", flush=True)
+        if console: console.write(f"maluos-install: FAILED at plan: {e}\n"); console.flush()
+        return 3
+    facts = fake_facts() if opts.no_hardware else disks.facts(media)
+    if opts.no_hardware or opts.check or opts.preview:
+        run_dir = os.path.join(os.environ.get("TMPDIR", "/tmp"), f"maluos-install-check-{os.getpid()}")
+    else:
+        run_dir = engine.RUN_DIR
+    dry = opts.dry_run or opts.check or opts.preview
+    ctx = engine.Context(plan, facts, media=media, target=target, dry_run=dry, json_out=opts.json, run_dir=run_dir, console=console)
+    ctx.state["unattended"] = unattended
+    ctx.state["remote"] = bool(os.environ.get("SSH_CONNECTION"))
+    if os.geteuid() != 0 and not dry:
+        print("maluos-install: run with sudo", file=sys.stderr); return 2
+    # check everything before touching the disk
+    try:
+        summaries = engine.check(ctx)
+    except engine.CheckFailed as e:
+        print("maluos-install: the plan cannot be applied to this machine:", flush=True)
+        for err in e.errors:
+            print(f"  - {err}", flush=True)
+        if console:
+            console.write("maluos-install: FAILED at check: " + "; ".join(e.errors)[:400] + "\n"); console.flush()
+        return 3
+    if opts.preview:
+        print(json.dumps(telemetry.document(ctx, outcome="ok"), indent=1)); return 0
+    if opts.check:
+        print(planmod.dump(planmod.redact(plan)), end="")
+        for s in summaries:
+            print(f"  {s}")
+        for w in ctx.warnings:
+            print(f"  warning: {w}")
+        print("check: ok (nothing was changed)")
+        return 0
+    try:
+        action = engine.apply(ctx, resume=opts.resume)
+    except engine.StepFailed as e:
+        where = f"{e.step}/{e.sub}" if e.sub else e.step
+        msg = f"maluos-install: FAILED at {where}: {e.message.splitlines()[0]}"
+        print(msg, flush=True)
+        if console:
+            console.write(msg + "\n"); console.flush()
+        if plan["telemetry"]["send"]:
+            doc = telemetry.document(ctx, outcome="failed", failure={"step": e.step, "sub": e.sub, "error": e.message})
+            ok, note = telemetry.send(ctx, doc)
+            print(f"maluos-install: telemetry {note}", flush=True)
+        print(f"maluos-install: the log is {ctx.log_path}; fix and `sudo maluos-install --resume --plan {opts.plan}`", flush=True)
+        return 1
+    global LAST_ACTION
+    LAST_ACTION = action
+    if console:
+        console.write(f"maluos-install: finished ({action})\n"); console.flush()
+    if not dry:
+        finish_step.do_action(ctx, action)
+    return 0
+
+
+# --- the screens ---------------------------------------------------------------------------------
+def run_screens(opts, console_unit=False):
+    """The urwid wizard; returns an exit code. After the loop: the marker, the plan's action, or a shell."""
+    from maluos_installer.ui.app import Installer
+    media = opts.media or CDROM
+    seed = None
+    if opts.plan:
+        lines = []
+        try:
+            seed = load_plan(opts.plan, media, lines.append, resolve=False)
+        except planmod.PlanError as e:
+            print(f"maluos-install: the plan to prefill from has errors: {e}", file=sys.stderr); return 3
+    facts = fake_facts() if opts.no_hardware else disks.facts(media)
+    if os.geteuid() != 0 and not opts.no_hardware:
+        print("maluos-install: run with sudo", file=sys.stderr); return 2
+    run_dir = engine.RUN_DIR if not opts.no_hardware else os.path.join(os.environ.get("TMPDIR", "/tmp"), f"maluos-install-ui-{os.getpid()}")
+    app = Installer(media, facts, medium_variant(media), seed=seed, save_plan=opts.save_plan, no_hardware=opts.no_hardware,
+                    run_dir=run_dir, target=opts.target or TARGET)
+    kind, value = app.run()
+    if kind == "installed":
+        print(f"maluos-install: finished ({value})", flush=True)
+        if not opts.no_hardware and value in ("reboot", "poweroff"):
+            subprocess.run(["systemctl", value])
+        return 0
+    if kind == "saved":
+        print(f"maluos-install: the plan is saved at {value}", flush=True); return 0
+    if kind == "failed":
+        print(f"maluos-install: FAILED: {value}", flush=True)
+        print("maluos-install: the log is /run/maluos-install/install.log; `sudo maluos-install --resume --plan /run/maluos-install/plan.yaml` continues", flush=True)
+        if console_unit:
+            os.execvp("/bin/bash", ["/bin/bash", "-l"])
+        return 1
+    if kind == "shell":
+        print("maluos-install: leaving the installer. `sudo maluos-install` starts it again.", flush=True)
+        if console_unit:
+            os.execvp("/bin/bash", ["/bin/bash", "-l"])
+        return 0
+    return 0
+
+
+# --- the console unit ----------------------------------------------------------------------------
+def console_main():
+    test = "maluos.test=1" in cmdline()
+    con = None
+    try:
+        con = open("/dev/console", "w")
+    except OSError:
+        con = None
+    def out(line):
+        print(line, flush=True)
+        if con and test:
+            con.write(line + "\n"); con.flush()
+    banner(out)
+    src = cmdline_value("maluos.plan")
+    if not src and os.path.exists(f"{CDROM}/maluos/plan/default.yaml"):
+        src = f"{CDROM}/maluos/plan/default.yaml"
+    if src:
+        out(f"Installing from the plan {src}" + (" (test mode)" if test else ""))
+        opts = Options(["--plan", src])
+        rc = run_plan(opts, console=con if test else None, test=test)
+        if test:
+            if rc == 0 and LAST_ACTION in ("reboot", "poweroff"):
+                out(f"maluos-install: ok; the plan's {LAST_ACTION} is under way (maluos.test=1)")
+            else:
+                out(f"maluos-install: {'ok' if rc == 0 else 'failed'}; powering off (maluos.test=1)")
+                subprocess.run(["systemctl", "poweroff"])
+            time.sleep(600)
+            return rc
+        if rc != 0:
+            out("\nThe install did not finish. The log is /run/maluos-install/install.log; `sudo maluos-install --resume --plan " + src + "`")
+            out("continues from the journal once the cause is fixed. You have a shell.\n")
+        else:
+            out("\nThe install finished; the target is still mounted at /target (finish.action shell or none). You have a shell.\n")
+        os.execvp("/bin/bash", ["/bin/bash", "-l"])
+    if test:
+        ok = check_media(out)
+        out("")
+        out(f"check-media: {'ok' if ok else 'FAILED'}; powering off (maluos.test=1)")
+        subprocess.run(["systemctl", "poweroff"])
+        return 0
+    # no plan: the screens (slice 3); they wait for the network to settle a little first
+    time.sleep(3)
+    return run_screens(Options([]), console_unit=True)
 
 
 def main(argv):
@@ -155,28 +404,24 @@ def main(argv):
         print(f"maluos-install {VERSION}"); return 0
     if "--check-media" in argv:
         return 0 if check_media(print) else 1
-    # the console unit
-    test = "maluos.test=1" in cmdline()
-    con = None
-    if test:
-        try:
-            con = open("/dev/console", "w")
-        except OSError:
-            con = None
-    def out(line):
-        print(line, flush=True)
-        if con:
-            con.write(line + "\n"); con.flush()
-    banner(out)
-    ok = check_media(out)
-    out("")
-    if test:
-        out(f"check-media: {'ok' if ok else 'FAILED'}; powering off (maluos.test=1)")
-        subprocess.run(["systemctl", "poweroff"])
+    if not argv:
+        return console_main()
+    opts = Options(argv)
+    if opts.apt_check:
+        media = opts.media or CDROM
+        facts = fake_facts()
+        plan = planmod.load("maluos-install:\n  version: 1\n  storage: {disk: first, erase: true}\n  identity: {user: {name: x, password: 'plain:x'}}\n", "server")
+        ctx = engine.Context(plan, facts, media=media, target=opts.apt_check, dry_run=False,
+                             run_dir=os.path.join(os.environ.get("TMPDIR", "/tmp"), f"maluos-apt-check-{os.getpid()}"))
+        ctx.step = "configure"
+        configure_step.apt_configure(ctx, opts.apt_check, media)
+        print(f"apt: the repository copied into {opts.apt_check}/var/lib/maluos/apt and maluos-iso.sources written")
         return 0
-    out("The MaluOS installer is not on this medium yet (slice 2). You have a shell;")
-    out("nmcli for the network, lsblk for the disks, maluos-install --check-media to read this again.\n")
-    os.execvp("/bin/bash", ["/bin/bash", "-l"])
+    if opts.screens:
+        return run_screens(opts)
+    if not opts.plan:
+        print(__doc__); return 2
+    return run_plan(opts, unattended=True)
 
 
 if __name__ == "__main__":

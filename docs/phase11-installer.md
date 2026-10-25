@@ -152,7 +152,8 @@ assembly script and the test.
 
 ### Slice 2: the engine and the unattended install
 
-Specified in docs/phase11-slice2-engine.md (2026-10-23): the steps and
+Specified in docs/phase11-slice2-engine.md (2026-10-23) and built
+2026-10-24 (its status section): the steps and
 their commands, the four layouts, the journal and resume, the events,
 the SSH option, the telemetry document and endpoint, the tests.
 
@@ -176,6 +177,9 @@ the SSH option, the telemetry document and endpoint, the tests.
 
 ### Slice 3: the screens
 
+Specified and built 2026-10-24 in docs/phase11-slice3-screens.md (its
+status section has what the round settled).
+
 - The urwid front end: welcome and language; keyboard; network (the
   interfaces, DHCP or static, a proxy; "continue without network" is
   always allowed because the media has the repository); storage (the
@@ -195,6 +199,12 @@ the SSH option, the telemetry document and endpoint, the tests.
   (an expect-style driver in tests/), producing the same plan the
   unattended path uses; the plan compared; the install then runs as in
   slice 2.
+
+### The Apple T2 round (between slices 3 and 4)
+
+Built 2026-10-24 for the Intel Macs with the T2 chip: docs/phase11-apple-t2.md
+(the apple-t2 component, the Mac facts, storage.target free beside macOS, the
+firmware import, the extra Ubuntu pool on the medium).
 
 ### Slice 4: parity and the switch
 

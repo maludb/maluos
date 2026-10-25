@@ -1,0 +1,15 @@
+# The telemetry endpoint (docs/phase11-slice2-engine.md). Deploy from this directory with
+# `wrangler deploy` once the bucket exists: Dashboard -> R2 -> Create bucket maluos-telemetry
+# (two-year retention is a lifecycle rule on the bucket: delete objects after 730 days), then the
+# custom domain telemetry.maluos.com on this Worker (Workers -> the worker -> Settings -> Domains).
+name = "maluos-telemetry"
+main = "worker.js"
+compatibility_date = "2026-01-01"
+
+[[r2_buckets]]
+binding = "TELEMETRY"
+bucket_name = "maluos-telemetry"
+
+[[routes]]
+pattern = "telemetry.maluos.com/*"
+custom_domain = true

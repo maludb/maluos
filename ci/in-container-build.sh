@@ -12,7 +12,7 @@ STEP=${1:-all}; PROFILES=${PROFILES:-server}
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
 apt-get install -y -q --no-install-recommends \
-    build-essential devscripts debhelper dh-python lintian dpkg-dev gnupg python3 python3-yaml ca-certificates curl \
+    build-essential devscripts debhelper dh-python lintian dpkg-dev gnupg python3 python3-yaml python3-urwid openssl ca-certificates curl \
     mmdebstrap squashfs-tools xorriso qemu-utils dosfstools mtools gdisk rsync fdisk e2fsprogs \
     util-linux mount grub-common \
     composer php-cli php-pgsql nodejs npm python3-venv python3-pip >/dev/null
@@ -21,9 +21,14 @@ export PATH=/usr/sbin:/sbin:$PATH
 if [ "$STEP" = packages ] || [ "$STEP" = all ] || [ "$STEP" = images ]; then
     [ -n "$(ls build/*.deb 2>/dev/null)" ] && [ "$STEP" = images ] || scripts/build-packages.sh
 fi
+if [ "$STEP" = packages ] || [ "$STEP" = all ]; then
+    python3 tests/install-plan-test.py          # the installer engine's pure parts (Phase 11 slice 2)
+    python3 tests/install-screens-test.py       # the installer's screens driven in a pty (Phase 11 slice 3)
+    python3 tests/apple-t2-test.py              # the Apple T2 round: the firmware renamer and importer, the vendored packages' checksums
+fi
 [ "$STEP" = packages ] && exit 0
 
-ci/build-flat-repo.sh build/ci-repo build/*.deb vendor/maludb/*.deb
+ci/build-flat-repo.sh build/ci-repo build/*.deb vendor/*/*.deb
 python3 -m http.server -d build/ci-repo -b 127.0.0.1 8089 >/dev/null 2>&1 &
 HTTP=$!; trap 'kill $HTTP 2>/dev/null || true' EXIT
 sleep 1

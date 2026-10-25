@@ -30,9 +30,9 @@ What is installed.
 
 | Key | Type | Default | Notes |
 |---|---|---|---|
-| `image` | string | the media's default (`maluos-server` or `maluos-desktop`, from the ISO's menu) | the name of a squashfs under `/maluos/images/` on the media (Phase 11 slice 1 keeps `/casper/` for the live image alone), or a URL (netboot, later) |
+| `image` | string | the media's default (`maluos-server` or `maluos-desktop`, from the medium's `.disk/info`) | the name of a squashfs under `/maluos/images/` on the media (`/casper/` holds the live image alone), or a URL (netboot, later; the key is reserved and refused today) |
 | `verify` | bool | true | the squashfs is checked against the media's SHA256SUMS before unpacking; `false` only for experiments |
-| `repository` | `media` \| `none` | media | copy the on-media MaluOS repository to the target (`/var/lib/maluos/apt`, a cdrom-style source beside apt.maluos.com), as the late-commands do today |
+| `repository` | `media` \| `none` | media | copy the on-media MaluOS repository to the target (`/var/lib/maluos/apt`, `maluos-iso.sources` beside apt.maluos.com), as the late-commands do today; the network source stays as the image ships it (apt tolerates it unreachable) |
 
 ## `locale`
 
@@ -64,12 +64,19 @@ and needs no section.
 ## `storage`
 
 Guided layouts only in Phase 11 slice 2; manual partitioning is a later
-item. The disk is erased; the plan must say so.
+item. With `target: disk` (the default) the disk is erased and the plan
+must say so; with `target: free` (the Apple T2 round) the disk's partitions
+are kept, MaluOS goes into the largest free region and the disk's own EFI
+system partition is shared (mounted, never formatted). The free target is
+UEFI only (no BIOS boot partition is made) and needs a GPT disk with an
+EFI partition and at least 8G free beside the root's needs; on a Mac the
+space comes from shrinking the APFS container in Disk Utility first.
 
 | Key | Type | Default | Notes |
 |---|---|---|---|
 | `disk` | string | *asked* | `first` (the first non-removable disk that is not the install media), a device path (`/dev/nvme0n1`), `id:` + a `/dev/disk/by-id` name, `serial:` + a serial, or `model:` + a model substring; a plan that matches more than one disk fails |
-| `erase` | bool | *asked* | must be `true`; the screens require typing the disk's name |
+| `target` | `disk` \| `free` | disk | *asked* when a disk has free space beside an EFI partition; `free` keeps every partition (macOS, Windows, their EFI partition) and installs into the free space |
+| `erase` | bool | *asked* | must be `true` with `target: disk` and `false` with `target: free`; the screens require typing the disk's name either way |
 | `layout` | `direct` \| `lvm` | `lvm` | *asked*; `direct`: GPT, ESP, `/boot` (when encrypted), root; `lvm`: GPT, ESP, `/boot`, one physical volume holding the volume group `maluos` with `root` sized by `root_size` and the rest free (the database and backups can take it later) |
 | `root_size` | size \| `all` | `all` for `direct`; `50G` (or the disk when smaller) for `lvm` | |
 | `filesystem` | `ext4` \| `xfs` | ext4 | the root filesystem; `xfs` for large database servers |
@@ -108,7 +115,7 @@ in the image is installed from the on-media repository in the target
 
 | Key | Type | Default | Notes |
 |---|---|---|---|
-| `install` | list of string | empty | *asked* from the media's catalogue (`/maluos/catalog.yaml`: name, description from debian/descriptions, size, in-image yes/no) |
+| `install` | list of string | empty | *asked* from the media's catalogue (`/maluos/catalog.yaml`: name, description from debian/descriptions, size, in-image yes/no); on an Intel Mac with the T2 chip the engine adds `maluos-apple-t2` itself when the medium carries it (*derived*; name it under `remove` to refuse) |
 | `remove` | list of string | empty | a metapackage of the image to drop (its packages are autoremoved) |
 
 ## `firstboot`
@@ -125,7 +132,7 @@ written; the conffile's documented defaults stand for the rest.
 | `enroll.kind` | `office` \| `estate` | none | *asked* (the owner's answer 3): `office` runs `maluctl office enroll` on the first boot (desks); `estate` enrols the node with Phase 13 slice 1 |
 | `enroll.url` | string | | the office's or the estate's address |
 | `enroll.code` | string | | the one-time code; `file:` + a path on the media for an unattended plan |
-| `enroll.name` | string | the hostname | the desk's or node's name at the office |
+| `enroll.name` | string | the hostname | the desk's or node's name at the office; the installer also writes `enroll.owner`, the plan's user, whose desk it is |
 | `cloud_init` | bool | true on server media, false on desktop | keep cloud-init enabled in the target (NoCloud and cloud data sources); `false` masks it |
 
 ## `bootloader`
@@ -134,7 +141,7 @@ written; the conffile's documented defaults stand for the rest.
 |---|---|---|---|
 | `mode` | `auto` \| `bios` \| `uefi` \| `both` | auto (*derived* from how the live environment booted) | `both` writes grub for BIOS to the disk and shim and grub to the ESP, for a disk that may move between machines |
 | `secure_boot` | `auto` \| `required` \| `ignore` | auto | `required` fails the install when the firmware has Secure Boot off; `auto` only reports it |
-| `cmdline` | string | empty | appended to `GRUB_CMDLINE_LINUX_DEFAULT`; the media's server plan gives `console=tty1 console=ttyS0,115200` as the late-commands do today |
+| `cmdline` | string | empty | appended to `GRUB_CMDLINE_LINUX_DEFAULT`; the media's server plan gives `console=tty1 console=ttyS0,115200` as the late-commands do today. On a T2 Mac the engine adds `intel_iommu=on iommu=pt pm_async=off` to `GRUB_CMDLINE_LINUX` itself (*derived*) |
 | `timeout` | int | 3 (server), 0 (desktop) | grub's menu timeout |
 | `efi_entry` | string | `MaluOS` | the NVRAM entry's label |
 
@@ -152,7 +159,7 @@ The owner's answer 4 (docs/phase11-installer.md).
 | Key | Type | Default | Notes |
 |---|---|---|---|
 | `action` | `reboot` \| `poweroff` \| `shell` \| `none` | reboot | `shell` drops to the live shell with the target still mounted; `none` leaves the live environment running (the tests use it to read the log over the serial console) |
-| `eject` | bool | true | |
+| `eject` | bool | true | the medium is ejected by casper when the live system reboots (the `noeject` boot option keeps it); `false` adds nothing today |
 | `log` | string | `/var/log/maluos-install/` in the target | the engine's log and the plan as run (passwords and passphrases redacted) |
 
 ## Where a plan comes from
@@ -166,10 +173,12 @@ In this order; the first found wins:
    media built with one).
 3. None: the screens run.
 
-`maluos.ssh=` on the kernel command line (a URL or an `authorized_keys`
-line) starts the SSH server in the live environment for a remote install
-(the owner's answer 2); the plan is then given to `maluos-install --plan`
-over SSH, or the screens are used in that terminal.
+`maluos.ssh=` on the kernel command line (a URL, a quoted `authorized_keys`
+line, or `media` for `/maluos/ssh/authorized_keys` on a medium built with
+`--ssh-key`) starts the SSH server in the live environment for a remote
+install (the owner's answer 2); the plan is then given to `maluos-install
+--plan` over SSH (`--json` for the event stream), or the screens are used in
+that terminal. Without the option sshd is not running.
 
 ## Examples
 
@@ -214,7 +223,8 @@ maluos-install:
 
 ## Validation
 
-`maluos-install --plan FILE --check` validates without touching a disk:
+`maluos-install --plan FILE --check` validates without touching a disk (built
+in Phase 11 slice 2, docs/phase11-slice2-engine.md):
 the schema, the disk match (listing what `first` or `model:` resolves
 to), the layout's fit, the network reachability of URLs, the presence of
 the image on the media and its hash, and prints the plan as the engine

@@ -1,0 +1,16 @@
+[Unit]
+Description=MaluOS live environment: SSH for a remote install (maluos.ssh on the kernel command line)
+Documentation=https://github.com/maludb/maluos
+ConditionKernelCommandLine=maluos.ssh
+ConditionPathExists=/cdrom/.disk/info
+After=network-online.target
+Wants=network-online.target
+Before=maluos-installer.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/maluos-installer/maluos-live-ssh
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,17 @@
+[Unit]
+Description=MaluOS: import the Mac's Wi-Fi and Bluetooth firmware from its EFI partition
+Documentation=https://github.com/maludb/maluos/blob/main/docs/phase11-apple-t2.md
+ConditionFirmware=smbios-field(sys_vendor = "Apple Inc.")
+ConditionPathExists=!/lib/firmware/brcm/.maluos-apple-firmware
+DefaultDependencies=no
+After=local-fs.target systemd-udevd.service
+Before=network-pre.target NetworkManager.service systemd-networkd.service bluetooth.service
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/maluos-apple-firmware import --auto
+SuccessExitStatus=2
+
+[Install]
+WantedBy=multi-user.target
