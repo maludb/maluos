@@ -14,6 +14,8 @@ struct LoadGraph;
 #include "argv.h"
 #include "disks.h"
 #include "maluos-gpus.h"
+#include "maluos-network.h"
+#include "maluos-queue.h"
 #include "prettytable.h"
 #include "procinfo.h"
 #include "proclist.h"
@@ -130,7 +132,9 @@ public:
   LoadGraph *disk_graph;
 
   GsmDisksView *disk_list;
-  GsmMaluosGpusView *maluos_gpus;   /* MaluOS: the GPUs tab */
+  GsmMaluosGpusView *maluos_gpus;         /* MaluOS: the GPUs tab */
+  GsmMaluosNetworkView *maluos_network;   /* MaluOS: the MaluOS Network tab */
+  GsmMaluosQueueView *maluos_queue;       /* MaluOS: the Queue tab */
 
   GtkTreeSelection *selection;
 

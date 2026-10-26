@@ -28,18 +28,20 @@ Package: maluos-system-monitor
 Architecture: any
 Depends: ${misc:Depends},
          ${shlibs:Depends}
-Recommends: gvfs, maluos-desktop-session (>= 0.7.1), maluos-firstboot (>= 0.1.10)
+Recommends: gvfs, maluos-desktop-session (>= 0.8.0), maluos-firstboot (>= 0.1.10)
 Suggests: pkexec
 Provides: gnome-system-monitor
 Conflicts: gnome-system-monitor
 Replaces: gnome-system-monitor
 Description: GNOME System Monitor with the MaluOS tabs (GPUs, MaluOS Network, Queue)
- GNOME's process viewer and system resource monitor (Processes, Resources,
- File Systems), carried by MaluOS with its own tabs: GPUs (this computer's
- GPUs, the switch that shares them with the MaluOS network, the models
- loaded and the queue; the network's GPUs once the desk is enrolled), and,
- in later slices, MaluOS Network and Queue. The tabs render what the MaluOS
+ GNOME's process viewer and system resource monitor (Processes, Resources, File
+ Systems), carried by MaluOS with its own tabs: GPUs (this computer's GPUs, the
+ switch that shares them with the MaluOS network, the models loaded and the
+ queue; the network's GPUs once the desk is enrolled), MaluOS Network (this
+ node as the gateway's node API reports it, the nodes it is paired with, the
+ office) and Queue (every lane and every call of the gateway's queue, with
+ pause, resume, cancel and a call's class). The tabs render what the MaluOS
  session service publishes and compute nothing themselves; they appear only
- when that service answers, so on a plain GNOME desktop this is System
- Monitor as upstream ships it. Replaces Ubuntu's gnome-system-monitor
- package (same application id, same files).
+ when that service answers, so on a plain GNOME desktop this is System Monitor
+ as upstream ships it. Replaces Ubuntu's gnome-system-monitor package (same
+ application id, same files).

@@ -44,6 +44,9 @@
 #include "util.h"
 #include "disks.h"
 #include "maluos-gpus.h"
+#include "maluos-network.h"
+#include "maluos-queue.h"
+#include "maluos-session.h"
 #include "settings-keys.h"
 #include "legacy/gsm_color_button.h"
 
@@ -735,11 +738,19 @@ update_page_activities (GsmApplication *app)
       disks_freeze (app->disk_list);
     }
 
-  /* MaluOS: the GPUs tab polls the session service only while it is the current page */
+  /* MaluOS: the MaluOS tabs follow the session service only while they are the current page */
   if (strcmp (current_page, "gpus") == 0)
     maluos_gpus_thaw (app->maluos_gpus);
   else
     maluos_gpus_freeze (app->maluos_gpus);
+  if (strcmp (current_page, "network") == 0)
+    maluos_network_thaw (app->maluos_network);
+  else
+    maluos_network_freeze (app->maluos_network);
+  if (strcmp (current_page, "queue") == 0)
+    maluos_queue_thaw (app->maluos_queue);
+  else
+    maluos_queue_freeze (app->maluos_queue);
 }
 
 static void
@@ -839,6 +850,10 @@ create_main_window (GsmApplication *app)
   GError *err = NULL;
 
   g_type_ensure (GSM_TYPE_MALUOS_GPUS_VIEW);   /* MaluOS: interface.ui names the type */
+
+  g_type_ensure (GSM_TYPE_MALUOS_NETWORK_VIEW);   /* MaluOS: interface.ui names the type */
+
+  g_type_ensure (GSM_TYPE_MALUOS_QUEUE_VIEW);   /* MaluOS: interface.ui names the type */
   gtk_builder_add_from_resource (builder, "/org/gnome/gnome-system-monitor/data/interface.ui", &err);
   if (err != NULL)
     g_error ("%s", err->message);
@@ -861,10 +876,13 @@ create_main_window (GsmApplication *app)
   create_proc_view (app, builder);
   create_sys_view (app, builder);
   app->disk_list = GSM_DISKS_VIEW (gtk_builder_get_object (builder, "disks_view"));
-  /* MaluOS: the GPUs tab exists when the session service answers */
+  /* MaluOS: the three MaluOS tabs exist when the session service answers */
   app->maluos_gpus = GSM_MALUOS_GPUS_VIEW (gtk_builder_get_object (builder, "maluos_gpus_view"));
-  g_object_bind_property (app->maluos_gpus, "available", gtk_builder_get_object (builder, "maluos_gpus_page"), "visible",
-                          G_BINDING_SYNC_CREATE);
+  app->maluos_network = GSM_MALUOS_NETWORK_VIEW (gtk_builder_get_object (builder, "maluos_network_view"));
+  app->maluos_queue = GSM_MALUOS_QUEUE_VIEW (gtk_builder_get_object (builder, "maluos_queue_view"));
+  for (const char *page : { "maluos_gpus_page", "maluos_network_page", "maluos_queue_page" })
+    g_object_bind_property (gsm_maluos_session_get (), "available", gtk_builder_get_object (builder, page), "visible",
+                            G_BINDING_SYNC_CREATE);
 
   app->app_menu_button = GTK_MENU_BUTTON (gtk_builder_get_object (builder, "app_menu_button"));
   app->generic_window_menu_model = G_MENU_MODEL (gtk_builder_get_object (builder, "generic-window-menu"));

@@ -1,3 +1,22 @@
+maluos-system-monitor (49.1+maluos.3) resolute; urgency=medium
+
+  * Phase 13, shared GPUs, slice G5 (the local half): the MaluOS Network
+    tab (this node as the gateway's node API reports it: name and id, the
+    listener, sharing, the manager, the lanes, the keys issued; the nodes
+    paired by hand; the office, with the estate's directory to follow) and
+    the Queue tab (every lane with Pause/Resume, every queued or running
+    call of every principal with Cancel and its class as a drop-down, live
+    every two seconds through the session service's NodeQueue; the actions
+    run maluctl gateway node …; "Open in Sovereign LLM Manager" when the
+    desk is enrolled). Alt+5, Alt+6, --show-network-tab, --show-queue-tab.
+  * One session client (maluos-session.cpp) shared by the three tabs: it
+    polls GetState while a tab that draws the state is current and
+    NodeQueue while the Queue tab is; the GPUs tab is rewritten on it. The
+    self-test exercises the three tabs and prints one line:
+    "self-test ok: GPUs: …; Network: …; Queue: …".
+
+ -- Edward Honour <ed@maludb.org>  Mon, 26 Oct 2026 02:30:00 +0000
+
 maluos-system-monitor (49.1+maluos.2) resolute; urgency=medium
 
   * The self-test no longer fails while a GetState call is still in flight:

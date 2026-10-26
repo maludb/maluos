@@ -1,3 +1,14 @@
+maluos-session (0.8.0) resolute; urgency=medium
+
+  * Phase 13, shared GPUs, slice G5 (the forked System Monitor's MaluOS
+    Network and Queue tabs): the state carries `node`, the gateway's node
+    API view of this computer when the user is an operator (this node's
+    name and id, the listener, the lanes, the paired nodes, the keys it
+    issued; /node/v1/status and /node/v1/keys as the session user);
+    NodeQueue() answers the queue and the lanes live for the Queue tab.
+
+ -- Edward Honour <ed@maludb.org>  Mon, 26 Oct 2026 02:00:00 +0000
+
 maluos-session (0.7.1) resolute; urgency=medium
 
   * Phase 13, shared GPUs, slice G1: the host state carries the GPUs of

@@ -27,6 +27,9 @@ src/load-graph.cpp
 src/lsof.cpp
 src/main.cpp
 src/maluos-gpus.cpp
+src/maluos-network.cpp
+src/maluos-queue.cpp
+src/maluos-session.cpp
 src/memmaps.cpp
 src/openfiles.cpp
 src/org.gnome.gnome-system-monitor.gschema.xml.in

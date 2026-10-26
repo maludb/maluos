@@ -413,6 +413,31 @@
                 </property>
               </object>
             </child>
+            <!-- MaluOS: the MaluOS Network and Queue tabs (maluos-network.cpp, maluos-queue.cpp); shown with the GPUs tab -->
+            <child>
+              <object class="AdwViewStackPage" id="maluos_network_page">
+                <property name="name">network</property>
+                <property name="use-underline">True</property>
+                <property name="title" translatable="yes">MaluOS _Network</property>
+                <property name="icon-name">network-workgroup-symbolic</property>
+                <property name="visible">False</property>
+                <property name="child">
+                  <object class="GsmMaluosNetworkView" id="maluos_network_view"/>
+                </property>
+              </object>
+            </child>
+            <child>
+              <object class="AdwViewStackPage" id="maluos_queue_page">
+                <property name="name">queue</property>
+                <property name="use-underline">True</property>
+                <property name="title" translatable="yes">_Queue</property>
+                <property name="icon-name">view-list-ordered-symbolic</property>
+                <property name="visible">False</property>
+                <property name="child">
+                  <object class="GsmMaluosQueueView" id="maluos_queue_view"/>
+                </property>
+              </object>
+            </child>
           </object>
         </property>
       </object>

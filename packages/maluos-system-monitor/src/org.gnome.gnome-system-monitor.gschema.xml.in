@@ -103,6 +103,8 @@
         <choice value="processes"/>
         <choice value="disks"/>
         <choice value="gpus"/>
+        <choice value="network"/>
+        <choice value="queue"/>
       </choices>
       <default>'resources'</default>
       <summary>Saves the currently viewed tab

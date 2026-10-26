@@ -12,6 +12,7 @@
 #include <sigc++/functors/functors.h>
 
 #include "application.h"
+#include "maluos-session.h"   /* MaluOS */
 #include "procdialogs.h"
 #include "prefsdialog.h"
 #include "interface.h"
@@ -402,6 +403,8 @@ GsmApplication::GsmApplication()
   disk_list (NULL),
 
   maluos_gpus (NULL),
+  maluos_network (NULL),
+  maluos_queue (NULL),
 
   selection (NULL),
 
@@ -454,13 +457,17 @@ GsmApplication::on_command_line (const Glib::RefPtr<Gio::ApplicationCommandLine>
     tab = "disks";
   else if (option_group.show_gpus_tab || option_group.maluos_self_test)
     tab = "gpus";   /* MaluOS */
+  else if (option_group.show_network_tab)
+    tab = "network";   /* MaluOS */
+  else if (option_group.show_queue_tab)
+    tab = "queue";   /* MaluOS */
   if (tab)
     adw_view_stack_set_visible_child_name (this->stack, tab);
 
   on_activate ();
 
   if (option_group.maluos_self_test)
-    gsm_maluos_gpus_view_self_test (this->maluos_gpus);
+    gsm_maluos_session_self_test (gsm_maluos_session_get ());   /* MaluOS: GetState and NodeQueue once; the three tabs report */
 
   return 0;
 }
@@ -571,6 +578,8 @@ GsmApplication::on_startup ()
   set_accel_for_action ("win.show-page('processes')", "<Alt>2");
   set_accel_for_action ("win.show-page('disks')", "<Alt>3");
   set_accel_for_action ("win.show-page('gpus')", "<Alt>4");   /* MaluOS */
+  set_accel_for_action ("win.show-page('network')", "<Alt>5");   /* MaluOS */
+  set_accel_for_action ("win.show-page('queue')", "<Alt>6");   /* MaluOS */
   set_accel_for_action ("win.refresh", "<Control>r");
 
   load_settings ();

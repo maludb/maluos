@@ -15,6 +15,8 @@ OptionGroup::OptionGroup()
   show_file_systems_tab (false),
   print_version (false),
   show_gpus_tab (false),
+  show_network_tab (false),
+  show_queue_tab (false),
   maluos_self_test (false)
 {
   processes_tab_option.set_long_name ("show-processes-tab");
@@ -36,6 +38,10 @@ OptionGroup::OptionGroup()
   gpus_tab_option.set_long_name ("show-gpus-tab");
   gpus_tab_option.set_short_name ('g');
   gpus_tab_option.set_description (_("Show the GPUs tab"));
+  network_tab_option.set_long_name ("show-network-tab");
+  network_tab_option.set_description (_("Show the MaluOS Network tab"));
+  queue_tab_option.set_long_name ("show-queue-tab");
+  queue_tab_option.set_description (_("Show the Queue tab"));
   maluos_self_test_option.set_long_name ("maluos-self-test");
   maluos_self_test_option.set_description (_("Build the window, read the MaluOS session state once, print a summary and exit"));
 
@@ -44,6 +50,8 @@ OptionGroup::OptionGroup()
   this->add_entry (fs_tab_option, this->show_file_systems_tab);
   this->add_entry (show_version_option, this->print_version);
   this->add_entry (gpus_tab_option, this->show_gpus_tab);
+  this->add_entry (network_tab_option, this->show_network_tab);
+  this->add_entry (queue_tab_option, this->show_queue_tab);
   this->add_entry (maluos_self_test_option, this->maluos_self_test);
 }
 
@@ -54,6 +62,8 @@ std::vector<Glib::OptionEntry> OptionGroup::entries() const {
     fs_tab_option,
     show_version_option,
     gpus_tab_option,
+    network_tab_option,
+    queue_tab_option,
     maluos_self_test_option
   };
 }
@@ -64,6 +74,8 @@ void OptionGroup::load(const Glib::RefPtr<Glib::VariantDict> &args) {
   show_file_systems_tab = args->contains (fs_tab_option.get_long_name () );
   print_version = args->contains (show_version_option.get_long_name () );
   show_gpus_tab = args->contains (gpus_tab_option.get_long_name () );
+  show_network_tab = args->contains (network_tab_option.get_long_name () );
+  show_queue_tab = args->contains (queue_tab_option.get_long_name () );
   maluos_self_test = args->contains (maluos_self_test_option.get_long_name () );
 }
 }

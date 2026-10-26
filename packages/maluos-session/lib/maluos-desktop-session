@@ -20,6 +20,7 @@ D-Bus: com.maluos.Session at /com/maluos/Session, interface com.maluos.Session1:
   RequestDecide(id, approve|deny, options) -> s (JSON)      answer a vault grant request (as the owner); options is an
                                                             expiry ("7d") or JSON {"expires": "30d", "level": "use", "budget": {"usd_per_day": 10}}
   UpdateAction(open|restart|refresh|apply|apply-all|auto:...)  the updates page, restart, re-read, install now (a terminal), the switches (pkexec)
+  NodeQueue() -> s (JSON)  the gateway's queue and lanes now (/node/v1/queue as this user: an operator sees every call)
   signal StateChanged(s)   property Version
 
 Slice 3: agents carry their owner (`mine` when it is the session user); the
@@ -63,10 +64,20 @@ request filed by the gateway's refused credential lookup carries its cause
 budget alert for an agent names the agent and reaches its owner's desk
 ("Agent research: budget nearly used (day)"); the Desk's Alerts page lists
 it under the agent.
+
+Phase 13 G5 (the forked System Monitor's MaluOS Network and Queue tabs):
+the state carries `node`, the gateway's node API view of this computer
+(/node/v1/status and /node/v1/keys, read as the session user: this node's
+name and id, the listener, the lanes, the nodes it is paired with, the
+keys it issued), when the user is an operator of the gateway; anyone else
+sees {"available": …, "operator": false}. NodeQueue() reads the queue and
+the lanes live for the Queue tab, which polls it every two seconds while
+it is the current page; the tab's actions (cancel, priority, pause,
+resume) run `maluctl gateway node …` themselves.
 """
 import http.client, json, os, pwd, re, socket, subprocess, sys, threading, time, urllib.parse
 
-VERSION = "0.7.1"
+VERSION = "0.8.0"
 BUS_NAME, OBJ, IFACE = "com.maluos.Session", "/com/maluos/Session", "com.maluos.Session1"
 GW = os.environ.get("MALUOS_GATEWAY_SOCKET", "/run/maluos/gateway.sock")
 VAULT = os.environ.get("MALUOS_VAULT_SOCKET", "/run/maluos/vault.sock")
@@ -93,6 +104,7 @@ XML = """<node>
   <method name="RequestDecide"><arg type="i" name="id" direction="in"/><arg type="s" name="decision" direction="in"/><arg type="s" name="expires" direction="in"/><arg type="s" name="json" direction="out"/></method>
   <method name="UpdateAction"><arg type="s" name="action" direction="in"/></method>
   <method name="OfficeAction"><arg type="s" name="action" direction="in"/></method>
+  <method name="NodeQueue"><arg type="s" name="json" direction="out"/></method>
   <signal name="StateChanged"><arg type="s" name="json"/></signal>
   <property name="Version" type="s" access="read"/>
 </interface>
@@ -211,6 +223,48 @@ def gateway_state():
               "share": status.get("share")})
     me = ok(GW, "/v1/maluos/whoami")
     return g, me
+
+
+def node_state(gw_available, me):
+    """The node API's view of this gateway (Phase 13 G5): this node, its lanes, the nodes it is paired with
+    (remote backends) and the keys it issued. Read as the session user, so only an operator of the gateway
+    sees it; anyone else gets {"available": …, "operator": False} and the tabs say so."""
+    n = {"available": False, "operator": bool((me or {}).get("operator"))}
+    if not gw_available or not n["operator"]:
+        return n
+    st = ok(GW, "/node/v1/status")
+    if st is None:
+        return n
+    keys = (ok(GW, "/node/v1/keys", default={}) or {}).get("keys") or []
+    m = st.get("machine") or {}
+    ex = st.get("exposed") or {}
+    paired = [{"name": b.get("name"), "endpoint": b.get("endpoint"), "healthy": bool(b.get("healthy")), "enabled": b.get("enabled", True),
+               "error": b.get("error"), "paired": bool(b.get("paired")), "version": b.get("version"), "checked_at": b.get("checked_at"),
+               "models": b.get("models") or [], "loaded": [l.get("name") for l in b.get("loaded") or []]}
+              for b in st.get("backends") or [] if b.get("remote")]
+    n.update({"available": True, "name": st.get("node_name"), "id": st.get("node_id"), "version": st.get("version"), "api_version": st.get("api_version"),
+              "uptime_s": st.get("uptime_s"), "started_at": st.get("started_at"), "last_manager_seen_at": st.get("last_manager_seen_at"),
+              "exposed": {"enabled": bool(ex.get("enabled")), "host": ex.get("host"), "port": ex.get("port")}, "share": st.get("share"),
+              "machine": {k: m.get(k) for k in ("hostname", "os", "arch", "cpu_count", "memory_total", "memory_available", "load_1m", "chassis")},
+              "lanes": st.get("lanes") or {}, "counters": st.get("counters") or {},
+              "loaded": [{"name": l.get("name"), "backend": l.get("backend")} for l in st.get("loaded") or []], "paired": paired,
+              "keys": [{"id": k.get("id"), "name": k.get("name"), "kind": k.get("kind"), "principal": k.get("principal"), "class": (k.get("policy") or {}).get("class"),
+                        "created_at": k.get("created_at"), "expires_at": k.get("expires_at"), "revoked_at": k.get("revoked_at"), "last_used_at": k.get("last_used_at")}
+                       for k in keys]})
+    return n
+
+
+def node_queue():
+    """Live, for the Queue tab: GET /node/v1/queue as the session user (an operator): the jobs and the lanes now."""
+    if not os.path.exists(GW):
+        return {"ok": False, "error": "no_gateway", "message": "the inference gateway is not on this computer", "queue": [], "lanes": {}}
+    try:
+        st, body = get(GW, "/node/v1/queue")
+    except (OSError, http.client.HTTPException) as e:
+        return {"ok": False, "error": "unreachable", "message": f"{e.__class__.__name__}: {str(e)[:120]}", "queue": [], "lanes": {}}
+    if st >= 400:
+        return {"ok": False, "error": body.get("error") or f"http_{st}", "message": body.get("message") or f"HTTP {st}", "status": st, "queue": [], "lanes": {}}
+    return {"ok": True, "queue": body.get("queue") or [], "lanes": body.get("lanes") or {}, "ts": body.get("clock")}
 
 
 def me_state(me):
@@ -391,8 +445,8 @@ class Service:
         from gi.repository import Gio, GLib
         self.Gio, self.GLib = Gio, GLib
         self.once = once
-        self.state = {"version": VERSION, "ts": 0, "host": host_state(), "gateway": {"available": False}, "me": {}, "vault": {}, "agents": [], "alerts": [],
-                      "updates": {"available": False}, "office": {"enrolled": False}}
+        self.state = {"version": VERSION, "ts": 0, "host": host_state(), "gateway": {"available": False}, "me": {}, "node": {"available": False, "operator": False},
+                      "vault": {}, "agents": [], "alerts": [], "updates": {"available": False}, "office": {"enrolled": False}}
         self.office_hb = None            # the last heartbeat's outcome (office thread writes, under office_lock)
         self.office_lock = threading.Lock()
         self.office_wake = threading.Event()
@@ -493,7 +547,7 @@ class Service:
             u["last_action"] = self.updates_last_action
         with self.office_lock:
             hb = self.office_hb; oa = self.office_agents; op = self.office_apps
-        st = {"version": VERSION, "ts": int(time.time()), "host": host_state(), "gateway": gw, "me": me_state(me),
+        st = {"version": VERSION, "ts": int(time.time()), "host": host_state(), "gateway": gw, "me": me_state(me), "node": node_state(gw.get("available"), me),
               "vault": vault, "agents": agents_state(units, mine), "alerts": alerts_state(), "updates": u, "office": office_state(office_conf(), hb, oa, op)}
         return st
 
@@ -942,6 +996,12 @@ class Service:
             elif method == "OfficeAction":
                 self.office_action(params.unpack()[0])
                 invocation.return_value(None)
+            elif method == "NodeQueue":
+                # the gateway answers in milliseconds, but never hold the bus on it: a thread reads, the main loop replies
+                def work():
+                    d = node_queue()
+                    GLib.idle_add(lambda: (invocation.return_value(GLib.Variant("(s)", (json.dumps(d, default=str),))), False)[1])
+                threading.Thread(target=work, daemon=True).start()
             else:
                 invocation.return_error_literal(self.Gio.dbus_error_quark(), self.Gio.DBusError.UNKNOWN_METHOD, method)
         except Exception as e:

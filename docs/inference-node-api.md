@@ -63,7 +63,7 @@ with `queued` and `expected_wait_ms` per class, `oldest_queued_ms`.
 
 | Route | Does | gateway | node service |
 |---|---|---|---|
-| `GET /queue` | every queued and running job across lanes: `id`, `lane`, `model`, `requested_model`, `principal`, `key` (the key name when the call came by key), `class`, `kind` (chat, generate, embed), `mode` (sync, async), `face`, `state`, `queued_at`, `started_at`, `waited_ms`, `elapsed_ms`, `expected_wait_ms` | yes | G3 |
+| `GET /queue` | every queued and running job across lanes: `id`, `lane`, `model`, `requested_model`, `principal`, `key` (the key name when the call came by key), `class`, `kind` (chat, generate, embed), `mode` (sync, async), `face`, `state`, `queued_at`, `started_at`, `waited_ms`, `elapsed_ms`, `expected_wait_ms`; and `lanes{}` as in `/status`, so one call draws a queue page | yes | G3 |
 | `POST /queue/{id}/priority {class}` | move a queued job to another class (the gateway's priority is the class's; `{priority: n}` names the class with that priority number) | yes | G3 |
 | `POST /queue/{id}/move {lane, model}` | force a fallback now, or move a job back, while queued | later | later |
 | `DELETE /queue/{id}` | cancel; a running job's backend call is aborted; the caller gets 409 `cancelled`; the ledger row says `cancelled` with the reason `operator` | yes | G3 |

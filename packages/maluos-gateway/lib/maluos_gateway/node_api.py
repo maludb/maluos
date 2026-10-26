@@ -126,7 +126,7 @@ def queue_rows(gw):
 async def h_queue(request):
     gw = request.app["gw"]
     await node_caller(request)
-    return envelope(gw, {"queue": queue_rows(gw)})
+    return envelope(gw, {"queue": queue_rows(gw), "lanes": lanes(gw)})   # the lanes ride along: one call draws a queue page
 
 
 async def read_body(request):

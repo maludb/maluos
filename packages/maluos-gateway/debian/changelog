@@ -1,3 +1,10 @@
+maluos-gateway (0.4.1) resolute; urgency=medium
+
+  * Phase 13, shared GPUs, slice G5: GET /node/v1/queue answers the lanes
+    too (`lanes{}`, as in /status), so a queue page is one call.
+
+ -- Edward Honour <ed@maludb.org>  Mon, 26 Oct 2026 02:00:00 +0000
+
 maluos-gateway (0.4.0) resolute; urgency=medium
 
   * Phase 13, shared GPUs, slice G2 (docs/inference-node-api.md, surface 1;

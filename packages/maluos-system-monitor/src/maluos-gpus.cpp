@@ -2,17 +2,18 @@
 #include <config.h>
 
 #include <adwaita.h>
-#include <gio/gio.h>
 #include <glib/gi18n.h>
 #include <json-glib/json-glib.h>
-#include <stdlib.h>
 #include <string.h>
 
 #include "maluos-gpus.h"
+#include "maluos-session.h"
 
-#define SESSION_NAME  "com.maluos.Session"
-#define SESSION_PATH  "/com/maluos/Session"
-#define SESSION_IFACE "com.maluos.Session1"
+#define jo gsm_maluos_jo
+#define ja gsm_maluos_ja
+#define js gsm_maluos_js
+#define jd gsm_maluos_jd
+#define jb gsm_maluos_jb
 
 typedef struct
 {
@@ -39,88 +40,13 @@ struct _GsmMaluosGpusView
 
   GPtrArray *rows;
 
-  GDBusProxy   *proxy;
-  GCancellable *cancellable;
-  guint         timeout;
-  guint         interval_ms;
-  gboolean      in_flight;
-  gboolean      available;
-  gboolean      answered_once;
-  gboolean      updating_switch;
-  gboolean      self_test;
-  guint         self_test_timeout;
-  gint64        self_test_deadline;   /* monotonic µs */
-  char         *summary;
-  char         *last_error;
+  GsmMaluosSession *session;   /* the process's one client, not owned */
+  gulong            state_id;
+  gboolean          watching;
+  gboolean          updating_switch;
 };
 
 G_DEFINE_FINAL_TYPE (GsmMaluosGpusView, gsm_maluos_gpus_view, GTK_TYPE_WIDGET)
-
-enum {
-  PROP_0,
-  PROP_AVAILABLE,
-  N_PROPS
-};
-
-static GParamSpec *properties[N_PROPS];
-
-/* ---- JSON helpers: every missing or null member reads as "not there" */
-
-static JsonObject *
-jo (JsonObject *o, const char *name)
-{
-  if (!o || !json_object_has_member (o, name))
-    return NULL;
-  JsonNode *n = json_object_get_member (o, name);
-  return JSON_NODE_HOLDS_OBJECT (n) ? json_node_get_object (n) : NULL;
-}
-
-static JsonArray *
-ja (JsonObject *o, const char *name)
-{
-  if (!o || !json_object_has_member (o, name))
-    return NULL;
-  JsonNode *n = json_object_get_member (o, name);
-  return JSON_NODE_HOLDS_ARRAY (n) ? json_node_get_array (n) : NULL;
-}
-
-static const char *
-js (JsonObject *o, const char *name)
-{
-  if (!o || !json_object_has_member (o, name))
-    return NULL;
-  JsonNode *n = json_object_get_member (o, name);
-  if (!JSON_NODE_HOLDS_VALUE (n) || json_node_get_value_type (n) != G_TYPE_STRING)
-    return NULL;
-  return json_node_get_string (n);
-}
-
-static gboolean
-jd (JsonObject *o, const char *name, double *out)
-{
-  if (!o || !json_object_has_member (o, name))
-    return FALSE;
-  JsonNode *n = json_object_get_member (o, name);
-  if (!JSON_NODE_HOLDS_VALUE (n))
-    return FALSE;
-  GType t = json_node_get_value_type (n);
-  if (t == G_TYPE_INT64)
-    *out = (double) json_node_get_int (n);
-  else if (t == G_TYPE_DOUBLE)
-    *out = json_node_get_double (n);
-  else
-    return FALSE;
-  return TRUE;
-}
-
-static gboolean
-jb (JsonObject *o, const char *name)
-{
-  if (!o || !json_object_has_member (o, name))
-    return FALSE;
-  JsonNode *n = json_object_get_member (o, name);
-  return JSON_NODE_HOLDS_VALUE (n) && json_node_get_value_type (n) == G_TYPE_BOOLEAN && json_node_get_boolean (n);
-}
 
 /* ---- rows */
 
@@ -380,7 +306,8 @@ apply_state (GsmMaluosGpusView *self, JsonObject *root)
   /* the office */
   if (office && jb (office, "enrolled"))
     {
-      const char *name = js (office, "name");
+      JsonObject *o = jo (office, "office");
+      const char *name = o ? js (o, "name") : NULL;
       char *txt = g_strdup_printf (_("Enrolled in %s. The network's GPUs appear here with the estate's node directory (Phase 13 slice 1)."),
                                    name ? name : _("an office"));
       set_subtitle (self->office_row, txt);
@@ -389,208 +316,47 @@ apply_state (GsmMaluosGpusView *self, JsonObject *root)
   else
     set_subtitle (self->office_row, _("Not enrolled in an office. Enrol this desk (maluctl office enroll) to see the network's GPUs."));
 
-  g_free (self->summary);
-  self->summary = g_strdup_printf ("%u gpus, chassis %s, rule %s, share %s, gateway %s",
+  char *summary = g_strdup_printf ("session reachable, %u gpus, chassis %s, rule %s, share %s, gateway %s",
                                    n, chassis ? chassis : "?", rule ? rule : "?",
                                    share ? (jb (share, "enabled") ? "on" : "off") : "?", gw_ok ? "ok" : "absent");
-}
-
-/* ---- the session service */
-
-static void
-set_available (GsmMaluosGpusView *self, gboolean available)
-{
-  if (self->available == available)
-    return;
-  self->available = available;
-  g_object_notify_by_pspec (G_OBJECT (self), properties[PROP_AVAILABLE]);
+  gsm_maluos_session_set_summary (self->session, "gpus", summary);
+  g_free (summary);
 }
 
 static void
-self_test_done (GsmMaluosGpusView *self, gboolean ok)
+on_state (GsmMaluosSession *, JsonObject *state, gpointer data)
 {
-  if (!self->self_test)
-    return;
-  self->self_test = FALSE;
-  if (self->self_test_timeout)
-    {
-      g_source_remove (self->self_test_timeout);
-      self->self_test_timeout = 0;
-    }
-  if (ok)
-    g_print ("self-test ok: GPUs: session reachable, %s\n", self->summary ? self->summary : "no summary");
-  else
-    g_print ("self-test FAIL: GPUs: the MaluOS session service did not answer%s%s\n",
-             self->last_error ? ": " : "", self->last_error ? self->last_error : "");
-  fflush (stdout);
-  exit (ok ? 0 : 1);
-}
-
-static void
-on_state (GObject *source, GAsyncResult *res, gpointer data)
-{
-  GsmMaluosGpusView *self = (GsmMaluosGpusView *) data;
-  GError *error = NULL;
-  GVariant *ret = g_dbus_proxy_call_finish (G_DBUS_PROXY (source), res, &error);
-
-  if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
-    {
-      g_error_free (error);
-      return;
-    }
-  self->in_flight = FALSE;
-  if (!ret)
-    {
-      g_debug ("maluos gpus: GetState: %s", error ? error->message : "?");
-      g_free (self->last_error);
-      self->last_error = g_strdup (error ? error->message : "GetState failed");
-      g_clear_error (&error);
-      adw_banner_set_revealed (ADW_BANNER (self->banner), self->answered_once);
-      if (!self->answered_once)
-        set_available (self, FALSE);
-      self_test_done (self, FALSE);   /* a self-test ends on the first refused call (no service: ServiceUnknown) */
-      return;
-    }
-
-  const char *json = NULL;
-  g_variant_get (ret, "(&s)", &json);
-  JsonParser *parser = json_parser_new ();
-  if (json_parser_load_from_data (parser, json, -1, &error) && JSON_NODE_HOLDS_OBJECT (json_parser_get_root (parser)))
-    {
-      apply_state (self, json_node_get_object (json_parser_get_root (parser)));
-      self->answered_once = TRUE;
-      adw_banner_set_revealed (ADW_BANNER (self->banner), FALSE);
-      set_available (self, TRUE);
-      self_test_done (self, TRUE);
-    }
-  else
-    {
-      g_warning ("maluos gpus: state is not JSON: %s", error ? error->message : "?");
-      g_clear_error (&error);
-    }
-  g_object_unref (parser);
-  g_variant_unref (ret);
-}
-
-static void
-on_proxy (GObject *, GAsyncResult *res, gpointer data)
-{
-  GsmMaluosGpusView *self = (GsmMaluosGpusView *) data;
-  GError *error = NULL;
-  GDBusProxy *proxy = g_dbus_proxy_new_for_bus_finish (res, &error);
-
-  if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
-    {
-      g_error_free (error);
-      return;
-    }
-  if (!proxy)
-    {
-      g_debug ("maluos gpus: no session proxy: %s", error ? error->message : "?");
-      g_free (self->last_error);
-      self->last_error = g_strdup_printf ("no session bus: %s", error ? error->message : "?");
-      g_clear_error (&error);
-      self->in_flight = FALSE;
-      self_test_done (self, FALSE);
-      return;
-    }
-  self->proxy = proxy;
-  self->in_flight = FALSE;
-  maluos_gpus_update (self);
-}
-
-void
-maluos_gpus_update (GsmMaluosGpusView *self)
-{
-  if (self->in_flight)
-    return;
-  self->in_flight = TRUE;
-  if (!self->proxy)
-    {
-      g_dbus_proxy_new_for_bus (G_BUS_TYPE_SESSION, G_DBUS_PROXY_FLAGS_DO_NOT_LOAD_PROPERTIES, NULL,
-                                SESSION_NAME, SESSION_PATH, SESSION_IFACE, self->cancellable, on_proxy, self);
-      return;
-    }
-  g_dbus_proxy_call (self->proxy, "GetState", NULL, G_DBUS_CALL_FLAGS_NONE, 30000, self->cancellable, on_state, self);
-}
-
-static gboolean
-cb_timeout (gpointer data)
-{
-  maluos_gpus_update ((GsmMaluosGpusView *) data);
-  return G_SOURCE_CONTINUE;
+  apply_state ((GsmMaluosGpusView *) data, state);
 }
 
 void
 maluos_gpus_freeze (GsmMaluosGpusView *self)
 {
-  if (self->timeout)
-    {
-      g_source_remove (self->timeout);
-      self->timeout = 0;
-    }
+  if (!self->watching)
+    return;
+  self->watching = FALSE;
+  gsm_maluos_session_unwatch (self->session, GSM_MALUOS_WATCH_STATE);
 }
 
 void
 maluos_gpus_thaw (GsmMaluosGpusView *self)
 {
-  if (self->timeout)
+  if (self->watching)
     return;
-  maluos_gpus_update (self);
-  self->timeout = g_timeout_add (self->interval_ms, cb_timeout, self);
-}
-
-gboolean
-gsm_maluos_gpus_view_get_available (GsmMaluosGpusView *self)
-{
-  return self->available;
-}
-
-/* The self-test runs on slow machines (the boot test under TCG): the window's first paint can hold the main
- * loop for longer than any sensible deadline, and when the loop resumes the timer and the D-Bus reply are
- * both ready.  So the timer never fails a call that is still in flight (the call's own 30 s timeout ends it
- * with an error, which fails the test with its message); it only fails when nothing is pending past the
- * deadline. */
-static gboolean
-cb_self_test_timeout (gpointer data)
-{
-  GsmMaluosGpusView *self = (GsmMaluosGpusView *) data;
-  self->self_test_timeout = 0;
-  if (!self->self_test)
-    return G_SOURCE_REMOVE;
-  if (self->in_flight || g_get_monotonic_time () < self->self_test_deadline)
-    {
-      self->self_test_timeout = g_timeout_add_seconds (5, cb_self_test_timeout, self);
-      return G_SOURCE_REMOVE;
-    }
-  self_test_done (self, FALSE);
-  return G_SOURCE_REMOVE;
-}
-
-void
-gsm_maluos_gpus_view_self_test (GsmMaluosGpusView *self)
-{
-  self->self_test = TRUE;
-  self->self_test_deadline = g_get_monotonic_time () + 60 * G_USEC_PER_SEC;
-  self->self_test_timeout = g_timeout_add_seconds (20, cb_self_test_timeout, self);
-  maluos_gpus_update (self);
+  self->watching = TRUE;
+  gsm_maluos_session_watch (self->session, GSM_MALUOS_WATCH_STATE);
 }
 
 /* ---- the one action: the sharing switch runs maluctl through polkit */
 
 static void
-on_share_done (GObject *source, GAsyncResult *res, gpointer data)
+on_share_done (gboolean ok, const char *output, gpointer data)
 {
   GsmMaluosGpusView *self = (GsmMaluosGpusView *) data;
-  GError *error = NULL;
-
-  if (!g_subprocess_wait_check_finish (G_SUBPROCESS (source), res, &error))
-    {
-      g_warning ("maluos gpus: maluctl gateway share: %s", error ? error->message : "?");
-      g_clear_error (&error);
-    }
+  if (!ok)
+    g_warning ("maluos gpus: maluctl gateway share: %s", output);
   gtk_widget_set_sensitive (self->share_row, TRUE);
-  maluos_gpus_update (self);
+  gsm_maluos_session_update (self->session);
   g_object_unref (self);
 }
 
@@ -598,40 +364,16 @@ static void
 on_share_toggled (GObject *, GParamSpec *, gpointer data)
 {
   GsmMaluosGpusView *self = (GsmMaluosGpusView *) data;
-  GError *error = NULL;
 
   if (self->updating_switch)
     return;
   gboolean on = adw_switch_row_get_active (ADW_SWITCH_ROW (self->share_row));
   const char *argv[] = { "pkexec", "maluctl", "gateway", "share", on ? "on" : "off", NULL };
-  GSubprocess *p = g_subprocess_newv (argv, G_SUBPROCESS_FLAGS_STDOUT_SILENCE, &error);
-  if (!p)
-    {
-      g_warning ("maluos gpus: pkexec: %s", error ? error->message : "?");
-      g_clear_error (&error);
-      maluos_gpus_update (self);
-      return;
-    }
   gtk_widget_set_sensitive (self->share_row, FALSE);
-  g_subprocess_wait_check_async (p, NULL, on_share_done, g_object_ref (self));
-  g_object_unref (p);
+  gsm_maluos_run (argv, on_share_done, g_object_ref (self));
 }
 
 /* ---- GObject */
-
-static void
-gsm_maluos_gpus_view_get_property (GObject *object, guint prop_id, GValue *value, GParamSpec *pspec)
-{
-  GsmMaluosGpusView *self = GSM_MALUOS_GPUS_VIEW (object);
-  switch (prop_id)
-    {
-    case PROP_AVAILABLE:
-      g_value_set_boolean (value, self->available);
-      break;
-    default:
-      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
-    }
-}
 
 static void
 gsm_maluos_gpus_view_dispose (GObject *object)
@@ -639,25 +381,17 @@ gsm_maluos_gpus_view_dispose (GObject *object)
   GsmMaluosGpusView *self = GSM_MALUOS_GPUS_VIEW (object);
 
   maluos_gpus_freeze (self);
-  if (self->self_test_timeout)
+  if (self->state_id)
     {
-      g_source_remove (self->self_test_timeout);
-      self->self_test_timeout = 0;
+      g_signal_handler_disconnect (self->session, self->state_id);
+      self->state_id = 0;
     }
-  if (self->cancellable)
-    {
-      g_cancellable_cancel (self->cancellable);
-      g_clear_object (&self->cancellable);
-    }
-  g_clear_object (&self->proxy);
-  g_clear_pointer (&self->last_error, g_free);
   if (self->rows)
     {
       g_ptr_array_free (self->rows, TRUE);
       self->rows = NULL;
     }
   g_clear_pointer (&self->box, gtk_widget_unparent);
-  g_clear_pointer (&self->summary, g_free);
 
   G_OBJECT_CLASS (gsm_maluos_gpus_view_parent_class)->dispose (object);
 }
@@ -669,26 +403,20 @@ gsm_maluos_gpus_view_class_init (GsmMaluosGpusViewClass *klass)
   GtkWidgetClass *widget_class = GTK_WIDGET_CLASS (klass);
 
   object_class->dispose = gsm_maluos_gpus_view_dispose;
-  object_class->get_property = gsm_maluos_gpus_view_get_property;
-
-  properties[PROP_AVAILABLE] = g_param_spec_boolean ("available", NULL, NULL, FALSE,
-                                                     (GParamFlags) (G_PARAM_READABLE | G_PARAM_STATIC_STRINGS));
-  g_object_class_install_properties (object_class, N_PROPS, properties);
-
   gtk_widget_class_set_layout_manager_type (widget_class, GTK_TYPE_BIN_LAYOUT);
 }
 
 static void
 gsm_maluos_gpus_view_init (GsmMaluosGpusView *self)
 {
-  self->interval_ms = 2000;
   self->rows = g_ptr_array_new_with_free_func (gpu_row_free);
-  self->cancellable = g_cancellable_new ();
+  self->session = gsm_maluos_session_get ();
 
   self->box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
   gtk_widget_set_parent (self->box, GTK_WIDGET (self));
 
   self->banner = adw_banner_new (_("The MaluOS session service is not answering"));
+  g_object_bind_property (self->session, "stale", self->banner, "revealed", G_BINDING_SYNC_CREATE);
   gtk_box_append (GTK_BOX (self->box), self->banner);
 
   self->page = adw_preferences_page_new ();
@@ -725,8 +453,9 @@ gsm_maluos_gpus_view_init (GsmMaluosGpusView *self)
   self->office_row = action_row (_("Other GPUs"), "—");
   adw_preferences_group_add (ADW_PREFERENCES_GROUP (estate_group), self->office_row);
 
-  /* one probe at construction, whatever tab is current: it decides whether the tab is shown */
-  maluos_gpus_update (self);
+  self->state_id = g_signal_connect (self->session, "state", G_CALLBACK (on_state), self);
+  if (gsm_maluos_session_get_state (self->session))
+    apply_state (self, gsm_maluos_session_get_state (self->session));
 }
 
 GsmMaluosGpusView *

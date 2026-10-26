@@ -62,7 +62,7 @@ gtkmm      = dependency('gtkmm-4.0',   version: '>=4.0.0')
 libgtop    = dependency('libgtop-2.0', version: '>=2.41.2')
 libadwaita = dependency('libadwaita-1',version: '>=1.6.alpha')
 librsvg    = dependency('librsvg-2.0', version: '>=2.46')
-json_glib  = dependency('json-glib-1.0', version: '>=1.6')   # MaluOS: the GPUs tab parses the session's state
+json_glib  = dependency('json-glib-1.0', version: '>=1.6')   # MaluOS: the MaluOS tabs parse the session's state
 
 if get_option('systemd')
   libsystemd = dependency('libsystemd', version: '>=44')

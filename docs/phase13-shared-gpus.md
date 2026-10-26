@@ -292,3 +292,40 @@ deadline, now 240 s in maluos-agents 0.2.1):
   (all listed as later in the API document); the laptop idle detection
   (G4); the estate's directory replacing pairing by hand (G4); the node
   service's side of the same API (G3, the other repository).
+
+**G5, the local half, built 2026-10-26** (the fork's local test and the
+gateway's local test pass on the dev host; the images and their boot
+tests follow):
+
+- maluos-system-monitor 49.1+maluos.3: the **MaluOS Network** tab (This
+  Node: name and id, the listener, sharing, the manager's last call, the
+  lanes, the keys issued; Paired Nodes: the gateway's remote backends with
+  their health and models; Estate: the office, with the directory's nodes
+  to follow in D1) and the **Queue** tab (Lanes: every backend with its
+  running and queued counts, the oldest wait, the resident model, the
+  per-class waits, Pause/Resume; Queue: every queued or running call of
+  every principal with its principal, key, face, mode and kind, its wait
+  or run time, the class as a drop-down that moves a queued call, Cancel;
+  "Open in Sovereign LLM Manager" when the desk is enrolled). Alt+5 and
+  Alt+6, `--show-network-tab`, `--show-queue-tab`. One session client
+  (maluos-session.cpp) now serves the three tabs: GetState every 2 s while
+  a tab that draws the state is current, NodeQueue every 2 s while the
+  Queue tab is; the GPUs tab was rewritten on it. The actions run `maluctl
+  gateway node pause|resume|cancel|priority` as the user and show the
+  outcome as a toast; a user who is not an operator of the gateway sees
+  the GPUs tab as before and a note on the other two.
+- maluos-session 0.8.0: `node` in the state (/node/v1/status and
+  /node/v1/keys as the session user, when an operator: this node, the
+  lanes, the paired nodes, the keys), `NodeQueue()` live over the bus.
+- maluos-gateway 0.4.1: GET /node/v1/queue answers the lanes too.
+- Tests: tests/system-monitor-local-test.sh (the self-test now prints the
+  three tabs' summaries; a node with a paired host and three jobs, an
+  empty queue on a VM, a user who is not an operator, no session);
+  tests/gateway-local-test.sh (the lanes in the queue answer); the image
+  boot test reads the node in the session state, NodeQueue over the bus,
+  pause and resume through maluctl as the tab does, and the three
+  summaries of the self-test on the live desktop session.
+- Not in G5's local half: the estate half of both tabs (the Estate page's
+  data, D1; the estate's queue snapshot and operator actions, D2), the
+  `move` route, translations of the tabs' strings, a pairing dialog (the
+  pairing stays `maluctl gateway backend add`).
