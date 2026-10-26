@@ -261,8 +261,11 @@ whose deadline fired while the first paint held the main loop under TCG):
   no session input for a threshold, on mains power).
 
 **G2 built 2026-10-25** (docs/inference-node-api.md is surface 1; the
-gateway's local test covers every route; the image boot test checks keys,
-the node API and `expose` on both profiles):
+gateway's local test covers every route; both profiles' images were rebuilt
+and their UEFI boot tests passed on 2026-10-26, checking keys, the node API
+and `expose`; the first pass failed only on three timing waits in older
+sections of the test, which now poll, and the Agents app's self-test
+deadline, now 240 s in maluos-agents 0.2.1):
 
 - maluos-gateway 0.4.0: the node API `/node/v1` (status with the machine,
   the GPUs and the lanes; health; the queue with cancel, priority and
