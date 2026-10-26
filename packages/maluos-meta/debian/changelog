@@ -1,7 +1,9 @@
 maluos-meta (0.2.12) resolute; urgency=medium
 
   * maluos-desktop carries malu123, the MaluOS spreadsheet (Excel-compatible,
-    built on GridCraft; vendored binary package in vendor/malu123).
+    built on GridCraft; vendored binary package in vendor/malu123);
+    maluos-business-os recommends malu123-web, the browser build served
+    by Apache at /malu123/.
 
  -- Edward Honour <ed@maludb.org>  Sun, 26 Oct 2026 02:10:00 +0000
 
