@@ -1,0 +1,13 @@
+# Vendored Malu123 package
+
+Malu123 is the MaluOS spreadsheet: Excel-compatible, native, with an LLM assistant on the way.
+It is built from [maludb/malu123](https://github.com/maludb/malu123), a fork of GridCraft
+(MIT OR Apache-2.0). The binary package is carried here so that the repository, image and CI
+builds are self-contained; a Rust toolchain is not needed to build MaluOS. Refresh with
+`scripts/vendor-malu123-deb.sh <dir-with-debs>` after `packaging/linux/package.sh` in the
+malu123 checkout; both local publishing (repo/publish.sh) and CI pick it up from this directory.
+The desktop seed depends on it, so every desktop image installs it.
+
+| Package | Version | sha256 (prefix) |
+|---|---|---|
+| malu123 | 0.11.1-1 | 146f201e70beb0f2… |

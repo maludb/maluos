@@ -1,3 +1,10 @@
+maluos-meta (0.2.12) resolute; urgency=medium
+
+  * maluos-desktop carries malu123, the MaluOS spreadsheet (Excel-compatible,
+    built on GridCraft; vendored binary package in vendor/malu123).
+
+ -- Edward Honour <ed@maludb.org>  Sun, 26 Oct 2026 02:10:00 +0000
+
 maluos-meta (0.2.11) resolute; urgency=medium
 
   * Phase 13 shared GPUs, slice G1: maluos-nvidia (seeds/nvidia.seed), the
