@@ -384,20 +384,21 @@ desktop image, one on the server image.
 
 ## Status
 
-**The host half built 2026-10-27** against the mock estate (the kernel
+**The host half built and boot-tested 2026-10-27** (both profiles' UEFI images, the third chain clean) against the mock estate (the kernel
 half, db/188 and the `/api/v1/estate/*` endpoints, waits for the owner's
 approval in maludb-os-core; until it lands the mock in maluos-estate
 serves the contract and the health rules the kernel will apply):
 
-- maluos-estate 0.1.0: `maluos_estate.client` (the shared HTTP client,
+- maluos-estate 0.1.1: `maluos_estate.client` (the shared HTTP client,
   the facts, the enrolment files, the estate endpoints), `report` (units
   through systemctl, agents, the gateway, the vault's alert rows,
   updates, disk, memory, load; under 32 KB; a part that cannot be read
   is null and named in `errors`), the daemon (`python3 -m maluos_estate`
   as the system user maluos-estate: presence and facts every
   `heartbeat_s`, the report every `report_s` and with the first
-  heartbeat, `offline` on SIGTERM, 401/410 kept trying every three
-  intervals, a 10/30/60 s retry ladder), `maluctl estate
+  heartbeat, made on a worker thread so a slow `maluctl update status`
+  never delays presence, `offline` on SIGTERM, 401/410 kept trying every
+  three intervals, a 10/30/60 s retry ladder), `maluctl estate
   join|status|report|heartbeat|nodes|leave`, the unit (hardened,
   `ConditionPathExists=/etc/maluos/estate.yaml`, enabled by `join`), the
   mock office moved here from maluos-desk (the desk contract unchanged;
@@ -407,7 +408,9 @@ serves the contract and the health rules the kernel will apply):
   `/mock/report`, `/mock/alert`, `--node-code`, `--node-heartbeat-s`,
   `--report-s`.
 - maluos-vault 0.4.1: a `host:` principal reads the ledger's `alert.%`
-  rows. maluos-desk 0.5.0: `maluctl office` on the shared client,
+  rows. maluos-gateway 0.4.3: whoami's spend figures tolerate a ledger not
+  yet granted (first boot). maluos-firstboot 0.1.11: `maluctl principal
+  list` fixed (it named the kind column wrongly). maluos-desk 0.5.0: `maluctl office` on the shared client,
   `maluctl office estate` (cached a minute per user), depends on
   maluos-estate. maluos-session 0.9.0: `office.estate` in the state after
   each successful heartbeat when `endpoints.estate` is set, notifications
@@ -453,3 +456,13 @@ Where the build departs from the text above, and why:
 6. **The mock's `/api/v1/desks/estate` is published to every desk**; the
    kernel decides by role (decision 6). `maluctl office estate` and the
    session treat a missing `endpoints.estate` as "not published to you".
+7. **The report never holds a heartbeat.** The first image chain swept
+   the node offline between heartbeats: the daemon made the report inline
+   and `maluctl update status` took longer than three intervals under
+   emulation. The report is made on a worker thread now; a heartbeat waits
+   for it at most half the interval (15 s at most) and a report that
+   finishes later goes with a heartbeat of its own at once. The same chain
+   found two older faults the new checks exposed: `maluctl principal list`
+   had never worked (the wrong column name) and the gateway logged an
+   internal error when the session asked `whoami` while first boot was
+   still granting the ledger; both fixed (firstboot 0.1.11, gateway 0.4.3).
