@@ -21,6 +21,8 @@ the same table.
 - **Bearer tokens.** Every call but `/health` carries
   `Authorization: Bearer <key>`. Two kinds of key:
   - a **node key** opens the node API (this document) and nothing else;
+    on the MaluOS gateway's own Unix socket an operator (root, or one of
+    the estate's operators) opens it without a key;
   - an **inference key** opens the faces (§5) under its limits and may read
     its own jobs; the node API refuses it (403).
   On the MaluOS gateway both are rows of `maluos_token` with a `kind`,

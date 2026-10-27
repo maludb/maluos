@@ -271,7 +271,8 @@ deadline, now 240 s in maluos-agents 0.2.1):
   the GPUs and the lanes; health; the queue with cancel, priority and
   pause/resume per lane; runs from the ledger with `since_seq`; models with
   a catalogue sequence; keys), opened by a node key or an operator on the
-  socket. Keys are principals: `key:<name>`, a principal policy (class,
+  socket (root, or one of the estate's operators: the human accounts the
+  provisioning state lists, since gateway 0.4.2). Keys are principals: `key:<name>`, a principal policy (class,
   cloud, remote, tiers) and a token of kind `inference` or `node`, minted by
   `maluctl gateway key issue` or `POST /node/v1/keys`, shown once. Async
   jobs on every face (`X-Node-Mode: async` or the body object `node`,
@@ -325,6 +326,13 @@ tests follow):
   boot test reads the node in the session state, NodeQueue over the bus,
   pause and resume through maluctl as the tab does, and the three
   summaries of the self-test on the live desktop session.
+- The first image chain (2026-10-26) failed the five G5 checks on the
+  desktop: the gateway counted only uid 0 on its socket as an operator, so
+  the session service, which reads the node API as the login user, got
+  403 and the tabs said "not an operator". maluos-gateway 0.4.2 counts the
+  estate's operators too (the provisioning state's list, the accounts
+  firstboot makes database superusers), re-read on reload; the local test
+  covers the switch.
 - Not in G5's local half: the estate half of both tabs (the Estate page's
   data, D1; the estate's queue snapshot and operator actions, D2), the
   `move` route, translations of the tabs' strings, a pairing dialog (the

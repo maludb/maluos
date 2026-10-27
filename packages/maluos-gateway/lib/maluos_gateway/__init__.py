@@ -1,2 +1,2 @@
 """maluos-gateway: the MaluOS inference gateway (Phase 6)."""
-VERSION = "0.4.1"
+VERSION = "0.4.2"

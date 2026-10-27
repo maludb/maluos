@@ -206,6 +206,24 @@ class Gateway:
         self.jobs = Jobs(self)
         self._models_sig, self._catalog_seq = None, 0
         self.runner, self.tcp_site, self.tcp_bound = None, None, None
+        self._operators, self._operators_at = set(), 0
+
+    def operators(self):
+        """The estate's operators besides root: the provisioning state's `operators` (the human accounts firstboot made
+        database superusers; `maluctl status` lists them) plus the config's `operators`, re-read every 30 s and on
+        reload. G5: the session service runs as the login user and reads the node API for the MaluOS Network and
+        Queue tabs, so that user must count as an operator on the socket, as it does for the database and maluctl."""
+        now = time.time()
+        if now - self._operators_at > 30:
+            ops = set(self.cfg.get("operators") or [])
+            path = self.cfg.get("operators_file") or os.path.join(os.environ.get("MALUOS_STATE_DIR", "/var/lib/maluos/firstboot"), "done")
+            try:
+                with open(path) as f:
+                    ops.update(json.load(f).get("operators") or [])
+            except (OSError, ValueError, AttributeError):
+                pass
+            self._operators, self._operators_at = ops, now
+        return self._operators
 
     def load_node_id(self):
         path = os.path.join(self.cfg.get("state_dir") or "/var/lib/maluos-gateway", "node-id")
@@ -438,7 +456,7 @@ class Gateway:
                 user = str(uid)
             ref = (self.cfg.get("identities") or {}).get(user, f"user:{user}")
             c = Caller(ref, user, uid, process_ref(pid), "socket")
-            c.operator = uid == 0
+            c.operator = uid == 0 or user in self.operators()
         else:
             auth = request.headers.get("Authorization", "")
             token = auth[7:].strip() if auth.lower().startswith("bearer ") else None
@@ -1183,7 +1201,7 @@ async def read_json(request):
 
 def need_operator(caller):
     if not caller.operator:
-        raise ApiError(403, "forbidden", "operators only (run as root on the socket)")
+        raise ApiError(403, "forbidden", "operators only (root or one of the estate's operators, on the socket)")
 
 
 # -- OpenAI
@@ -1552,6 +1570,7 @@ async def h_reload(request):
     gw = request.app["gw"]
     need_operator(await gw.caller(request))
     gw.cfg.reload()
+    gw._operators_at = 0                      # re-read the provisioning state's operators
     await gw.reload_catalog()
     await gw.apply_tcp()
     for b in gw.backends.values():

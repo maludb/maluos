@@ -16,6 +16,11 @@ DEFAULTS = {
     "affinity": {"max_wait_s": 20, "max_backlog": 4},
     "engine_queue": {"enabled": True, "poll_s": 2, "class": "batch", "principal": "service:engine"},
     "state_dir": "/var/lib/maluos-gateway",
+    # Operators on the socket besides root: the provisioning state's `operators` (the human accounts firstboot made
+    # database superusers) from operators_file, plus these users. G5: the session service reads the node API as the
+    # login user for the MaluOS Network and Queue tabs.
+    "operators": [],
+    "operators_file": "/var/lib/maluos/firstboot/done",
     "episodes": {"enabled": True},
     "health": {"cooldown_s": 60, "probe_s": 10},      # a memory episode per call that carries a task reference (FR-42)
     "alerts": {"hooks_dir": "/etc/maluos/alert-hooks.d", "check_s": 30, "backend_down_s": 300, "backend_down_repeat_s": 3600,

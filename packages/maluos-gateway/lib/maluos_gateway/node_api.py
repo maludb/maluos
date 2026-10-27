@@ -25,7 +25,7 @@ async def node_caller(request):
     gw = request.app["gw"]
     caller = await gw.caller(request)
     if not (caller.operator or caller.token_kind == "node"):
-        raise ApiError(403, "forbidden", "the node API needs a node key (maluctl gateway key issue --kind node) or an operator on the socket")
+        raise ApiError(403, "forbidden", "the node API needs a node key (maluctl gateway key issue --kind node) or an operator on the socket (root or one of the estate's operators)")
     if caller.token_kind == "node":
         gw.manager_seen = time.time()
     return caller

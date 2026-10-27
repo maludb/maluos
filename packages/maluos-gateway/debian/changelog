@@ -1,3 +1,15 @@
+maluos-gateway (0.4.2) resolute; urgency=medium
+
+  * Operators on the socket are root and the estate's operators: the
+    human accounts the provisioning state lists (the same accounts
+    firstboot makes database superusers and maluctl status names), plus
+    the config's `operators`, re-read every 30 s and on reload. G5's
+    first image chain found the node API refusing the session service,
+    which reads it as the login user for the MaluOS Network and Queue
+    tabs: only uid 0 counted before.
+
+ -- Edward Honour <ed@maludb.org>  Tue, 27 Oct 2026 01:30:00 +0000
+
 maluos-gateway (0.4.1) resolute; urgency=medium
 
   * Phase 13, shared GPUs, slice G5: GET /node/v1/queue answers the lanes

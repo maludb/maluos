@@ -51,6 +51,7 @@ engine_queue: {enabled: true, poll_s: 1, class: batch}
 ollama: {url: "http://127.0.0.1:11434", keep_alive: 5m, max_concurrent: 1}
 vault_socket: $W/vault.sock
 state_dir: $W/gwstate
+operators_file: $W/state/done
 alerts: {check_s: 2, backend_down_s: 3, backend_down_repeat_s: 60, hooks_dir: $W/hooks, usage_anomaly: {enabled: true, check_s: 2, min_calls: 5, factor: 2}}
 health: {cooldown_s: 2, probe_s: 3}
 share: {enabled: true}
@@ -370,6 +371,15 @@ check "expose moves the TCP listener live (gateway.yaml + reload), refusing with
 check "unexpose closes it; expose back on the test port" "rmctl unexpose | grep -q 'tcp listener off' && curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$TCP2/node/v1/health | grep -q 000 && rmctl expose --bind 127.0.0.1 --port $TCP >/dev/null && curl -s http://127.0.0.1:$TCP/node/v1/health | grep -q '\"ok\": true' && mctl share | grep -q \"tcp on 127.0.0.1:$TCP only\""
 check "key revoke by maluctl; the key then fails (401)" "rmctl key revoke ed-desk | grep -q 'revoked key ed-desk' && sleep 0.5 && curl -s -o /dev/null -w '%{http_code}' -H \"Authorization: Bearer $EDKEY\" $EU/v1/models | grep -q 401"
 rmctl backend rm self-remote >/dev/null 2>&1
+
+echo "== Phase 13 G5: the estate's operators on the socket (the session service reads the node API as the login user)"
+check "a plain user is not an operator (the provisioning state lists none)" "C $U/v1/maluos/whoami | grep -q '\"operator\": false'"
+check "the node API refuses a plain user on the socket" "C -o /dev/null -w '%{http_code}' $U/node/v1/queue | grep -q 403"
+printf '{"database":"%s","tenant":"%s","provisioned_at":"test","admin_principal":"human:admin","operators":["%s"],"components":{}}\n' $DB $T $ME > "$W/state/done"; Cr -X POST $U/v1/maluos/reload >/dev/null
+check "listed in the provisioning state's operators, $ME is an operator on the socket after a reload" "C $U/v1/maluos/whoami | grep -q '\"operator\": true'"
+check "and reads the node API without a key (the Network and Queue tabs' data)" "C $U/node/v1/queue | J 'sorted(d[\"lanes\"])' | grep -q mock && C $U/node/v1/status | grep -q '\"node_id\"'"
+printf '{"database":"%s","tenant":"%s","provisioned_at":"test","admin_principal":"human:admin","operators":[],"components":{}}\n' $DB $T > "$W/state/done"; Cr -X POST $U/v1/maluos/reload >/dev/null
+check "unlisted again after a reload: not an operator" "C $U/v1/maluos/whoami | grep -q '\"operator\": false'"
 
 echo "== ledger"
 check "model.call rows carry tokens, wait, process" "SQL \"select count(*) from maluos_ledger where event='model.call' and status='ok' and tokens_out > 0 and queue_wait_ms is not null and process_ref like 'curl@%' and linux_user='$ME'\" | grep -qE '^[1-9]'"
