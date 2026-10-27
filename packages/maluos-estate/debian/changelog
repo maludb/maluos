@@ -1,3 +1,14 @@
+maluos-estate (0.1.1) resolute; urgency=medium
+
+  * The daemon makes the report on a worker thread; a heartbeat waits for
+    it at most half the interval (15 s at most) and a report that finishes
+    later goes at once with a heartbeat of its own. The first image chain
+    saw the node swept offline between heartbeats while `maluctl update
+    status` ran under emulation (heartbeat_s 5, the sweep at 15 s): a slow
+    report must never cost the node its presence.
+
+ -- Edward Honour <ed@maludb.org>  Tue, 27 Oct 2026 14:00:00 +0000
+
 maluos-estate (0.1.0) resolute; urgency=medium
 
   * Phase 13 slice 1, the host half (docs/phase13-slice1-nodes.md): a

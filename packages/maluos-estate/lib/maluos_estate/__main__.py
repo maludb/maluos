@@ -2,6 +2,9 @@
 
 While /etc/maluos/estate.yaml exists: a heartbeat every heartbeat_s with `presence: online` and the facts, the
 full report with it every report_s (and with the first one); the outcome in /var/lib/maluos/estate/state.json.
+The report is made on a worker thread: a heartbeat waits for it at most half the interval (15 s at most), so a
+slow `maluctl update status` or systemctl never delays presence past the office's three-heartbeat sweep; a report
+that finishes later goes with a heartbeat of its own at once.
 401 or 410 from the office: the node was retired or its token revoked; the daemon keeps trying every
 3 × heartbeat_s and `maluctl estate status` says why. Network errors retry at 10 s, 30 s, 60 s, then heartbeat_s.
 SIGTERM (shutdown, `maluctl estate leave`, systemctl stop): one `presence: offline`, then exit.
@@ -23,12 +26,23 @@ def main(argv=None):
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     signal.signal(signal.SIGINT, lambda *_: stop.set())
 
+    made = threading.Event()                  # a report is ready on `ready`
+    ready = []                                # the worker's report (or None when it failed), at most one
+
     def pause(seconds):
-        """Sleep in short slices: a signal interrupts time.sleep and the handler sets `stop`."""
+        """Sleep in short slices: a signal interrupts time.sleep and the handler sets `stop`; a report that
+        became ready meanwhile ends the pause so it goes to the office at once."""
         end = time.time() + seconds
-        while not stop.is_set() and time.time() < end:
+        while not stop.is_set() and not made.is_set() and time.time() < end:
             time.sleep(min(0.5, max(0.0, end - time.time())))
-    tok, fails, last_report, last_conf = None, 0, 0.0, None
+
+    def make_report():
+        try:
+            ready.append(R.report())
+        except Exception as e:
+            log(f"report: {e.__class__.__name__}: {str(e)[:120]}"); ready.append(None)
+        made.set()
+    tok, fails, last_report, last_conf, worker = None, 0, 0.0, None, None
     while not stop.is_set():
         conf = C.read_conf()
         if not conf:
@@ -46,13 +60,14 @@ def main(argv=None):
                                "error": f"the node token is not readable from the vault: {e.__class__.__name__}: {str(e)[:120]}"})
                 log(f"token: {e.__class__.__name__}: {str(e)[:120]}")
                 pause(LADDER[min(fails, len(LADDER)) - 1]); continue
-        with_report = time.time() - last_report >= rep_s
-        rep = None
-        if with_report:
-            try:
-                rep = R.report()
-            except Exception as e:
-                log(f"report: {e.__class__.__name__}: {str(e)[:120]}")
+        if worker is None and time.time() - last_report >= rep_s:
+            made.clear(); worker = threading.Thread(target=make_report, daemon=True); worker.start()
+        if worker is not None:
+            worker.join(timeout=min(hb_s / 2, 15))
+            if not worker.is_alive():
+                worker = None
+        made.clear()                          # cleared before the take: a report made after it ends the pause
+        rep = ready.pop() if ready else None  # None when it failed: the next heartbeat starts another
         res = C.heartbeat(conf, tok, "online", rep)
         if res["ok"]:
             fails = 0

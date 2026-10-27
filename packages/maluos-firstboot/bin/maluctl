@@ -95,7 +95,7 @@ def cmd_principal(args):
     db, t = st["database"], st["tenant"]
     pre = f"SET ROLE {mp.qi(t)}; SET search_path TO {mp.qi(t)}, maludb_core, public; "
     if args[:1] == ["list"]:
-        print(mp.psql(pre + "SELECT principal_ref || '  ' || kind || '  ' || coalesce(display_name,'') || '  home=' || coalesce(home_scope,'') FROM maludb_principal ORDER BY 1;", db) or "(none)")
+        print(mp.psql(pre + "SELECT principal_ref || '  ' || principal_kind || '  ' || coalesce(display_name,'') || '  home=' || coalesce(home_scope,'') FROM maludb_principal ORDER BY 1;", db) or "(none)")
         return 0
     if args[:1] == ["add"] and len(args) >= 2:
         ref, kind, name, home = args[1], "agent", args[1], args[1]

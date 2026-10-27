@@ -694,8 +694,11 @@ class Gateway:
         ent = self.spend_cache.get(key)
         if ent and ent[1] > time.time() - 10:
             return ent[0]
-        row = await self.db.fetchone(f"SELECT coalesce(sum(cost_actual), 0) AS c FROM maluos_ledger WHERE principal_ref=%s AND event='model.call' AND ts >= date_trunc(%s, now())",
-                                     (principal_ref, period))
+        try:
+            row = await self.db.fetchone(f"SELECT coalesce(sum(cost_actual), 0) AS c FROM maluos_ledger WHERE principal_ref=%s AND event='model.call' AND ts >= date_trunc(%s, now())",
+                                         (principal_ref, period))
+        except (psycopg.errors.InsufficientPrivilege, psycopg.errors.UndefinedTable):
+            return 0.0                        # first boot: the vault's ledger not yet made or granted (nothing spent, not cached)
         v = float(row["c"]) if row else 0.0
         self.spend_cache[key] = (v, time.time())
         return v

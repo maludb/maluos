@@ -1,3 +1,11 @@
+maluos-firstboot (0.1.11) resolute; urgency=medium
+
+  * `maluctl principal list` named the principal kind by a column that
+    does not exist (kind, for principal_kind) and failed with a traceback;
+    found by the slice 1 boot test, which reads the host principal back.
+
+ -- Edward Honour <ed@maludb.org>  Tue, 27 Oct 2026 14:00:00 +0000
+
 maluos-firstboot (0.1.10) resolute; urgency=medium
 
   * Phase 13, shared GPUs, slice G1 (docs/phase13-shared-gpus.md): the GPU
