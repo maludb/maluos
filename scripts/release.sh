@@ -4,13 +4,15 @@
 # download host (ISO + qcow2 + checksums). Packages keep their own versions;
 # the OS release is the date of the build on top of the Ubuntu point release.
 #
-#   scripts/release.sh [--dry-run] [--no-upload] [--profiles=server|server,desktop]
+#   scripts/release.sh [--dry-run] [--no-upload] [--profiles=server|server,desktop] [--stale-ok]
 # Re-runnable: an existing tag or GitHub release is reused and the uploads
 # resume, so a dropped session is fixed by running it again (in tmux).
 # Needs: a clean tree on main, build/maluos-*.iso and build/image/*.qcow2 from
 # this tree (image/build-rootfs.sh, build-qcow2.sh, iso/build-iso.sh), gh auth.
 # The server ISO and image are required; the desktop pair is released too
 # when present (build both with -p desktop).
+# Every artefact must come from this tree (the freshness guard below); --stale-ok releases one that is not,
+# with its findings printed, for a knowing exception.
 # Optional: MALUOS_DOWNLOAD_RSYNC=user@host:/srv/download/maluos for the ISO.
 # Run it as `source ~/.config/maluos/publish.env && scripts/release.sh`: without MALUOS_DOWNLOAD_S3 the
 # tag and the GitHub Release are made but nothing reaches download.maluos.com (it says so at the end).
@@ -21,9 +23,9 @@ ROOT_DIR=$(cd "$(dirname "$0")/.." && pwd)
 drop_caches_loop() { while :; do sleep 15; sync; sudo -n sh -c 'echo 1 > /proc/sys/vm/drop_caches' 2>/dev/null || true; done; }
 ROOT=$(cd "$(dirname "$0")/.." && pwd); cd "$ROOT"
 . repo/config.env
-DRY=0; UPLOAD=1; RESUME=0
+DRY=0; UPLOAD=1; RESUME=0; STALE_OK=0
 ONLY=""
-for a in "$@"; do case "$a" in --dry-run) DRY=1;; --no-upload) UPLOAD=0;; --resume) RESUME=1;; --profiles=*) ONLY=${a#--profiles=};; esac; done
+for a in "$@"; do case "$a" in --dry-run) DRY=1;; --no-upload) UPLOAD=0;; --resume) RESUME=1;; --stale-ok) STALE_OK=1;; --profiles=*) ONLY=${a#--profiles=};; esac; done
 [ -z "$(git status --porcelain)" ] || { echo "working tree not clean" >&2; exit 1; }
 [ "$(git branch --show-current)" = main ] || { echo "release from main" >&2; exit 1; }
 BASE=$(grep -oE 'VERSION_ID="[0-9.]+"' packages/maluos-branding/files/share/os-release.server | grep -oE '[0-9.]+')
@@ -41,6 +43,34 @@ ISO=build/maluos-26.04.1-server-amd64.iso; QCOW=build/image/maluos-server-26.04-
 PROFILES=server
 [ -f build/maluos-26.04.1-desktop-amd64.iso ] && [ -f build/image/maluos-desktop-26.04-amd64.qcow2 ] && PROFILES="server desktop"
 [ -n "$ONLY" ] && PROFILES=$(echo "$ONLY" | tr , " ")   # --profiles=server ships the server pair even when desktop images are present
+# The freshness guard: every artefact staged comes from this tree. 26.04.20261027 shipped the 10-24 ISOs
+# (gateway 0.3.4) beside that day's images because nothing looked. Two rules per profile, for the ISO and
+# the image alike: the manifest (build/image/maluos-P.manifest; /casper/maluos-P.manifest inside the ISO)
+# lists every package this tree builds at the version its debian/changelog declares, and the file is
+# newer than the last commit that touched packages/, seeds/, image/ or iso/.
+tree_versions=$(for d in packages/*/; do v=$(head -1 "$d/debian/changelog" | sed -E 's/.*\(([^)]+)\).*/\1/'); grep -h '^Package:' "$d/debian/control" | awk -v v="$v" '{print $2 "\t" v}'; done)
+last_change=$(git log -1 --format=%ct -- packages seeds image iso); last_change_desc=$(git log -1 --format='%h, %cd' --date=format:'%Y-%m-%d %H:%M' -- packages seeds image iso)
+stale=()
+check_manifest() {   # check_manifest ARTEFACT MANIFEST: the tree's packages at the tree's versions
+    local bad; bad=$(awk -F'\t' 'NR==FNR {tree[$1]=$2; next} ($1 in tree) && tree[$1] != $2 {printf "%s %s (the tree has %s)\n", $1, $2, tree[$1]}' <(printf '%s\n' "$tree_versions") "$2")
+    [ -z "$bad" ] || while read -r l; do stale+=("$1: $l"); done <<< "$bad"
+}
+check_age() { [ "$(stat -c %Y "$1")" -ge "$last_change" ] || stale+=("$1: built before the last change to packages/, seeds/, image/ or iso/ ($last_change_desc)"); }
+for p in $PROFILES; do
+    iso=build/maluos-26.04.1-$p-amd64.iso; qcow=build/image/maluos-$p-26.04-amd64.qcow2; man=build/image/maluos-$p.manifest
+    [ -f "$iso" ] && [ -f "$qcow" ] || { echo "no $p ISO or image in build/" >&2; exit 1; }
+    if [ -f "$man" ]; then check_manifest "$qcow" "$man"; else stale+=("$qcow: no manifest beside it ($man)"); fi
+    check_age "$qcow"
+    tmp=$(mktemp -u)
+    if xorriso -indev "$iso" -osirrox on -extract "/casper/maluos-$p.manifest" "$tmp" >/dev/null 2>&1; then check_manifest "$iso" "$tmp"; rm -f "$tmp"
+    else stale+=("$iso: no /casper/maluos-$p.manifest inside it"); fi
+    check_age "$iso"
+done
+if [ ${#stale[@]} -gt 0 ]; then
+    echo "== stale artefacts: a release must come from this tree" >&2; printf '   %s\n' "${stale[@]}" >&2
+    echo "   rebuild: repo/publish.sh, then for each profile image/build-rootfs.sh -p P, image/build-qcow2.sh -p P, iso/build-iso.sh -p P" >&2
+    if [ $STALE_OK = 1 ]; then echo "   --stale-ok: releasing them anyway" >&2; else exit 1; fi
+else echo "== fresh: every artefact carries this tree's package versions and postdates its last package change ($last_change_desc)"; fi
 OUT=build/release/$VERSION; mkdir -p "$OUT"
 gpg --batch --list-secret-keys "$MALUOS_PUBLIC_SIGNING_UID" >/dev/null 2>&1 || { echo "production key not on this host" >&2; exit 1; }
 echo "== release $VERSION ($TAG): $PROFILES"

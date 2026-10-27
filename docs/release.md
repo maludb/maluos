@@ -35,6 +35,18 @@ uploads: the dev VM is a 14 GB guest that its hypervisor killed four times
 when plain `cp` and `sha256sum` over the images filled the guest's cache
 (docs/phase12-desktop.md, slice 6 status). Run the script in tmux.
 
+A third rule since 2026-10-27, the freshness guard: every artefact must
+come from this tree. Release 26.04.20261027 shipped the ISOs of 10-24
+(gateway 0.3.4) beside that day's cloud images because the script staged
+whatever `build/` held. Now, for each profile, the image's manifest
+(`build/image/maluos-P.manifest`) and the ISO's (`/casper/maluos-P.manifest`,
+read with xorriso) must list every package this tree builds at the version
+its `debian/changelog` declares, and both files must be newer than the last
+commit that touched `packages/`, `seeds/`, `image/` or `iso/`. A stale
+artefact stops the script, dry run included, with the package and the
+versions named; `--stale-ok` releases it anyway for a knowing exception
+(a hotfix of one profile, say) and prints the findings beside the release.
+
 The passphrase prompt comes first, before staging. The script sets
 `GPG_TTY`, signs a test line with the production key and lets gpg-agent
 cache the passphrase (10 minutes by default) for the real signature a
