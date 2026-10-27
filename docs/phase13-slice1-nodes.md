@@ -381,3 +381,75 @@ without a desk is covered.
 
 About the size of Phase 12 slice 7. Two build-and-test rounds on the
 desktop image, one on the server image.
+
+## Status
+
+**The host half built 2026-10-27** against the mock estate (the kernel
+half, db/188 and the `/api/v1/estate/*` endpoints, waits for the owner's
+approval in maludb-os-core; until it lands the mock in maluos-estate
+serves the contract and the health rules the kernel will apply):
+
+- maluos-estate 0.1.0: `maluos_estate.client` (the shared HTTP client,
+  the facts, the enrolment files, the estate endpoints), `report` (units
+  through systemctl, agents, the gateway, the vault's alert rows,
+  updates, disk, memory, load; under 32 KB; a part that cannot be read
+  is null and named in `errors`), the daemon (`python3 -m maluos_estate`
+  as the system user maluos-estate: presence and facts every
+  `heartbeat_s`, the report every `report_s` and with the first
+  heartbeat, `offline` on SIGTERM, 401/410 kept trying every three
+  intervals, a 10/30/60 s retry ladder), `maluctl estate
+  join|status|report|heartbeat|nodes|leave`, the unit (hardened,
+  `ConditionPathExists=/etc/maluos/estate.yaml`, enabled by `join`), the
+  mock office moved here from maluos-desk (the desk contract unchanged;
+  `maluos_desk.mock_office` is the same module) with the estate contract,
+  node codes, the health rules, alerts keyed by their subject so a disk
+  at 90 % then 97 % is one alert, the presence sweep, `/mock/nodes`,
+  `/mock/report`, `/mock/alert`, `--node-code`, `--node-heartbeat-s`,
+  `--report-s`.
+- maluos-vault 0.4.1: a `host:` principal reads the ledger's `alert.%`
+  rows. maluos-desk 0.5.0: `maluctl office` on the shared client,
+  `maluctl office estate` (cached a minute per user), depends on
+  maluos-estate. maluos-session 0.9.0: `office.estate` in the state after
+  each successful heartbeat when `endpoints.estate` is set, notifications
+  (a node offline or back, an alert once, "Open Estate"), the indicator's
+  Estate line, the Desk's Estate row, `OfficeAction(estate)`.
+  maluos-system-monitor 49.1+maluos.4: the MaluOS Network tab's Estate
+  group (the counts, a row per node, the open alerts). maluos-meta 0.2.13:
+  both profiles depend on maluos-estate.
+- Tests: tests/desk-local-test.sh (the estate section: join as root with
+  the current user standing in for maluos-estate, the daemon, the report,
+  the rules, SIGTERM, leave, the desk path; 64 checks),
+  tests/system-monitor-local-test.sh (the estate fixture),
+  tests/qcow2-boot-test.sh (a server block on both profiles: join as an
+  inference node, the identity map, the report as the node, the ledger,
+  leave; the desktop's office section: the node beside the desk, both in
+  `maluctl office estate` and the session state, a failing agent raised
+  and cleared, the Network tab, the clean offline and its notification,
+  leave, the desk path of `maluctl estate status`).
+
+Where the build departs from the text above, and why:
+
+1. **The host principal's kind is `service`**, not `host`: the kernel's
+   `maludb_principal` CHECK allows human, agent and service, and a new
+   kind is the kernel half's to add (db/188). The ref is `host:<hostname>`
+   as specified; the identities map and the vault's rule key on the ref.
+2. **The session keeps its own status readers.** `maluos_estate.report`
+   reads the same things the same way for the daemon and `maluctl estate
+   report`; moving the session's functions out would have changed nothing
+   the Desk shows and risked what the boot test checks byte for byte.
+3. **The estate's view lives in the forked System Monitor's MaluOS
+   Network tab**, not a Desk page: the owner's G5 decision
+   (docs/phase13-shared-gpus.md) placed it there. The Desk's Office group
+   carries a one-row summary with a button to the tab.
+4. **`maluctl estate join --kind desk`** is the desk path (it runs
+   `maluctl office enroll`): on the desktop image one VM is both the
+   server node and the desk, so the kind cannot be inferred from the
+   profile. `maluctl estate status` on a desk names its desk enrolment.
+5. **An agent in auto-restart counts as failing** (`activating` with
+   restarts), since systemd's `Restart=on-failure` never leaves an agent
+   in `failed`; the alert reads "agent X failing (N restarts)". A clean
+   `offline` (shutdown, stop) raises `node_offline` like a swept one: an
+   operator wants to know either way; it clears when the node is back.
+6. **The mock's `/api/v1/desks/estate` is published to every desk**; the
+   kernel decides by role (decision 6). `maluctl office estate` and the
+   session treat a missing `endpoints.estate` as "not published to you".

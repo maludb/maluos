@@ -309,7 +309,18 @@ class Indicator extends PanelMenu.Button {
         item.menu.addMenuItem(new InfoItem(o.last_heartbeat_at ? `last check-in ${o.last_heartbeat_at}` : 'no check-in yet', true));
         if (o.last_error)
             item.menu.addMenuItem(new InfoItem(o.last_error, true));
-        for (const [label, action] of [['Open office…', 'open'], ['Check in now', 'heartbeat']]) {
+        const e = o.estate || {};
+        if (e.available) {   // Phase 13 slice 1: the estate the office publishes to this desk's owner
+            const c = e.counts || {};
+            const line = new InfoItem(`Estate: ${c.nodes ?? 0} nodes · ${c.online ?? 0} online · ${c.alerts ?? 0} alert${c.alerts === 1 ? '' : 's'}${e.stale ? ' (cached)' : ''}`, true);
+            if ((c.alerts ?? 0) > 0 || (c.offline ?? 0) > 0)
+                line.add_style_class_name('maluos-dot-warn');
+            item.menu.addMenuItem(line);
+        }
+        const actions = [['Open office…', 'open'], ['Check in now', 'heartbeat']];
+        if (e.available)
+            actions.push(['Open Estate (System Monitor)…', 'estate']);
+        for (const [label, action] of actions) {
             const it = new PopupMenu.PopupMenuItem(label);
             it.connect('activate', () => this._proxy?.OfficeActionRemote(action, (_r, error) => {
                 if (error)

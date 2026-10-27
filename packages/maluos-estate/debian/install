@@ -1,0 +1,2 @@
+lib/maluos_estate          usr/lib/maluos
+lib/maluctl.d/estate.py    usr/lib/maluos/maluctl.d

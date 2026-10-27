@@ -18,7 +18,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives import hashes
 
-VERSION = "0.4.0"
+VERSION = "0.4.1"
 CONFIG = os.environ.get("MALUOS_VAULT_CONFIG", "/etc/maluos/vault.yaml")
 DEFAULTS = {
     "socket": "/run/maluos/vault.sock",
@@ -795,9 +795,12 @@ class Vault:
         if not caller.operator:
             if not caller.principal:
                 return []
-            # own rows, rows brokered for me, and the rows of agents I own (maluos_agent, Phase 12 slice 3)
-            where.append("(principal_ref=%s OR broker_ref=%s OR principal_ref IN (SELECT principal_ref FROM maluos_agent WHERE owner_principal_ref=%s AND removed_at IS NULL))")
-            args += [caller.ref, caller.ref, caller.ref]
+            if caller.ref.startswith("host:") and str(q.get("event_like") or "").startswith("alert."):
+                pass    # Phase 13 slice 1: the host principal reads the host's alert rows for the node's report
+            else:
+                # own rows, rows brokered for me, and the rows of agents I own (maluos_agent, Phase 12 slice 3)
+                where.append("(principal_ref=%s OR broker_ref=%s OR principal_ref IN (SELECT principal_ref FROM maluos_agent WHERE owner_principal_ref=%s AND removed_at IS NULL))")
+                args += [caller.ref, caller.ref, caller.ref]
         for key, col in (("principal", "principal_ref"), ("secret", "secret_name"), ("compartment", "compartment"),
                          ("event", "event"), ("status", "status"), ("user", "linux_user")):
             if q.get(key):

@@ -10,6 +10,8 @@ maluos-desktop-branding
 maluos-desktop-session
 # the desk's enrolment with a Business OS office (maluctl office)
 maluos-desk
+# the estate client and the mock office (Phase 13 slice 1); a desk's node record is its desk row
+maluos-estate
 # the Tools Installer (Phase 12 slice 7): maluctl tools and the install scripts
 maluos-tools
 # the Agents app (Phase 12 slice 8): local and office agents, their icons

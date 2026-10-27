@@ -1,3 +1,13 @@
+maluos-system-monitor (49.1+maluos.4) resolute; urgency=medium
+
+  * Phase 13 slice 1 (docs/phase13-slice1-nodes.md): the MaluOS Network
+    tab's Estate group shows the estate the office publishes to this
+    desk's owner (office.estate in the session's state): the counts, one
+    row per node (kind, presence, health, summary, last seen), the open
+    alerts; the self-test summary names them. Read-only until slice 2.
+
+ -- Edward Honour <ed@maludb.org>  Tue, 27 Oct 2026 04:00:00 +0000
+
 maluos-system-monitor (49.1+maluos.3) resolute; urgency=medium
 
   * Phase 13, shared GPUs, slice G5 (the local half): the MaluOS Network

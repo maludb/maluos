@@ -1,0 +1,45 @@
+[Unit]
+Description=MaluOS estate membership: the node's heartbeat and report
+Documentation=https://github.com/maludb/maluos
+ConditionPathExists=/etc/maluos/estate.yaml
+After=network-online.target maluos-vault.socket maluos-gateway.socket
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=maluos-estate
+Group=maluos-estate
+WorkingDirectory=/usr/lib/maluos
+Environment=PYTHONPATH=/usr/lib/maluos
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 -s -m maluos_estate
+StateDirectory=maluos/estate
+TimeoutStopSec=20
+Restart=on-failure
+RestartSec=5
+
+# Hardening: reads the vault and the gateway over their Unix sockets, systemd over the system bus,
+# apt's lists through maluctl, and talks HTTPS to the office; writes only its state directory.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

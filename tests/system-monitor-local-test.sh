@@ -2,9 +2,9 @@
 # The forked System Monitor's MaluOS tabs (Phase 13 G1: GPUs; G5: MaluOS Network, Queue) on this host,
 # without a VM: the binary from a meson build (or the installed /usr/bin/gnome-system-monitor), a fake
 # com.maluos.Session on a private session bus (tests/lib/fake_session.py), Xvfb for a display,
-# `--maluos-self-test` three times (two GPUs with a node, a paired node and a queue; no GPU on a VM
-# with an empty queue; a user who is not an operator), then the session absent (the self-test must
-# fail cleanly).
+# `--maluos-self-test` four times (two GPUs with a node, a paired node and a queue; no GPU on a VM
+# with an empty queue; an enrolled desk whose office publishes the estate; a user who is not an
+# operator), then the session absent (the self-test must fail cleanly).
 #   usage: tests/system-monitor-local-test.sh [BINARY]       default: build/gsm/src/gnome-system-monitor
 set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -42,6 +42,8 @@ run_case "two GPUs, share on; a node with 2 lanes, 1 paired, 2 keys, exposed; 3 
     "self-test ok: GPUs: session reachable, 2 gpus, chassis desktop, rule opt-in, share on, gateway ok; Network: node fake-desk, 2 lanes, 1 paired, 2 keys, exposed; Queue: 3 jobs (1 running, 2 queued) in 2 lanes"
 run_case "no GPU on a VM; the node on its socket only; an empty queue" "--no-gpu" \
     "self-test ok: GPUs: session reachable, 0 gpus, chassis vm, rule always, share off, gateway ok; Network: node fake-desk, 2 lanes, 1 paired, 2 keys, socket only; Queue: 0 jobs (0 running, 0 queued) in 2 lanes"
+run_case "an enrolled desk whose office publishes the estate: two nodes (one offline), one open alert on the Network tab" "--no-gpu --estate" \
+    "self-test ok: GPUs: session reachable, 0 gpus, chassis vm, rule always, share off, gateway ok; Network: node fake-desk, 2 lanes, 1 paired, 2 keys, socket only, estate 2 nodes (1 online, 1 alert); Queue: 0 jobs (0 running, 0 queued) in 2 lanes"
 run_case "not an operator: the GPUs tab works, the Network and Queue tabs say so" "--not-operator" \
     "self-test ok: GPUs: session reachable, 2 gpus, chassis desktop, rule opt-in, share on, gateway ok; Network: not an operator; Queue: forbidden (not an operator)"
 out=$(dbus-run-session -- timeout 60 xvfb-run -a -s '-screen 0 1280x800x24' "$BIN" --maluos-self-test 2>&1); rc=$?

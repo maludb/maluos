@@ -2,7 +2,9 @@
 # Exercise `maluctl office` and the mock office on this host, without a VM: a throwaway
 # database and the real vault daemon (as in vault-local-test.sh), the mock office on a
 # local port, enrol/heartbeat/status/leave as root for the current user, no gateway
-# (--no-gateway; the image boot test covers the office rung). Needs passwordless sudo.
+# (--no-gateway; the image boot test covers the office rung). Then Phase 13 slice 1: this host joins the mock's
+# estate as a server node (maluctl estate, the daemon, the report, the health rules, leave), the current user
+# standing in for the system user maluos-estate (MALUOS_ESTATE_USER). Needs passwordless sudo.
 set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 W=/var/tmp/maluos-desk-test; DB=maluos_desktest; T=dt; VROLE=desktest_vault; ME=$(id -un); PORT=18981
@@ -13,12 +15,12 @@ check(){ if (set +o pipefail; eval "$2"); then ok "$1"; else bad "$1"; fi; }
 
 sudo -n true 2>/dev/null || { echo "needs passwordless sudo"; exit 2; }
 pkill -f "$W/lib/maluos_vault.py" 2>/dev/null; pkill -f "maluos_desk.mock_office --port $PORT" 2>/dev/null; sleep 0.5
-sudo rm -rf "$W"; mkdir -p "$W/lib/maluctl.d" "$W/cred" "$W/state" "$W/etc"; chmod 755 "$W" "$W/lib" "$W/lib/maluctl.d" "$W/etc"
+sudo rm -rf "$W"; mkdir -p "$W/lib/maluctl.d" "$W/cred" "$W/state" "$W/etc" "$W/fb"; chmod 755 "$W" "$W/lib" "$W/lib/maluctl.d" "$W/etc" "$W/fb"
 cp "$ROOT"/packages/maluos-firstboot/lib/maluos_provision.py "$ROOT"/packages/maluos-firstboot/bin/maluctl \
    "$ROOT"/packages/maluos-vault/lib/maluos_vault.py "$ROOT"/packages/maluos-vault/lib/maluos_vault_client.py \
    "$ROOT"/packages/maluos-vault/components/40-maluos-vault.py "$ROOT"/packages/maluos-vault/share/schema.sql "$W/lib/"
-cp "$ROOT"/packages/maluos-vault/lib/maluctl.d/secret.py "$ROOT"/packages/maluos-desk/lib/maluctl.d/office.py "$W/lib/maluctl.d/"
-cp -r "$ROOT"/packages/maluos-desk/lib/maluos_desk "$W/lib/"
+cp "$ROOT"/packages/maluos-vault/lib/maluctl.d/secret.py "$ROOT"/packages/maluos-desk/lib/maluctl.d/office.py "$ROOT"/packages/maluos-estate/lib/maluctl.d/estate.py "$W/lib/maluctl.d/"
+cp -r "$ROOT"/packages/maluos-desk/lib/maluos_desk "$ROOT"/packages/maluos-estate/lib/maluos_estate "$W/lib/"
 chmod -R a+rX "$W/lib"; head -c 32 /dev/urandom > "$W/cred/maluos-vault.key"
 cat > "$W/vault.yaml" <<EOY
 socket: $W/vault.sock
@@ -48,10 +50,11 @@ PY
 
 echo "== daemon and mock office"
 ( cd "$W" && CREDENTIALS_DIRECTORY=$W/cred MALUOS_VAULT_CONFIG=$W/vault.yaml python3 "$W/lib/maluos_vault.py" --socket "$W/vault.sock" >"$W/daemon.log" 2>&1 & echo $! > "$W/daemon.pid" )
-( cd "$W" && PYTHONPATH=$W/lib python3 -m maluos_desk.mock_office --port $PORT --code good-code --name "Local Office" --models office-7b --heartbeat-s 5 >"$W/office.log" 2>&1 & echo $! > "$W/office.pid" )
+( cd "$W" && PYTHONPATH=$W/lib python3 -m maluos_desk.mock_office --port $PORT --code good-code --node-code node-code --name "Local Office" --models office-7b --heartbeat-s 5 --report-s 4 >"$W/office.log" 2>&1 & echo $! > "$W/office.pid" )
+printf '{"database":"%s","tenant":"%s","provisioned_at":"test","admin_principal":"human:admin","operators":[],"components":{"vault":{}}}\n' $DB $T > "$W/fb/done"
 trap 'kill $(cat $W/daemon.pid) $(cat $W/office.pid) 2>/dev/null' EXIT
 for i in $(seq 1 20); do [ -S "$W/vault.sock" ] && curl -fsS --max-time 1 http://127.0.0.1:$PORT/api/v1/health >/dev/null 2>&1 && break; sleep 0.25; done
-ENV="PYTHONPATH=$W/lib MALUCTL_PLUGIN_DIR=$W/lib/maluctl.d MALUCTL_BIN=$W/lib/maluctl MALUOS_VAULT_SOCKET=$W/vault.sock MALUOS_OFFICE_CONF=$W/etc/office.yaml MALUOS_OFFICE_ENV=$W/etc/office.env XDG_STATE_HOME=$W/state-$ME"
+ENV="PYTHONPATH=$W/lib MALUCTL_PLUGIN_DIR=$W/lib/maluctl.d MALUCTL_BIN=$W/lib/maluctl MALUOS_VAULT_SOCKET=$W/vault.sock MALUOS_OFFICE_CONF=$W/etc/office.yaml MALUOS_OFFICE_ENV=$W/etc/office.env XDG_STATE_HOME=$W/state-$ME XDG_CACHE_HOME=$W/cache-$ME MALUOS_STATE_DIR=$W/fb MALUOS_PROVISIONED=$W/fb/done MALUOS_ESTATE_CONF=$W/etc/estate.yaml MALUOS_ESTATE_STATE_DIR=$W/estate MALUOS_ESTATE_USER=$ME MALUOS_ESTATE_NO_UNIT=1 MALUOS_VAULT_CONFIG=$W/vault.yaml MALUOS_GATEWAY_CONFIG=$W/etc/gateway.yaml MALUOS_GATEWAY_SOCKET=$W/no-gateway.sock"
 me()   { env $ENV python3 "$W/lib/maluctl" "$@"; }
 root() { sudo -n env $ENV python3 "$W/lib/maluctl" "$@"; }
 mock() { curl -fsS --max-time 5 "http://127.0.0.1:$PORT$1" "${@:2}"; }
@@ -85,6 +88,49 @@ check "leave (root): told, files and token gone" "root office leave | grep -q 'l
 check "status: not enrolled again" "! me office status >/dev/null 2>&1"
 check "re-enrol with a new code, --keep-secret on leave keeps the token" "mock /mock/code -d '{\"code\":\"second\"}' >/dev/null && root office enroll http://127.0.0.1:$PORT --code second --owner $ME --no-gateway | grep -q 'enrolled: desk' && root office leave --keep-secret | grep -q 'desk retired' && me secret list | grep -q office-desk-token"
 check "no token value in the vault log or the office config dir" "! grep -q 'desk_' $W/daemon.log && ! ls $W/etc | grep -q office"
+
+echo "== Phase 13 slice 1: this host as a node of the estate (maluctl estate against the mock; $ME stands in for maluos-estate)"
+HOST=$(hostname)
+check "estate status: not joined (exit 1)" "! me estate status >/dev/null 2>&1 && me estate status 2>&1 | grep -q 'not joined'"
+check "report without an office: units, disk, memory, load; the gateway and the vault absent are null, not errors" "me estate report --json | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r[\"hostname\"] and r[\"disk\"][0][\"mount\"]==\"/\" and r[\"memory\"][\"total_mb\"]>0 and len(r[\"load\"])==3 and isinstance(r[\"units\"], list), r'"
+check "report (text) names the node" "me estate report | grep -q '^node:     $HOST'"
+check "join needs root" "! me estate join http://127.0.0.1:$PORT --code node-code 2>&1 | grep -q joined"
+check "join refuses a desk code (403 bad_code)" "root estate join http://127.0.0.1:$PORT --code good-code --name n 2>&1 | grep -q 'refused the node (403 bad_code)'"
+check "join refuses a bad kind" "root estate join http://127.0.0.1:$PORT --code node-code --kind laptop 2>&1 | grep -q 'must be server, inference or desk'"
+check "join as a server node: the principal host:$HOST, the identity map, the key and the token, estate.yaml" "root estate join http://127.0.0.1:$PORT --code node-code --name local-node | grep -q \"joined: server 'local-node' (#57) at Local Office as host:$HOST\""
+check "estate.yaml: url, node, principal, no token" "grep -q '^url: http://127.0.0.1:$PORT' $W/etc/estate.yaml && grep -q 'principal: host:$HOST' $W/etc/estate.yaml && ! grep -q node_ $W/etc/estate.yaml"
+check "vault.yaml maps $ME to host:$HOST (the vault re-reads it): whoami is the host" "grep -q \"$ME: host:$HOST\" $W/vault.yaml && me secret whoami | grep -q 'principal:  host:$HOST'"
+check "the token and the key are in host:$HOST's compartment" "me secret list | grep -q 'host:$HOST/estate-node-token' && me secret list | grep -q 'host:$HOST/estate-node-key' && me secret info estate-node-key | grep -q generic"
+check "the node key is a private ed25519 key; the public half went to the office" "me secret show estate-node-key | grep -q 'BEGIN OPENSSH PRIVATE KEY' && mock /mock/nodes | python3 -c 'import json,sys; n=json.load(sys.stdin)[\"nodes\"][0]; assert n[\"id\"]==57 and n[\"kind\"]==\"server\"'"
+check "the office holds the public key and the components" "mock /mock/state | python3 -c 'import json,sys; n=json.load(sys.stdin)[\"nodes\"][0]; assert n[\"public_key\"].startswith(\"ssh-ed25519 \") and n[\"components\"]==[\"vault\"] and n[\"principal\"]==\"host:$HOST\", n'"
+check "the code is spent" "root estate join http://127.0.0.1:$PORT --code node-code --force 2>&1 | grep -q bad_code"
+check "a second join without --force is refused" "root estate join http://127.0.0.1:$PORT --code x 2>&1 | grep -q 'already node #57'"
+check "status: joined, no heartbeat yet" "me estate status | grep -q \"node:       server 'local-node'  (#57)\" && me estate status | grep -q 'no heartbeat yet'"
+check "heartbeat as the node, with the report" "me estate heartbeat --report | grep -q 'ok: node local-node (#57) online .* with the report'"
+check "the office has the report: health ok or warning, last_report_at set, the summary" "mock /mock/nodes | python3 -c 'import json,sys; n=json.load(sys.stdin)[\"nodes\"][0]; assert n[\"last_report_at\"] and n[\"health\"] in (\"ok\",\"warning\") and n[\"units\"][\"up\"]>=0 and n[\"memory_available_pct\"]>0, n'"
+check "vault ledger: the token read is the host's own row (secret.read by host:$HOST)" "sudo -n -u postgres psql -Atd $DB -c \"select count(*) from $T.maluos_ledger where event='secret.read' and principal_ref='host:$HOST' and secret_name='estate-node-token' and status='ok'\" | grep -qE '^[1-9]'"
+check "estate nodes as the node: itself (the desk left earlier)" "me estate nodes | grep -q 'estate of Local Office as node #57: 1 nodes, 1 online' && me estate nodes | grep -q \"#57   server    local-node\""
+check "estate nodes 57: the full report" "me estate nodes 57 | grep -q \"server 'local-node' (#57) online health\" && me estate nodes 57 | grep -q '^disk:     /'"
+( cd "$W"; exec env $ENV python3 -m maluos_estate >"$W/estated.log" 2>&1 ) & echo $! > "$W/estated.pid"   # exec: the pid is the daemon's, so SIGTERM reaches it
+for i in $(seq 1 40); do [ -f "$W/estate/state.json" ] && grep -q '"ok": true' "$W/estate/state.json" && break; sleep 0.25; done
+check "the daemon heartbeats: state.json ok with the report" "python3 -c 'import json; s=json.load(open(\"$W/estate/state.json\")); assert s[\"ok\"] and s[\"report_sent\"] and s[\"last_report_at\"], s'"
+check "status shows the last heartbeat" "me estate status | grep -q 'last:       .* ok  presence online'"
+check "a failing report raises alerts and turns health critical (an agent failed, disk at 97 %)" "mock /mock/report -d '{\"node_id\": 57, \"report\": {\"ts\": \"t\", \"units\": [{\"unit\": \"maluos-vault.service\", \"active\": \"active\"}], \"agents\": [{\"name\": \"demo\", \"active\": \"failed\", \"restarts\": 3}], \"disk\": [{\"mount\": \"/\", \"size_gb\": 10, \"used_pct\": 97}]}}' | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r[\"node\"][\"health\"]==\"critical\" and sorted(a[\"kind\"] for a in r[\"alerts\"])==[\"agent_down\",\"disk_full\"], r'"
+check "estate nodes lists the alerts" "me estate nodes | grep -q 'alert #.* local-node: warning agent_down: agent demo failed (3 restarts)' && me estate nodes | grep -q 'critical disk_full: disk / at 97 %'"
+for i in $(seq 1 40); do mock /mock/nodes | python3 -c 'import json,sys; n=json.load(sys.stdin)["nodes"][0]; sys.exit(0 if n["health"]!="critical" else 1)' && break; sleep 0.25; done
+check "the daemon's next report clears them (cleared_at set)" "mock /mock/nodes | python3 -c 'import json,sys; d=json.load(sys.stdin); n=d[\"nodes\"][0]; assert n[\"health\"]!=\"critical\"; assert all(a[\"cleared_at\"] for a in d[\"alerts\"] if a[\"kind\"] in (\"agent_down\",\"disk_full\") and a[\"title\"] in (\"agent demo failed (3 restarts)\", \"disk / at 97 %\")), d[\"alerts\"]'"
+kill -TERM $(cat "$W/estated.pid"); for i in $(seq 1 40); do kill -0 $(cat "$W/estated.pid") 2>/dev/null || break; sleep 0.25; done
+check "SIGTERM: the daemon says offline and exits; the office shows the node offline with a node_offline alert" "grep -q 'said offline' $W/estated.log && mock /mock/nodes | python3 -c 'import json,sys; d=json.load(sys.stdin); n=d[\"nodes\"][0]; assert n[\"presence\"]==\"offline\" and n[\"health\"]==\"offline\" and any(a[\"kind\"]==\"node_offline\" and not a[\"cleared_at\"] for a in d[\"alerts\"]), d'"
+check "the office retires the node -> heartbeat 410, revoked" "mock /mock/retire -d '{\"desk_id\": 0}' >/dev/null; true" ; mock /api/v1/estate/leave -X POST -H "Authorization: Bearer $(me secret show estate-node-token)" >/dev/null 2>&1
+check "a retired node's heartbeat is refused (401 after leave: the token is revoked)" "! me estate heartbeat >/dev/null 2>&1 && me estate heartbeat --json 2>/dev/null | grep -q '\"revoked\": true'"
+check "leave (root): told, the unit, the token and the key gone, the identity map restored" "root estate leave | grep -q 'left Local Office' && [ ! -f $W/etc/estate.yaml ] && [ ! -f $W/estate/state.json ] && ! grep -q \"$ME: host:$HOST\" $W/vault.yaml && me secret whoami | grep -q 'principal:  user:$ME'"
+check "the host's secrets are gone (as an operator sees it)" "! sudo -n env $ENV python3 $W/lib/maluctl secret list --all 2>/dev/null | grep -q 'host:$HOST/estate-node'"
+check "status: not joined again" "! me estate status >/dev/null 2>&1"
+check "status on a desk: its desk enrolment is its node record" "mock /mock/code -d '{\"code\":\"third\"}' >/dev/null && root office enroll http://127.0.0.1:$PORT --code third --owner $ME --no-gateway --force >/dev/null && me estate status | grep -q 'this desk is node #' && me estate status | grep -q 'maluctl estate nodes'"
+check "maluctl office estate as the desk's owner (endpoints.estate): the desk itself, no server node, no open alert" "me office estate --refresh | grep -q 'estate of Local Office: 1 nodes, 1 online, 0 open alerts' && me office estate --json | python3 -c 'import json,sys; c=json.load(sys.stdin); assert c[\"available\"] and c[\"counts\"][\"nodes\"]==1 and c[\"nodes\"][0][\"kind\"]==\"desk\", c'"
+check "maluctl estate nodes on a desk uses the desk token" "me estate nodes | grep -q 'estate of Local Office as desk #'"
+check "no token value in the daemon logs" "! grep -q 'node_' $W/daemon.log $W/estated.log"
+root office leave >/dev/null 2>&1
 
 echo; echo "$n checks, $fail failed"
 [ $fail = 0 ] && echo "PASS: maluctl office against the mock office" || echo "FAIL"

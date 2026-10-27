@@ -174,6 +174,22 @@ not a MaluOS device (the local LLM server runs there); an RTX card in an x86
 box is the MaluOS case. A host without the driver, or with an AMD or Intel
 GPU, is read through /sys/class/drm instead, with fewer numbers.
 
+### maluos-estate (package maluos-estate, in maluos-server and maluos-desktop; Phase 13 slice 1, docs/phase13-slice1-nodes.md)
+
+A MaluOS host as a node of its estate. `sudo maluctl estate join URL
+--code CODE [--kind server|inference]` exchanges a one-time node code for a
+node token, makes the host principal `host:<hostname>` (kind service) and
+maps the system user maluos-estate to it in vault.yaml and gateway.yaml,
+keeps the token and an ed25519 node key in that principal's vault
+compartment, writes /etc/maluos/estate.yaml (no secret) and starts
+maluos-estate.service: presence and facts every `heartbeat_s`, the report
+every `report_s` (units, agents, the gateway, the vault's alert rows,
+updates, disk, memory, load), `offline` on a clean stop. `maluctl estate
+status|report|nodes|leave`; a desk's node record is its desk row (`--kind
+desk` runs `maluctl office enroll`). The package also carries the shared
+estate client `maluctl office` uses and the mock office the tests run,
+which stands in for the kernel's estate endpoints (db/188) until they land.
+
 ## Planned
 
 - The default applications and the integration plugin as components.

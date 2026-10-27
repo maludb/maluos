@@ -17,7 +17,7 @@ tooling as it is: S under half a day, M a day, L several days.
 |---|---|
 | Latest release | 26.04.20261024, shipped 2026-10-24 00:37 UTC with Phase 12 slices 7 and 8; 26.04.20261025 (slice 9) built and boot-tested 2026-10-24, release after 00:00 UTC |
 | Phase 12 (desktop) | slices 1 to 8 released (26.04.20261024); slice 9 built and boot-tested 2026-10-24 (desktop UEFI 252 ok, server UEFI 140 ok), on the share for the 26.04.20261025 release |
-| Phase 13 (estate) | planned 2026-10-23, nothing built; the Agents app's task interface (slice 8) is its first protocol |
+| Phase 13 (estate) | shared GPUs G1, G2 and G5's local half built and boot-tested by 2026-10-27; slice 1 (D1) host half built 2026-10-27 against the mock estate, its kernel half waiting for approval |
 | Phase 11 (installer) | proposed only |
 | Phases 7 and 9 | partly done; the rest waits (components catalogue, editions) |
 | Dev host | Proxmox VM 4050, 16 GB cap with an 8 GB balloon floor since 2026-10-23; the host OOM-killed it five times before that |
@@ -75,7 +75,7 @@ owner. Each slice ends with its test on the three-machine proof.
 
 | # | Slice | Status | Effort | Depends on | Notes |
 |---|---|---|---|---|---|
-| D1 | 1 Nodes and the operator's view: node identity, enrolment of servers, the Estate page on the Desk | specified (docs/phase13-slice1-nodes.md) | L | nothing | new package maluos-estate; the kernel half (db/188, the estate endpoints) needs the owner's approval first |
+| D1 | 1 Nodes and the operator's view: node identity, enrolment of servers, the estate on the System Monitor's MaluOS Network tab | host half built 2026-10-27 against the mock estate (maluos-estate 0.1.0, vault 0.4.1, desk 0.5.0, session 0.9.0, the fork 49.1+maluos.4; docs/phase13-slice1-nodes.md, Status); the kernel half (db/188, the estate endpoints) needs the owner's approval first | L | nothing | new package maluos-estate |
 | D2 | 2 The agent directory and delegation: Agent HR registration, the A2A task endpoint on every node with the authorisation envelope, the desk's personal agent, operator actions on remote nodes | specified (docs/phase13-slice2-delegation.md) | L | D1, C2 | nodes pull their tasks from the coordinator; the envelope is verified on the agent's host; the kernel half (db/189) needs the owner's approval first |
 | D3 | 3 Shared inference: the gateway as a backend for other nodes, admission control, desk contribution opt-in | planned; specified as G1-G5 below | L | D1 | |
 | D4 | 4 Federated memory: personal, departmental and enterprise memory over the existing scopes; the memory endpoint real | planned | L | D1 | the Agents app's Memory page waits for this |

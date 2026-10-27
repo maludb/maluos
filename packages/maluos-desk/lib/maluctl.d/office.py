@@ -20,6 +20,8 @@ shows the desk and whether it is online.
                                                    a deb app installs from apt.maluos.com (pkexec apt-get)
   maluctl office agents [--json] [--refresh]       the office's agents this desk may use (endpoints.agents; Phase 12 slice 8)
   maluctl office agent ID card|activity|tasks [--json]       one of them: its card, its recent activity, the tasks sent from here
+  maluctl office estate [--json] [--refresh]       the estate as this desk's owner may see it (endpoints.estate, published to
+                                                   system managers; Phase 13 slice 1): nodes, their health, the open alerts
   maluctl office agent ID send TEXT [--json]       give it a task and wait for the answer (its task URL, the desk token)
   sudo maluctl office leave [--keep-secret]
 
@@ -31,8 +33,9 @@ and read the token for the office's MCP servers with
 """
 import json, os, pwd, socket, subprocess, sys, time, urllib.error, urllib.request
 sys.path.insert(0, "/usr/lib/maluos")
+from maluos_estate.client import http as _estate_http, flat as _flat     # the shared client (maluos-estate, Phase 13 slice 1)
 
-VERSION = "0.4.0"
+VERSION = "0.5.0"
 SURFACE = 1
 CONF = os.environ.get("MALUOS_OFFICE_CONF", "/etc/maluos/office.yaml")
 ENVF = os.environ.get("MALUOS_OFFICE_ENV", "/etc/maluos/office.env")
@@ -60,32 +63,8 @@ def utc():
 
 
 def http(method, url, body=None, token=None, timeout=20):
-    """(status, json) for an office call; raises OSError/URLError when the office is unreachable."""
-    data = json.dumps(body).encode() if body is not None else None
-    req = urllib.request.Request(url, data=data, method=method)
-    req.add_header("Accept", "application/json"); req.add_header("User-Agent", f"maluos-desk/{VERSION}")
-    if data is not None:
-        req.add_header("Content-Type", "application/json")
-    if token:
-        req.add_header("Authorization", f"Bearer {token}")
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            raw = r.read()
-            return r.status, _flat(json.loads(raw) if raw else {})
-    except urllib.error.HTTPError as e:
-        raw = e.read()
-        try:
-            return e.code, _flat(json.loads(raw))
-        except Exception:
-            return e.code, {"error": "http_error", "message": raw.decode(errors="replace")[:200]}
-
-
-def _flat(obj):
-    """The kernel answers errors as {"error": {"code", "message"}}; the mock and this code use the flat form."""
-    if isinstance(obj, dict) and isinstance(obj.get("error"), dict):
-        e = obj["error"]
-        obj = {**obj, "error": e.get("code") or "error", "message": e.get("message") or ""}
-    return obj if isinstance(obj, dict) else {}
+    """(status, json) for an office call (the shared client, as maluos-desk); raises when the office is unreachable."""
+    return _estate_http(method, url, body, token, timeout, agent=f"maluos-desk/{VERSION}")
 
 
 def facts():
@@ -556,6 +535,78 @@ def agent(a):
     sys.exit("maluctl office agent ID card|activity|tasks|send TEXT")
 
 
+# -- the estate (Phase 13 slice 1): the nodes of the office's estate, when the office publishes them to this desk's owner
+def estate_cache_path():
+    base = os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache")
+    return os.path.join(base, "maluos-estate", "office.json")
+
+
+def fetch_estate(refresh=False):
+    """GET endpoints.estate with the desk token, cached per user for 60 s: {available, fetched_at, office, office_url,
+    nodes, alerts, counts, error}; available is False with the reason when there is no office, no endpoint
+    (the owner is not a system manager) or no answer (the cache, marked stale, when there is one)."""
+    cache = None
+    try:
+        cache = json.load(open(estate_cache_path()))
+    except (OSError, ValueError):
+        pass
+    conf = read_conf()
+    if not conf:
+        try:
+            os.remove(estate_cache_path())
+        except OSError:
+            pass
+        return {"available": False, "fetched_at": int(time.time()), "office": None, "office_url": None, "nodes": [], "alerts": [], "counts": {}, "error": "not enrolled with an office"}
+    office_name = (conf.get("office") or {}).get("name")
+    ep = (conf.get("endpoints") or {}).get("estate")
+    if not ep:
+        return {"available": False, "fetched_at": int(time.time()), "office": office_name, "office_url": conf.get("url"), "nodes": [], "alerts": [], "counts": {},
+                "error": "the office does not publish the estate to this desk (endpoints.estate: its owner is not a system manager)"}
+    if cache and not refresh and cache.get("office_url") == conf.get("url") and cache.get("available") and time.time() - (cache.get("fetched_at") or 0) < 60:
+        return cache
+    try:
+        st, r = http("GET", ep, token=token_for_me(), timeout=15)
+        if st != 200 or not isinstance(r.get("nodes"), list):
+            raise RuntimeError(f"HTTP {st} {r.get('error') or ''}".strip())
+    except Exception as e:
+        err = f"office estate: {e.__class__.__name__ if not isinstance(e, RuntimeError) else ''} {str(e)[:120]}".strip()
+        if cache and cache.get("office_url") == conf.get("url") and cache.get("available"):
+            cache["stale"] = True; cache["error"] = err
+            return cache
+        return {"available": False, "fetched_at": int(time.time()), "office": office_name, "office_url": conf.get("url"), "nodes": [], "alerts": [], "counts": {}, "error": err}
+    nodes = [n for n in r["nodes"] if isinstance(n, dict)]
+    alerts = [a for a in r.get("alerts") or [] if isinstance(a, dict)]
+    cat = {"available": True, "fetched_at": int(time.time()), "office": office_name, "office_url": conf.get("url"), "error": None,
+           "nodes": sorted(nodes, key=lambda n: (n.get("kind") == "desk", str(n.get("name") or ""))), "alerts": alerts,
+           "counts": {"nodes": len(nodes), "online": sum(1 for n in nodes if n.get("presence") == "online"), "offline": sum(1 for n in nodes if n.get("presence") != "online"),
+                      "alerts": sum(1 for a in alerts if not a.get("cleared_at"))}}
+    try:
+        os.makedirs(os.path.dirname(estate_cache_path()), exist_ok=True)
+        tmp = estate_cache_path() + ".tmp"
+        with open(tmp, "w") as fh:
+            json.dump(cat, fh)
+        os.replace(tmp, estate_cache_path())
+    except OSError:
+        pass
+    return cat
+
+
+def estate(a):
+    cat = fetch_estate(refresh=opt(a, "--refresh", flag=True))
+    if opt(a, "--json", flag=True):
+        print(json.dumps(cat, indent=None if opt(a, "--compact", flag=True) else 2)); return 0
+    if not cat.get("available"):
+        print(cat.get("error") or "no estate"); return 1
+    c = cat["counts"]
+    print(f"estate of {cat.get('office') or cat.get('office_url')}" + (" (cached, the office was unreachable)" if cat.get("stale") else "")
+          + f": {c['nodes']} nodes, {c['online']} online, {c['alerts']} open alerts")
+    for n in cat["nodes"]:
+        print(f"  #{n.get('id'):<4} {n.get('kind') or '':<9} {n.get('name') or '':<20} {n.get('presence') or '':<8} {n.get('health') or '':<8} {n.get('summary') or ''}")
+    for x in cat["alerts"]:
+        print(f"  alert #{x.get('id')} {x.get('node') or '?'}: {x.get('severity')} {x.get('kind')}: {x.get('title')}" + (f"  (cleared {x['cleared_at']})" if x.get("cleared_at") else ""))
+    return 0
+
+
 # -- commands
 def enroll(a):
     need_root()
@@ -754,6 +805,8 @@ def main(a):
             return agents(a)
         if cmd == "agent":
             return agent(a)
+        if cmd == "estate":
+            return estate(a)
     except RuntimeError as e:
         sys.exit(f"maluctl office {cmd}: {e}")
     print(__doc__); return 2

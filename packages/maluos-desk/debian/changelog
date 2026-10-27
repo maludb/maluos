@@ -1,3 +1,15 @@
+maluos-desk (0.5.0) resolute; urgency=medium
+
+  * Phase 13 slice 1 (docs/phase13-slice1-nodes.md): the office client is
+    the shared one in maluos-estate (maluos_estate.client), which this
+    package now depends on; the mock office lives there too and
+    maluos_desk.mock_office names the same module. `maluctl office estate
+    [--json] [--refresh]`: the estate as this desk's owner may see it
+    (endpoints.estate, published to system managers), cached per user
+    for a minute: nodes with health and summary, the open alerts, counts.
+
+ -- Edward Honour <ed@maludb.org>  Tue, 27 Oct 2026 04:00:00 +0000
+
 maluos-desk (0.4.0) resolute; urgency=medium
 
   * Phase 12 slice 9: the public MaluApps catalogue is verified:

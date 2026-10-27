@@ -9,7 +9,7 @@ rebase touches layout only.
 
 ## The patch surface (everything MaluOS added or changed)
 
-G1 added the GPUs tab (49.1+maluos.1), G5 the MaluOS Network and Queue tabs and the shared session client (49.1+maluos.3).
+G1 added the GPUs tab (49.1+maluos.1), G5 the MaluOS Network and Queue tabs and the shared session client (49.1+maluos.3); Phase 13 slice 1 filled the Network tab's Estate group from office.estate (49.1+maluos.4).
 
 | File | Change |
 |---|---|

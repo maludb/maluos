@@ -1,0 +1,28 @@
+Source: maluos-estate
+Section: admin
+Priority: optional
+Maintainer: Edward Honour <ed@maludb.org>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.6.2
+Homepage: https://github.com/maludb/maluos
+Rules-Requires-Root: no
+
+Package: maluos-estate
+Architecture: all
+Depends: ${misc:Depends}, adduser, python3 (>= 3.12), python3-yaml, openssh-client, maluos-firstboot (>= 0.1.10), maluos-vault (>= 0.4.1)
+Recommends: maluos-gateway (>= 0.4.2)
+Description: MaluOS estate membership: maluctl estate and the node heartbeat
+ A MaluOS server joins its estate the way a desk joins an office (Phase 13
+ slice 1, docs/phase13-slice1-nodes.md): `sudo maluctl estate join URL
+ --code CODE` exchanges a one-time node code for a node token, keeps the
+ token and an ed25519 node key in the vault in the host principal's
+ compartment (host:<hostname>, stored as the system user maluos-estate),
+ records the office and its endpoints in /etc/maluos/estate.yaml, and
+ starts maluos-estate.service, which heartbeats the office with the
+ machine's facts and, every report_s, the report an operator needs: units,
+ agents, the gateway, vault alerts, updates, disk, memory and load.
+ .
+ `maluctl estate status|report|nodes|leave`. A desk does not enrol twice:
+ its desk row is its node record, and `maluctl estate nodes` on a desk
+ shows the estate as its owner may see it. The package also carries the
+ shared estate client (maluos_estate.client) and the mock office tests use.

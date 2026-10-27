@@ -1,3 +1,17 @@
+maluos-session (0.9.0) resolute; urgency=medium
+
+  * Phase 13 slice 1 (docs/phase13-slice1-nodes.md): office.estate in the
+    state, read with `maluctl office estate` after each successful
+    heartbeat when the office publishes the estate to this desk's owner
+    (endpoints.estate): the nodes' summary rows, the open alerts, the
+    counts. Notifications: a node went offline (urgency 2) or came back,
+    an alert the office raised (once per alert, "Open Estate" opens the
+    System Monitor's MaluOS Network tab); OfficeAction(estate) does the
+    same. The indicator's Office item carries an Estate line; the Desk's
+    Office group an Estate row with the counts and the open alerts.
+
+ -- Edward Honour <ed@maludb.org>  Tue, 27 Oct 2026 04:00:00 +0000
+
 maluos-session (0.8.0) resolute; urgency=medium
 
   * Phase 13, shared GPUs, slice G5 (the forked System Monitor's MaluOS

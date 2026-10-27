@@ -1,0 +1,9 @@
+#!/usr/bin/make -f
+%:
+	dh $@
+
+override_dh_installsystemd:
+	dh_installsystemd --no-enable --no-start maluos-estate.service
+
+override_dh_auto_clean:
+	find lib -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true

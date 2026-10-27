@@ -77,7 +77,7 @@ resume) run `maluctl gateway node …` themselves.
 """
 import http.client, json, os, pwd, re, socket, subprocess, sys, threading, time, urllib.parse
 
-VERSION = "0.8.0"
+VERSION = "0.9.0"
 BUS_NAME, OBJ, IFACE = "com.maluos.Session", "/com/maluos/Session", "com.maluos.Session1"
 GW = os.environ.get("MALUOS_GATEWAY_SOCKET", "/run/maluos/gateway.sock")
 VAULT = os.environ.get("MALUOS_VAULT_SOCKET", "/run/maluos/vault.sock")
@@ -103,7 +103,7 @@ XML = """<node>
   <method name="AgentAction"><arg type="s" name="name" direction="in"/><arg type="s" name="action" direction="in"/></method>
   <method name="RequestDecide"><arg type="i" name="id" direction="in"/><arg type="s" name="decision" direction="in"/><arg type="s" name="expires" direction="in"/><arg type="s" name="json" direction="out"/></method>
   <method name="UpdateAction"><arg type="s" name="action" direction="in"/></method>
-  <method name="OfficeAction"><arg type="s" name="action" direction="in"/></method>
+  <method name="OfficeAction"><arg type="s" name="action" direction="in"/></method>   <!-- open | heartbeat | estate -->
   <method name="NodeQueue"><arg type="s" name="json" direction="out"/></method>
   <signal name="StateChanged"><arg type="s" name="json"/></signal>
   <property name="Version" type="s" access="read"/>
@@ -390,8 +390,27 @@ def office_conf():
         return None
 
 
-def office_state(conf, hb, agents=None, apps=None):
-    """What the desk knows about its office: the enrolment, the last heartbeat's outcome, and (slice 8) its agents."""
+def estate_state(cat):
+    """office.estate (Phase 13 slice 1): the estate as the office publishes it to this desk's owner, from
+    `maluctl office estate` after a heartbeat: the nodes' summary rows, the open alerts, the counts."""
+    if not cat:
+        return {"available": False, "error": None, "nodes": [], "alerts": [], "counts": {}}
+    keys = ("id", "kind", "name", "hostname", "presence", "health", "summary", "last_seen_at", "last_report_at", "units", "agents", "gateway", "updates",
+            "disk_max_pct", "memory_available_pct", "load1")
+    nodes = []
+    for n in cat.get("nodes") or []:
+        row = {k: n.get(k) for k in keys}
+        if n.get("kind") == "desk":
+            row["owner"] = (n.get("owner") or {}).get("display_name")
+        nodes.append(row)
+    alerts = [{k: a.get(k) for k in ("id", "ts", "node_id", "node", "kind", "severity", "title", "cleared_at")} for a in cat.get("alerts") or []]
+    return {"available": bool(cat.get("available")), "fetched_at": cat.get("fetched_at"), "stale": bool(cat.get("stale")), "error": cat.get("error"),
+            "nodes": nodes, "alerts": alerts, "counts": cat.get("counts") or {}}
+
+
+def office_state(conf, hb, agents=None, apps=None, estate=None):
+    """What the desk knows about its office: the enrolment, the last heartbeat's outcome, (slice 8) its agents and
+    (Phase 13 slice 1) the estate when the office publishes it to this desk's owner."""
     if not conf:
         return {"enrolled": False}
     hb = dict(hb or {})
@@ -412,7 +431,8 @@ def office_state(conf, hb, agents=None, apps=None):
             "agents": [a for a in (agents.get("agents") or []) if agents.get("office_url") == conf.get("url")], "agents_error": agents.get("error"),
             "agents_fetched_at": agents.get("fetched_at"),
             "apps": {"count": len(apps.get("apps") or []), "installed": sum(1 for a in apps.get("apps") or [] if a.get("installed")),
-                     "fetched_at": apps.get("fetched_at"), "stale": bool(apps.get("stale")), "errors": apps.get("errors") or []} if apps else None}
+                     "fetched_at": apps.get("fetched_at"), "stale": bool(apps.get("stale")), "errors": apps.get("errors") or []} if apps else None,
+            "estate": estate_state(estate)}
 
 
 def updates_state():
@@ -454,6 +474,8 @@ class Service:
         self.office_token = None         # the desk token, read from the vault once per enrolment (not persisted)
         self.office_agents = None        # the office's agents, from `maluctl office agents` after a heartbeat (slice 8)
         self.office_apps = None          # the MaluApps catalogue summary, re-read after a heartbeat (slice 7 leftover)
+        self.office_estate = None        # the estate as the office publishes it to this desk's owner (Phase 13 slice 1)
+        self.estate_notified = set()     # ids of the estate alerts already notified
         self.icons_key = None            # what the agent icons were last synced for (slice 8)
         self.updates = None              # the last reading (updates thread writes, under updates_lock)
         self.updates_lock = threading.Lock()
@@ -546,10 +568,21 @@ class Service:
             u["reading"] = self.updates_reading
             u["last_action"] = self.updates_last_action
         with self.office_lock:
-            hb = self.office_hb; oa = self.office_agents; op = self.office_apps
+            hb = self.office_hb; oa = self.office_agents; op = self.office_apps; oe = self.office_estate
         st = {"version": VERSION, "ts": int(time.time()), "host": host_state(), "gateway": gw, "me": me_state(me), "node": node_state(gw.get("available"), me),
-              "vault": vault, "agents": agents_state(units, mine), "alerts": alerts_state(), "updates": u, "office": office_state(office_conf(), hb, oa, op)}
+              "vault": vault, "agents": agents_state(units, mine), "alerts": alerts_state(), "updates": u, "office": office_state(office_conf(), hb, oa, op, oe)}
         return st
+
+    def office_estate_read(self):
+        """`maluctl office estate --json --refresh` as this user: the estate when the office publishes it (endpoints.estate)."""
+        env = dict(os.environ)
+        if self.office_token:
+            env["MALUOS_OFFICE_TOKEN"] = self.office_token
+        try:
+            r = subprocess.run(["maluctl", "office", "estate", "--json", "--compact", "--refresh"], capture_output=True, text=True, timeout=60, env=env)
+            return json.loads(r.stdout)
+        except (OSError, ValueError, subprocess.SubprocessError) as e:
+            return {"available": False, "fetched_at": int(time.time()), "nodes": [], "alerts": [], "counts": {}, "error": f"maluctl office estate: {e.__class__.__name__}: {str(e)[:120]}"}
 
     def office_apps_read(self):
         """`maluctl office apps --json --refresh` as this user: the merged catalogue, written to the per-user cache the MaluApps window reads."""
@@ -639,9 +672,9 @@ class Service:
                 with self.office_lock:
                     force = self.office_force; self.office_force = False; prev = self.office_hb
                 if not conf:
-                    if prev is not None or self.office_token or self.office_agents or self.office_apps:
+                    if prev is not None or self.office_token or self.office_agents or self.office_apps or self.office_estate:
                         with self.office_lock:
-                            self.office_hb = None; self.office_agents = None; self.office_apps = None
+                            self.office_hb = None; self.office_agents = None; self.office_apps = None; self.office_estate = None
                         self.office_token = None
                         self.refresh_soon(0.5)
                 else:
@@ -664,12 +697,15 @@ class Service:
                             log(f"office: heartbeat failed: {d.get('error')}")
                         oa = self.office_agents_read() if d.get("ok") else ({"fetched_at": int(time.time()), "agents": [], "error": "the office retired this desk"} if d.get("revoked") else None)
                         op = self.office_apps_read() if d.get("ok") else None
+                        oe = self.office_estate_read() if d.get("ok") and (conf.get("endpoints") or {}).get("estate") else None
                         with self.office_lock:
                             self.office_hb = d
                             if oa is not None:
                                 self.office_agents = oa
                             if op is not None:
                                 self.office_apps = op
+                            if oe is not None:
+                                self.office_estate = oe
                         self.refresh_soon(0.5)
             except Exception as e:
                 log(f"office: {e.__class__.__name__}: {str(e)[:160]}")
@@ -686,7 +722,7 @@ class Service:
             log(f"office: goodbye: {str(e)[:100]}")
 
     def office_action(self, action):
-        """open: the office in the browser; heartbeat: check in now."""
+        """open: the office in the browser; heartbeat: check in now; estate: the System Monitor's MaluOS Network tab."""
         if action == "open":
             conf = office_conf()
             if not conf:
@@ -696,8 +732,10 @@ class Service:
             with self.office_lock:
                 self.office_force = True
             self.office_wake.set()
+        elif action == "estate":
+            subprocess.Popen(["gnome-system-monitor", "--show-network-tab"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
         else:
-            raise ValueError(f"unknown office action {action!r} (open, heartbeat)")
+            raise ValueError(f"unknown office action {action!r} (open, heartbeat, estate)")
 
     def poll_loop(self):
         while True:
@@ -831,6 +869,26 @@ class Service:
                 self.notify("Office unreachable", f"{no['office'].get('name') or no.get('url')}: {no.get('last_error') or 'the heartbeat failed'}", urgency=1)
             elif oo.get("presence") == "unreachable" and no.get("presence") == "online":
                 self.notify("Office reachable again", f"{no['office'].get('name') or no.get('url')} sees this desk online")
+        # the estate (Phase 13 slice 1): a node went offline or came back; an alert the office raised, once per alert
+        oe, ne = oo.get("estate") or {}, no.get("estate") or {}
+        if ne.get("available"):
+            office_name = no["office"].get("name") or no.get("url")
+            was = {n.get("id"): n for n in oe.get("nodes") or []} if oe.get("available") else {}
+            for n in ne.get("nodes") or []:
+                w = was.get(n.get("id"))
+                if w and w.get("presence") == "online" and n.get("presence") != "online":
+                    self.notify(f"{n.get('name')} is offline", f"{n.get('kind')} node of {office_name}: no heartbeat", urgency=2, actions=[("estate", "Open Estate")], ctx=("estate",))
+                elif w and w.get("presence") != "online" and n.get("presence") == "online":
+                    self.notify(f"{n.get('name')} is back", f"{n.get('kind')} node of {office_name}: online again")
+            open_ids = {a["id"] for a in ne.get("alerts") or [] if a.get("id") and not a.get("cleared_at")}
+            if oe.get("available"):
+                for a in ne.get("alerts") or []:
+                    if a.get("id") in open_ids and a["id"] not in self.estate_notified and a.get("kind") != "node_offline":
+                        self.notify(f"{a.get('node')}: {a.get('title')}", f"{a.get('severity')} {a.get('kind')} in the estate of {office_name}",
+                                    urgency=2 if a.get("severity") == "critical" else 1, actions=[("estate", "Open Estate")], ctx=("estate",))
+            self.estate_notified = open_ids
+        elif oe.get("available"):
+            self.estate_notified = set()
 
     def notify(self, summary, body="", urgency=1, actions=None, request_id=None, ctx=None):
         if request_id and ctx is None:
@@ -881,6 +939,8 @@ class Service:
                     rid = ctx[1]
                     log(f"request #{rid}: Choose… opens the Credential Manager")
                     subprocess.Popen(["maluos-desk", "--window", "vault", "--request", str(rid)], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                elif key == "estate":
+                    log("estate: Open Estate from the notification"); self.office_action("estate")
                 elif key == "install":
                     log("updates: Install from the notification"); self.update_action("open")
                 elif key == "restart":

@@ -403,6 +403,16 @@ class Desk(Window):
         models = (o.get("endpoints") or {}).get("models")
         grp.add(row("Published to desks", (", ".join(eps) or "nothing") + (f" · models {', '.join(models)}" if models else " · no models") + (f" · --model {o['gateway']} on this desk's gateway" if o.get("gateway") else ""), "network-server-symbolic"))
         grp.add(row("Agents", "the office's endpoints are in /etc/maluos/office.env; delegate the token: maluctl secret delegate --to agent:NAME --secret office-desk-token", "system-run-symbolic"))
+        e = o.get("estate") or {}
+        if e.get("available"):   # Phase 13 slice 1: the estate, in full on the System Monitor's MaluOS Network tab
+            c = e.get("counts") or {}
+            open_alerts = [a for a in e.get("alerts") or [] if not a.get("cleared_at")]
+            text = f"{c.get('nodes', 0)} nodes · {c.get('online', 0)} online · {c.get('alerts', 0)} open alert{'s' if c.get('alerts', 0) != 1 else ''}" + (" (cached)" if e.get("stale") else "")
+            if open_alerts:
+                text += "\n" + "; ".join(f"{a.get('node')}: {a.get('title')}" for a in open_alerts[:4]) + (" …" if len(open_alerts) > 4 else "")
+            r = row("Estate", text, "dialog-warning-symbolic" if open_alerts or c.get("offline") else "network-server-symbolic")
+            r.add_suffix(button("Open in System Monitor…", lambda: self.office("estate")))
+            grp.add(r)
         if o.get("revoked"):
             grp.add(row("Retired", "the office no longer accepts this desk's token; sudo maluctl office leave removes the enrolment", "dialog-warning-symbolic"))
 

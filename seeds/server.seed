@@ -8,3 +8,5 @@ maluos-firstboot
 maluos-vault
 maluos-gateway
 maluos-agent
+# estate membership (Phase 13 slice 1): maluctl estate join, the node's heartbeat and report
+maluos-estate

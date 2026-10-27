@@ -40,8 +40,10 @@ struct _GsmMaluosNetworkView
   GtkWidget *paired_empty_row;
   GtkWidget *office_group;
   GtkWidget *office_row;
+  GtkWidget *alerts_row;     /* the estate's open alerts (Phase 13 slice 1) */
 
   GPtrArray *paired_rows;
+  GPtrArray *estate_rows;    /* one row per node of the estate, rebuilt when the set of ids changes */
 
   GsmMaluosSession *session;
   gulong            state_id;
@@ -184,6 +186,79 @@ apply_paired (GsmMaluosNetworkView *self, JsonArray *paired)
       g_free (sub);
     }
   gtk_widget_set_visible (self->paired_empty_row, n == 0);
+}
+
+/* ---- the estate (Phase 13 slice 1): one row per node, from office.estate in the session's state */
+
+static char *
+estate_node_subtitle (JsonObject *n)
+{
+  GString *s = g_string_new (NULL);
+  const char *kind = js (n, "kind");
+  const char *presence = js (n, "presence");
+  const char *health = js (n, "health");
+  const char *summary = js (n, "summary");
+  const char *seen = js (n, "last_seen_at");
+  const char *owner = js (n, "owner");
+
+  join (s, " · ", kind ? kind : "node");
+  if (owner)
+    join (s, " · ", owner);
+  join (s, " · ", presence ? presence : "?");
+  if (health && g_strcmp0 (health, presence) != 0)
+    join (s, " · ", health);
+  if (summary && g_strcmp0 (summary, presence) != 0)
+    join (s, " · ", summary);
+  if (seen)
+    {
+      char *t = g_strdup_printf (_("seen %s"), seen);
+      join (s, " · ", t);
+      g_free (t);
+    }
+  return g_string_free (s, FALSE);
+}
+
+static void
+apply_estate_nodes (GsmMaluosNetworkView *self, JsonArray *nodes)
+{
+  guint n = nodes ? json_array_get_length (nodes) : 0;
+  gboolean same = (n == self->estate_rows->len);
+  for (guint i = 0; same && i < n; i++)
+    {
+      JsonObject *node = json_array_get_object_element (nodes, i);
+      double id = 0;
+      jd (node, "id", &id);
+      char *key = g_strdup_printf ("%.0f", id);
+      same = g_strcmp0 (key, ((NamedRow *) g_ptr_array_index (self->estate_rows, i))->name) == 0;
+      g_free (key);
+    }
+  if (!same)
+    {
+      for (guint i = 0; i < self->estate_rows->len; i++)
+        adw_preferences_group_remove (ADW_PREFERENCES_GROUP (self->office_group), ((NamedRow *) g_ptr_array_index (self->estate_rows, i))->row);
+      g_ptr_array_set_size (self->estate_rows, 0);
+      for (guint i = 0; i < n; i++)
+        {
+          JsonObject *node = json_array_get_object_element (nodes, i);
+          double id = 0;
+          jd (node, "id", &id);
+          NamedRow *r = g_new0 (NamedRow, 1);
+          r->name = g_strdup_printf ("%.0f", id);
+          r->row = action_row (js (node, "name") ? js (node, "name") : "?", NULL);
+          gtk_widget_add_css_class (r->row, "property");
+          adw_preferences_group_add (ADW_PREFERENCES_GROUP (self->office_group), r->row);
+          g_ptr_array_add (self->estate_rows, r);
+        }
+    }
+  for (guint i = 0; i < n; i++)
+    {
+      JsonObject *node = json_array_get_object_element (nodes, i);
+      NamedRow *r = (NamedRow *) g_ptr_array_index (self->estate_rows, i);
+      char *sub = estate_node_subtitle (node);
+      set_title (r->row, js (node, "name") ? js (node, "name") : "?");
+      set_subtitle (r->row, sub);
+      g_free (sub);
+    }
 }
 
 /* ---- the state applied to the widgets */
@@ -354,23 +429,74 @@ apply_state (GsmMaluosNetworkView *self, JsonObject *root)
   if (!have)
     apply_paired (self, NULL);
 
-  /* the office: the estate half of this page comes with the directory */
-  if (office && jb (office, "enrolled"))
-    {
-      JsonObject *o = jo (office, "office");
-      const char *name = o ? js (o, "name") : NULL;
-      const char *presence = js (office, "presence");
-      set_title (self->office_row, name ? name : _("Office"));
-      char *t = g_strdup_printf (_("This desk is %s. The estate's nodes, their health and what each serves appear here with the node directory (Phase 13 slice D1)."),
-                                 presence ? presence : "enrolled");
-      set_subtitle (self->office_row, t);
-      g_free (t);
-    }
-  else
-    {
-      set_title (self->office_row, _("No office"));
-      set_subtitle (self->office_row, _("Not enrolled in an office. Pairing by hand works without one; the estate's directory needs it."));
-    }
+  /* the office and its estate (Phase 13 slice 1): the nodes the office publishes to this desk's owner */
+  {
+    JsonObject *estate = office ? jo (office, "estate") : NULL;
+    gboolean have_estate = estate && jb (estate, "available");
+    JsonObject *o = office ? jo (office, "office") : NULL;
+    const char *name = o ? js (o, "name") : NULL;
+
+    if (office && jb (office, "enrolled") && have_estate)
+      {
+        JsonObject *counts = jo (estate, "counts");
+        JsonArray *nodes = ja (estate, "nodes");
+        JsonArray *alerts = ja (estate, "alerts");
+        double nn = 0, online = 0, nalerts = 0;
+        if (counts)
+          {
+            jd (counts, "nodes", &nn);
+            jd (counts, "online", &online);
+            jd (counts, "alerts", &nalerts);
+          }
+        char *title = g_strdup_printf (_("Estate of %s"), name ? name : "the office");
+        set_title (self->office_row, title);
+        g_free (title);
+        char *t = g_strdup_printf (_("%.0f nodes, %.0f online, %.0f open alerts%s. Read-only: operator actions on a node come with the delegation envelope (slice 2)."),
+                                   nn, online, nalerts, jb (estate, "stale") ? _(" (cached: the office did not answer)") : "");
+        set_subtitle (self->office_row, t);
+        g_free (t);
+        {
+          GString *a = g_string_new (NULL);
+          guint na = alerts ? json_array_get_length (alerts) : 0, open = 0;
+          for (guint i = 0; i < na; i++)
+            {
+              JsonObject *al = json_array_get_object_element (alerts, i);
+              if (js (al, "cleared_at"))
+                continue;
+              open++;
+              char *line = g_strdup_printf ("%s: %s (%s)", js (al, "node") ? js (al, "node") : "?", js (al, "title") ? js (al, "title") : "?",
+                                            js (al, "severity") ? js (al, "severity") : "?");
+              join (a, "; ", line);
+              g_free (line);
+            }
+          set_subtitle (self->alerts_row, open ? a->str : _("No open alert. A unit down, a failed agent, a vault alert, a required restart or a full disk raises one; it clears with the next report."));
+          g_string_free (a, TRUE);
+        }
+        gtk_widget_set_visible (self->alerts_row, TRUE);
+        apply_estate_nodes (self, nodes);
+        g_string_append_printf (summary, ", estate %.0f nodes (%.0f online, %.0f alert%s)", nn, online, nalerts, nalerts == 1 ? "" : "s");
+      }
+    else
+      {
+        if (office && jb (office, "enrolled"))
+          {
+            const char *presence = js (office, "presence");
+            const char *why = estate ? js (estate, "error") : NULL;
+            set_title (self->office_row, name ? name : _("Office"));
+            char *t = g_strdup_printf (_("This desk is %s. The estate appears here when the office publishes it to you (system managers see every node, its health and its alerts).%s%s"),
+                                       presence ? presence : "enrolled", why ? " " : "", why ? why : "");
+            set_subtitle (self->office_row, t);
+            g_free (t);
+          }
+        else
+          {
+            set_title (self->office_row, _("No office"));
+            set_subtitle (self->office_row, _("Not enrolled in an office. Pairing by hand works without one; the estate's directory needs it."));
+          }
+        gtk_widget_set_visible (self->alerts_row, FALSE);
+        apply_estate_nodes (self, NULL);
+      }
+  }
 
   gsm_maluos_session_set_summary (self->session, "network", summary->str);
   g_string_free (summary, TRUE);
@@ -418,6 +544,11 @@ gsm_maluos_network_view_dispose (GObject *object)
       g_ptr_array_free (self->paired_rows, TRUE);
       self->paired_rows = NULL;
     }
+  if (self->estate_rows)
+    {
+      g_ptr_array_free (self->estate_rows, TRUE);
+      self->estate_rows = NULL;
+    }
   g_clear_pointer (&self->box, gtk_widget_unparent);
 
   G_OBJECT_CLASS (gsm_maluos_network_view_parent_class)->dispose (object);
@@ -437,6 +568,7 @@ static void
 gsm_maluos_network_view_init (GsmMaluosNetworkView *self)
 {
   self->paired_rows = g_ptr_array_new_with_free_func (named_row_free);
+  self->estate_rows = g_ptr_array_new_with_free_func (named_row_free);
   self->session = gsm_maluos_session_get ();
 
   self->box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
@@ -483,8 +615,13 @@ gsm_maluos_network_view_init (GsmMaluosNetworkView *self)
   self->office_group = adw_preferences_group_new ();
   adw_preferences_group_set_title (ADW_PREFERENCES_GROUP (self->office_group), _("Estate"));
   adw_preferences_page_add (ADW_PREFERENCES_PAGE (self->page), ADW_PREFERENCES_GROUP (self->office_group));
+  adw_preferences_group_set_description (ADW_PREFERENCES_GROUP (self->office_group),
+                                         _("The nodes of the office's estate, their health and alerts, as the office publishes them to you (maluctl office estate)."));
   self->office_row = action_row (_("No office"), "—");
   adw_preferences_group_add (ADW_PREFERENCES_GROUP (self->office_group), self->office_row);
+  self->alerts_row = action_row (_("Open alerts"), "—");
+  gtk_widget_set_visible (self->alerts_row, FALSE);
+  adw_preferences_group_add (ADW_PREFERENCES_GROUP (self->office_group), self->alerts_row);
 
   self->state_id = g_signal_connect (self->session, "state", G_CALLBACK (on_state), self);
   if (gsm_maluos_session_get_state (self->session))

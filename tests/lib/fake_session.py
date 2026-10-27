@@ -3,9 +3,10 @@
 answers GetState with a fixture state (two GPUs, a gateway with a loaded model, the node section with two
 lanes, a paired node and two keys, no office) and NodeQueue with a fixture queue (three jobs), so the GPUs,
 MaluOS Network and Queue tabs can be exercised without the desktop session.
-Usage: fake_session.py [--no-gpu] [--not-operator] [--ready FILE]
+Usage: fake_session.py [--no-gpu] [--not-operator] [--estate] [--ready FILE]
   --no-gpu        a VM: no GPU, chassis vm, an empty queue
   --not-operator  the user is not an operator of the gateway: no node section, NodeQueue is forbidden
+  --estate        an enrolled desk whose office publishes the estate (Phase 13 slice 1): two nodes, one alert
 """
 import json, os, sys
 import gi
@@ -54,8 +55,29 @@ def node(no_gpu, operator):
                      {"id": 2, "name": "desk-7", "kind": "inference", "principal": "key:desk-7", "class": "batch", "created_at": "2026-10-26T00:00:00", "expires_at": None, "revoked_at": None, "last_used_at": "2026-10-26T01:00:00"}]}
 
 
-def state(no_gpu, operator):
-    return {"version": "0.8.0", "ts": 0,
+ESTATE = {"available": True, "fetched_at": 1, "stale": False, "error": None,
+          "nodes": [{"id": 57, "kind": "server", "name": "db-1", "hostname": "db-1", "presence": "online", "health": "warning", "summary": "1 agent failed · 3 updates pending (1 security)",
+                     "last_seen_at": "2026-10-27T04:00:00Z", "last_report_at": "2026-10-27T03:59:00Z", "units": {"up": 4, "down": 0}, "agents": {"count": 1, "running": 0, "failed": 1},
+                     "gateway": {"ok": True, "backends_healthy": 1, "backends": 1, "queued": 0, "running": 0}, "updates": {"pending_count": 3, "security_count": 1, "reboot_required": False},
+                     "disk_max_pct": 63, "memory_available_pct": 33, "load1": 0.8},
+                    {"id": 42, "kind": "desk", "name": "Ed's desk", "owner": "Edward Honour", "presence": "offline", "health": "offline", "summary": "offline",
+                     "last_seen_at": "2026-10-27T01:00:00Z", "last_report_at": None, "units": None, "agents": None, "gateway": None, "updates": None,
+                     "disk_max_pct": None, "memory_available_pct": None, "load1": None}],
+          "alerts": [{"id": 301, "ts": "2026-10-27T03:59:00Z", "node_id": 57, "node": "db-1", "kind": "agent_down", "severity": "warning", "title": "agent helpdesk failed (3 restarts)", "cleared_at": None},
+                     {"id": 299, "ts": "2026-10-27T02:00:00Z", "node_id": 57, "node": "db-1", "kind": "disk_full", "severity": "warning", "title": "disk / at 90 %", "cleared_at": "2026-10-27T03:30:00Z"}],
+          "counts": {"nodes": 2, "online": 1, "offline": 1, "alerts": 1}}
+
+
+def office(estate):
+    if not estate:
+        return {"enrolled": False}
+    return {"enrolled": True, "url": "http://fake.office", "office": {"name": "Fake Office", "url": "http://fake.office"}, "surface": 1,
+            "desk": {"id": 42, "name": "Ed's desk", "status": "active"}, "owner": {"principal": "user:me", "display_name": "Edward Honour"},
+            "presence": "online", "ok": True, "revoked": False, "agents": [], "apps": None, "estate": ESTATE}
+
+
+def state(no_gpu, operator, estate=False):
+    return {"version": "0.9.0", "ts": 0,
             "host": {"hostname": "fake-desk", "pretty_name": "MaluOS", "variant": "Desktop", "user": "me", "memory": None,
                      "gpus": [] if no_gpu else GPUS, "chassis": "vm" if no_gpu else "desktop", "contribution_rule": "always" if no_gpu else "opt-in"},
             "gateway": {"available": True, "ok": True, "version": "0.4.1", "uptime_s": 10,
@@ -64,7 +86,7 @@ def state(no_gpu, operator):
                         "queue": {"queued": 0 if no_gpu else 2, "running": 0 if no_gpu else 1}, "expected_wait_s": {}, "tiers": {},
                         "share": {"enabled": not no_gpu, "contribution": "always", "chassis": "vm" if no_gpu else "desktop",
                                   "rule": "always" if no_gpu else "opt-in", "configured": not no_gpu, "exposed": False}},
-            "me": {"operator": operator}, "node": node(no_gpu, operator), "vault": {}, "agents": [], "alerts": [], "updates": {"available": False}, "office": {"enrolled": False}}
+            "me": {"operator": operator}, "node": node(no_gpu, operator), "vault": {}, "agents": [], "alerts": [], "updates": {"available": False}, "office": office(estate)}
 
 
 def queue(no_gpu, operator):
@@ -79,13 +101,14 @@ def queue(no_gpu, operator):
 def main(argv):
     no_gpu = "--no-gpu" in argv
     operator = "--not-operator" not in argv
+    estate = "--estate" in argv
     ready = argv[argv.index("--ready") + 1] if "--ready" in argv else None
     loop = GLib.MainLoop()
     node_info = Gio.DBusNodeInfo.new_for_xml(XML)
 
     def on_call(conn, sender, path, iface, method, params, inv):
         if method == "GetState":
-            inv.return_value(GLib.Variant("(s)", (json.dumps(state(no_gpu, operator)),)))
+            inv.return_value(GLib.Variant("(s)", (json.dumps(state(no_gpu, operator, estate)),)))
         elif method == "NodeQueue":
             inv.return_value(GLib.Variant("(s)", (json.dumps(queue(no_gpu, operator)),)))
         else:

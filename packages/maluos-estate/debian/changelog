@@ -1,0 +1,21 @@
+maluos-estate (0.1.0) resolute; urgency=medium
+
+  * Phase 13 slice 1, the host half (docs/phase13-slice1-nodes.md): a
+    MaluOS server joins its estate. `sudo maluctl estate join URL --code
+    CODE [--name N] [--kind server|inference]`: the host principal
+    host:<hostname> (kind service), the system user maluos-estate mapped
+    to it in vault.yaml and gateway.yaml, an ed25519 node key and the
+    node token in that principal's vault compartment, the enrolment in
+    /etc/maluos/estate.yaml (no secret), maluos-estate.service started.
+    The daemon heartbeats presence and facts every heartbeat_s and the
+    report every report_s (units, agents, the gateway, vault alerts,
+    updates, disk, memory, load; under 32 KB; a part that cannot be read
+    is null and named in errors); `offline` on SIGTERM; 401/410 handled;
+    a retry ladder on network errors. `maluctl estate status|report|
+    heartbeat|nodes|leave`; `--kind desk` runs `maluctl office enroll`.
+    The mock office (moved here from maluos-desk, same module name
+    there) grows the estate contract: join with node codes, heartbeat
+    with the report, the health rules and alerts, the presence sweep,
+    /api/v1/estate/nodes and /api/v1/desks/estate.
+
+ -- Edward Honour <ed@maludb.org>  Tue, 27 Oct 2026 04:00:00 +0000

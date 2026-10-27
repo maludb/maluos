@@ -114,6 +114,9 @@ Each slice is a product on its own; each later one reuses the earlier.
 Specified in docs/phase13-slice1-nodes.md (2026-10-23): the estate
 endpoints, the report, the health rules, the kernel half, the packages
 and the test.
+**The host half built 2026-10-27** against the mock estate (maluos-estate
+0.1.0 and the packages around it; docs/phase13-slice1-nodes.md, Status);
+the kernel half waits for the owner's approval.
 
 - `maluctl estate join URL --code CODE` on servers and desks (the desk
   path keeps its `office` alias); node kinds `desk`, `server`,
