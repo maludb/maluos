@@ -295,8 +295,9 @@ deadline, now 240 s in maluos-agents 0.2.1):
   service's side of the same API (G3, the other repository).
 
 **G5, the local half, built 2026-10-26** (the fork's local test and the
-gateway's local test pass on the dev host; the images and their boot
-tests follow):
+gateway's local test pass on the dev host; both profiles' images were
+rebuilt with gateway 0.4.2 and their UEFI boot tests passed on
+2026-10-27, the three tabs on the live desktop session included):
 
 - maluos-system-monitor 49.1+maluos.3: the **MaluOS Network** tab (This
   Node: name and id, the listener, sharing, the manager's last call, the
