@@ -302,6 +302,14 @@ owner's approval of db/189:
   VM joins as the hub with a real `estate` interface, the mock's fake
   spoke peered, forwarding, the names resolving, the gateway on the
   overlay address only; the desktop's desk as the hub's spoke).
+- **Images boot-tested 2026-10-28** (both profiles, 488 checks). The chain
+  took three runs: the mock estate crashed when given a fake spoke, and
+  the overlay unit shared `StateDirectory=maluos/estate` with the daemon,
+  which systemd re-owned to root when the overlay started (maluos-estate
+  0.2.1: the overlay's state in `/var/lib/maluos/overlay`); then a first-boot
+  timing flake in the vault component (maluos-vault 0.4.2: a deadline and
+  OSError tolerated; maluos-gateway 0.5.1: the routes listing tolerates an
+  empty class).
 
 Where the build departs from the text above, and why:
 
