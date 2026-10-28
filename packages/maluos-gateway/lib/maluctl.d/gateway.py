@@ -158,7 +158,7 @@ def run(a):
         for r in rows:
             ts = datetime.datetime.fromtimestamp(r["ts"]).strftime("%H:%M:%S")
             route = " > ".join(f"{s['backend']}/{s['model']}" + ("" if s.get("taken") else f" (skipped: {s.get('skipped', '-')})") for s in r["route"]) or "-"
-            print(f"{ts}  {r['status']:6} {r['principal']:22} {r['requested']:14} {r['class']:11} {route}  "
+            print(f"{ts}  {r['status'] or '-':6} {r['principal'] or '-':22} {r['requested'] or '-':14} {r['class'] or '-':11} {route}  "
                   f"{'wait ' + str(r.get('queue_wait_ms')) + 'ms ' if r.get('queue_wait_ms') is not None else ''}"
                   f"{'svc ' + str(r.get('service_ms')) + 'ms ' if r.get('service_ms') else ''}"
                   f"{str(r.get('tokens_in')) + '/' + str(r.get('tokens_out')) + ' tok ' if r.get('tokens_out') else ''}"

@@ -1,3 +1,11 @@
+maluos-gateway (0.5.1) resolute; urgency=medium
+
+  * maluctl gateway routes: a row without a class, principal or requested tier
+    (a request refused before routing) prints a dash instead of crashing the
+    listing.
+
+ -- Edward Honour <ed@maludb.org>  Wed, 28 Oct 2026 17:58:00 +0000
+
 maluos-gateway (0.5.0) resolute; urgency=medium
 
   * Phase 13 slice 1b, the overlay: `maluctl gateway expose --bind overlay`

@@ -64,28 +64,42 @@ def provision(ctx):
     subprocess.run(["systemctl", "restart", "maluos-vault.service"], check=False)
     sys.path.insert(0, "/usr/lib/maluos")
     from maluos_vault_client import Vault, VaultError
-    v = Vault()
+    v = Vault(timeout=10)
+    # The socket unit accepts at once; the service behind it may take a while to answer on a slow or busy first
+    # boot (the master credential is decrypted, PostgreSQL connected), so a socket timeout (OSError) is as
+    # expected here as a refused request, and the wait is a deadline, not a count of attempts.
     healthy = False
-    for _ in range(30):
+    deadline = time.time() + 180
+    while time.time() < deadline:
         try:
             if v.health().get("ok"):
                 healthy = True; break
-        except VaultError:
+        except (VaultError, OSError):
             pass
         time.sleep(1)
     if not healthy:
         log("warning: vault not healthy (journalctl -u maluos-vault)")
         return {"healthy": False, "socket": v.socket_path}
 
+    def patient(fn, *a, **kw):
+        """A vault call that outlives a transient timeout on a busy first boot."""
+        for attempt in range(6):
+            try:
+                return fn(*a, **kw)
+            except OSError:
+                if attempt == 5:
+                    raise
+                time.sleep(5)
+
     # 5. shared compartment and the listener token
-    names = {c["name"] for c in v.compartments()}
+    names = {c["name"] for c in patient(v.compartments)}
     if "system" not in names:
-        v.create_compartment("system", scope="org"); log("vault: created shared compartment system")
+        patient(v.create_compartment, "system", scope="org"); log("vault: created shared compartment system")
     imported = 0
     tok = "/var/lib/maluos/secrets/mc2dbd.token"
     if os.path.exists(tok):
-        v.add("mc2dbd-token", open(tok).read().strip(), compartment="system", kind="token", provider="maludb-mc2dbd",
-              env_var="MALUDB_MC2DBD_TOKEN", upsert=True); imported += 1
+        patient(v.add, "mc2dbd-token", open(tok).read().strip(), compartment="system", kind="token", provider="maludb-mc2dbd",
+                env_var="MALUDB_MC2DBD_TOKEN", upsert=True); imported += 1
     log(f"vault healthy at {v.socket_path}; {imported} system secret(s) imported")
     return {"healthy": True, "socket": v.socket_path, "role": ROLE, "credential": CRED,
             "sealing": "tpm2+host" if has_tpm() else "host", "imported": imported}

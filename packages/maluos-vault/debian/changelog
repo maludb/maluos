@@ -1,3 +1,14 @@
+maluos-vault (0.4.2) resolute; urgency=medium
+
+  * first boot: the component waits up to 180 s for the restarted vault to
+    answer and treats a socket timeout like a refused request; the compartment
+    and token steps retry a transient timeout.  On a slow first boot one 30 s
+    timeout escaped the health loop, the component failed, and the system
+    compartment (mc2dbd-token, the API token, the BOS admin password) was never
+    created.
+
+ -- Edward Honour <ed@maludb.org>  Wed, 28 Oct 2026 17:55:00 +0000
+
 maluos-vault (0.4.1) resolute; urgency=medium
 
   * Phase 13 slice 1 (docs/phase13-slice1-nodes.md): a host principal
