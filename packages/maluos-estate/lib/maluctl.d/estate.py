@@ -18,7 +18,7 @@ A desk does not enrol twice: its desk row is its node record.
   sudo maluctl estate leave                 retire the node: the office is told, the units stopped, the secrets removed
 
 Files: /etc/maluos/estate.yaml (no secret), /var/lib/maluos/estate/state.json (the daemon's last outcome),
-/var/lib/maluos/estate/overlay.json (the overlay service's).
+/var/lib/maluos/overlay/state.json (the overlay service's).
 """
 import json, os, pwd, re, socket, subprocess, sys, tempfile, time
 

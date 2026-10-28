@@ -1,3 +1,15 @@
+maluos-estate (0.2.1) resolute; urgency=medium
+
+  * maluos-overlay.service keeps its state in its own directory,
+    /var/lib/maluos/overlay (StateDirectory): sharing /var/lib/maluos/estate
+    with the daemon let systemd re-own that directory to root when the overlay
+    started, after which the daemon (maluos-estate) could not write state.json
+    and `maluctl estate status` saw no heartbeat.
+  * mock office: a fake spoke (--overlay-spoke) is allocated its address after
+    the node and desk tables exist; it crashed the mock at start.
+
+ -- Edward Honour <ed@maludb.org>  Wed, 28 Oct 2026 16:20:00 +0000
+
 maluos-estate (0.2.0) resolute; urgency=medium
 
   * Phase 13 slice 1b, the overlay (docs/phase13-slice1b-overlay.md): the

@@ -52,8 +52,6 @@ class Office:
         for spec in fake_spokes:
             n, _, k = spec.partition("=")
             self.fake_spokes.append({"id": -len(self.fake_spokes) - 1, "kind": "server", "name": n, "status": "active", "overlay_key": k, "overlay_address": None, "overlay_freed_at": None})
-        for f in self.fake_spokes:
-            self.ov_allocate(f, f["overlay_key"])
         self.node_heartbeat_s = node_heartbeat_s or heartbeat_s
         self.codes = {c: {"used": False, "kind": "desk"} for c in codes}
         for c in node_codes:
@@ -70,6 +68,8 @@ class Office:
         self.next_id = 41
         self.lock = threading.Lock()
         self.tasks = {a["id"]: [] for a in self.AGENTS}      # agent id -> tasks (Phase 12 slice 8)
+        for f in self.fake_spokes:                           # after the tables exist: allocation looks at nodes and desks
+            self.ov_allocate(f, f["overlay_key"])
 
     # -- the overlay (slice 1b): addresses, the hub, the peers and the names the kernel will publish
     @staticmethod

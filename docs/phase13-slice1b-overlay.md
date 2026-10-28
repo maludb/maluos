@@ -195,7 +195,7 @@ install the package):
   and every spoke as a peer. SIGHUP refreshes now; SIGTERM leaves the
   tunnel up (a service restart must not drop the network); `overlay
   down` and `leave` take it down and remove the hosts block. The state
-  (`/var/lib/maluos/estate/overlay.json`: last refresh, peers, the hub's
+  (`/var/lib/maluos/overlay/state.json`: last refresh, peers, the hub's
   last handshake from `wg show`) feeds `maluctl estate overlay status`.
 - `maluctl estate join` and `office enroll`: `wg genkey` into the vault
   as `estate-overlay-key`, `overlay_public_key` in the request, `--hub

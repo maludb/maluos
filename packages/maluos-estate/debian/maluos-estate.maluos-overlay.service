@@ -12,7 +12,7 @@ WorkingDirectory=/usr/lib/maluos
 Environment=PYTHONPATH=/usr/lib/maluos
 Environment=PYTHONUNBUFFERED=1
 ExecStart=/usr/bin/python3 -s -m maluos_estate.overlay
-StateDirectory=maluos/estate
+StateDirectory=maluos/overlay
 RuntimeDirectory=maluos/overlay
 RuntimeDirectoryMode=1777
 RuntimeDirectoryPreserve=yes
@@ -25,7 +25,7 @@ CapabilityBoundingSet=CAP_NET_ADMIN CAP_DAC_OVERRIDE CAP_CHOWN CAP_FOWNER CAP_KI
 AmbientCapabilities=CAP_NET_ADMIN
 NoNewPrivileges=yes
 ProtectSystem=full
-ReadWritePaths=/etc/hosts /var/lib/maluos/estate /run/maluos/overlay
+ReadWritePaths=/etc/hosts /var/lib/maluos/overlay /run/maluos/overlay
 ProtectHome=yes
 PrivateTmp=yes
 ProtectKernelLogs=yes

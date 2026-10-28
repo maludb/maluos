@@ -17,7 +17,7 @@ sys.path.insert(0, "/usr/lib/maluos")
 from maluos_estate import client as C
 
 IFACE = os.environ.get("MALUOS_OVERLAY_IFACE", "estate")
-STATE = os.environ.get("MALUOS_OVERLAY_STATE", "/var/lib/maluos/estate/overlay.json")
+STATE = os.environ.get("MALUOS_OVERLAY_STATE", "/var/lib/maluos/overlay/state.json")   # its own directory: systemd re-owns a StateDirectory to its unit's user
 HOSTS = os.environ.get("MALUOS_OVERLAY_HOSTS", "/etc/hosts")
 RUN = os.environ.get("MALUOS_OVERLAY_RUN", "/run/maluos/overlay")
 HINT = os.path.join(RUN, "changed")
