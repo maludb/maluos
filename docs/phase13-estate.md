@@ -71,13 +71,17 @@ extend rather than replace.
    slice 6 (code, heartbeat, me, leave, endpoints) is the base for all
    node kinds. The name "estate" is the kernel's own term; "Fabric" was
    the brainstorming note's working name for the same thing.
-4. **Transport: HTTPS to the coordinator first, overlay later.** Desks
-   already talk to the office over HTTPS. Node-to-node traffic (remote
-   inference, memory queries, task delegation) also starts as HTTPS with
-   mutual service authentication (node tokens from the vault, the
-   coordinator as the directory). A WireGuard overlay between nodes is a
-   later slice, when traffic that should not cross the LAN in the clear
-   exists; it changes addressing, not the protocol.
+4. **Transport: HTTPS to the coordinator; the estate's own network for
+   nodes.** Desks and servers talk to the office over HTTPS and keep
+   doing so. Node-to-node traffic (remote inference, memory queries,
+   direct task calls) goes over a WireGuard overlay that every node gets
+   when it joins, hub and spoke through the coordinator's host, because
+   the people on MaluOS Desktop have no static addresses and must never
+   be asked to set up a VPN (the owner, 2026-10-28; slice 1b,
+   docs/phase13-slice1b-overlay.md). The overlay is reachability only:
+   every service keeps its own tokens, keys and envelopes (decision 2).
+   Until 2026-10-28 this read "overlay later, if needed"; the kernel's
+   long-poll path of slice 2 stays as the office transport either way.
 5. **A2A for agent tasks, MCP for tools.** Agents delegate work to each
    other over an A2A-compatible task interface with MaluOS's
    authorisation envelope as an extension; applications keep exposing
@@ -136,6 +140,15 @@ the kernel half waits for the owner's approval.
 - Test: the mock office grows node kinds; the boot test enrols a server
   and a desk, the desk's Estate page lists both, a stopped agent on the
   server shows on the desk within a heartbeat.
+
+### Slice 1b: the overlay
+
+Specified in docs/phase13-slice1b-overlay.md (2026-10-28): WireGuard,
+hub and spoke through the coordinator's host, the tunnel made by `join`
+and `enroll` with the key in the vault, an address and a name
+(`NAME.internal`) per node from the kernel, `maluctl gateway expose
+--bind overlay`, the kernel half beside db/188. A desk at home reaches
+the office's GPU server by name; nothing is asked of the person.
 
 ### Slice 2: the agent directory and delegation
 
@@ -211,7 +224,7 @@ actions, the kernel half and the test.
 
 - Versioned skills published to the estate after review and tests, with
   rollback; no agent changes a peer's instructions on its own.
-- Many coordinators; the WireGuard overlay if slice 3's traffic needs it.
+- Many coordinators, a second hub for the overlay of slice 1b.
 - Narrow, contractual interactions between two estates (a purchasing
   agent and a supplier's inventory agent) with their own identity,
   authorisation, residency and liability questions; not before the

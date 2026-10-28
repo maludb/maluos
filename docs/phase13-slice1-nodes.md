@@ -362,7 +362,8 @@ without a desk is covered.
 - Actions on remote nodes from the Estate page (restart an agent, apply
   updates, leave): slice 2, with the envelope and the node key.
 - A desk's full report to the system manager: slice 2.
-- Node-to-node traffic and the overlay: slices 3 and 6.
+- The overlay: slice 1b (docs/phase13-slice1b-overlay.md, 2026-10-28);
+  node-to-node traffic over it: slice 3.
 - Linking `server` rows to operator-typed `office` rows: kernel, later.
 - Alert routing to a person who is not at a desk (mail, the kernel's
   notifications): the kernel's own notification work, outside this slice.
