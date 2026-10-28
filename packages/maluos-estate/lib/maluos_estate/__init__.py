@@ -5,4 +5,4 @@ report   what a node reports with its heartbeat: units, agents, the gateway, vau
 __main__ maluos-estated, the heartbeat daemon (python3 -m maluos_estate)
 mock_office  the mock Business OS office for tests: desks (Phase 12 slice 6) and the estate (this slice)
 """
-VERSION = "0.1.1"
+VERSION = "0.2.0"

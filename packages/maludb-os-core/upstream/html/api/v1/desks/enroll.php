@@ -42,7 +42,10 @@ try {
     error_log('desk enroll failed: ' . $ex->getMessage());
     api_error('server_error', 'The desk could not be enrolled.', 500);
 }
-$desk = $made['desk'];
+// db/189: the desk's place on the overlay (its WireGuard key in the body); a desk is always a spoke.
+unset($body['overlay_hub']);
+overlay_join($pdo, (int) $made['desk']['id'], $body);
+$desk = desk_row($pdo, (int) $made['desk']['id']);
 log_activity($pdo, 'desk.enroll', 'location', (int) $desk['id'], ['source' => 'desk',
     'after' => ['name' => $desk['name'], 'hostname' => $desk['hostname'], 'app_version' => $desk['app_version'], 'principal' => $principal]]);
 $pdo->commit();

@@ -33,7 +33,7 @@ deterministic replies. Lives in maluos-estate; maluos_desk.mock_office is the sa
   POST /mock/retire {"desk_id": N}         retire a desk: its token answers 410 from then on
   POST /mock/code {"code": "..."}          add a one-time code
 """
-import argparse, hashlib, json, secrets, sys, threading, time
+import argparse, ipaddress, hashlib, json, secrets, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 SURFACE = 1
@@ -44,8 +44,16 @@ def now():
 
 
 class Office:
-    def __init__(self, name, codes, models, heartbeat_s, node_codes=(), report_s=300, node_heartbeat_s=None):
+    def __init__(self, name, codes, models, heartbeat_s, node_codes=(), report_s=300, node_heartbeat_s=None, overlay_range="100.100.0.0/16", fake_spokes=()):
         self.name, self.models, self.heartbeat_s, self.report_s = name, models, heartbeat_s, report_s
+        # the overlay (Phase 13 slice 1b): the range, the hub, a version every member polls against; fake spokes so a hub under test has peers
+        self.overlay = {"enabled": bool(overlay_range), "range": overlay_range or "100.100.0.0/16", "hub": None, "hub_endpoint": None, "hub_key": None, "version": 1}
+        self.fake_spokes = []
+        for spec in fake_spokes:
+            n, _, k = spec.partition("=")
+            self.fake_spokes.append({"id": -len(self.fake_spokes) - 1, "kind": "server", "name": n, "status": "active", "overlay_key": k, "overlay_address": None, "overlay_freed_at": None})
+        for f in self.fake_spokes:
+            self.ov_allocate(f, f["overlay_key"])
         self.node_heartbeat_s = node_heartbeat_s or heartbeat_s
         self.codes = {c: {"used": False, "kind": "desk"} for c in codes}
         for c in node_codes:
@@ -63,6 +71,135 @@ class Office:
         self.lock = threading.Lock()
         self.tasks = {a["id"]: [] for a in self.AGENTS}      # agent id -> tasks (Phase 12 slice 8)
 
+    # -- the overlay (slice 1b): addresses, the hub, the peers and the names the kernel will publish
+    @staticmethod
+    def ov_label(name):
+        import re as _re
+        lab = _re.sub(r"-+", "-", _re.sub(r"[^a-z0-9]+", "-", (name or "").lower())).strip("-")
+        return (lab or "node")[:63]
+
+    def ov_members(self):
+        """Every active member with a live address: nodes, desks and the fake spokes, by address."""
+        out = []
+        for m in list(self.nodes.values()) + list(self.desks.values()) + self.fake_spokes:
+            if m.get("status") == "active" and m.get("overlay_address") and not m.get("overlay_freed_at"):
+                out.append(m)
+        out.sort(key=lambda m: ipaddress.ip_address(m["overlay_address"]))
+        seen, rows = {}, []
+        for m in out:
+            lab = self.ov_label(m["name"])
+            if lab in seen:
+                lab = f"{lab}-{abs(m['id'])}"
+            seen[lab] = True
+            rows.append({"id": m["id"], "kind": "desk" if m in self.desks.values() else m.get("kind"), "name": lab, "address": m["overlay_address"], "public_key": m.get("overlay_key") or ""})
+        return rows
+
+    def ov_name(self, member):
+        for r in self.ov_members():
+            if r["id"] == member["id"]:
+                return r["name"]
+        return None
+
+    def ov_allocate(self, member, key, hub=False):
+        net = ipaddress.ip_network(self.overlay["range"])
+        hosts = list(net.hosts())
+        if hub:
+            addr = str(hosts[0])
+        elif member.get("overlay_address") and member["overlay_address"] != str(hosts[0]):
+            addr = member["overlay_address"]
+        else:
+            used = {m["overlay_address"] for m in list(self.nodes.values()) + list(self.desks.values()) + self.fake_spokes
+                    if m.get("overlay_address") and m is not member and (not m.get("overlay_freed_at") or time.time() - m["overlay_freed_at"] < 30 * 86400)}
+            addr = next((str(h) for h in hosts[1:] if str(h) not in used), None)
+            if addr is None:
+                raise RuntimeError("the overlay range is full")
+        member["overlay_key"], member["overlay_address"], member["overlay_freed_at"] = key, addr, None
+        if hub:
+            self.overlay["hub"], self.overlay["hub_key"] = member["id"], key
+        self.overlay["version"] += 1
+        return addr
+
+    def ov_hub(self):
+        hid = self.overlay["hub"]
+        m = self.nodes.get(hid) if hid is not None else None
+        if not m or m["status"] != "active" or not m.get("overlay_address"):
+            return None
+        return {"id": m["id"], "name": m["name"], "public_key": self.overlay["hub_key"] or m.get("overlay_key"), "endpoint": self.overlay["hub_endpoint"], "address": m["overlay_address"]}
+
+    def ov_join(self, member, b, allow_hub):
+        """The join's/enroll's overlay part: (status, code, message) on refusal, else None."""
+        key = b.get("overlay_public_key")
+        import re as _re
+        if not self.overlay["enabled"] or not isinstance(key, str) or not _re.fullmatch(r"[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=", key):
+            member["overlay_seen"] = self.overlay["version"]; return None
+        hub = b.get("overlay_hub") if allow_hub and isinstance(b.get("overlay_hub"), dict) else None
+        if hub:
+            ep = hub.get("endpoint")
+            if not isinstance(ep, str) or not _re.fullmatch(r"[A-Za-z0-9.-]+:\d{1,5}", ep):
+                return (400, "invalid", "overlay_hub.endpoint is host:port")
+            cur = self.ov_hub()
+            if cur and cur["id"] != member["id"]:
+                return (409, "hub_exists", "the estate already has a hub; it must leave before another joins as the hub")
+            self.overlay["hub_endpoint"] = ep
+            self.ov_allocate(member, key, hub=True)
+        else:
+            self.ov_allocate(member, key)
+        member["overlay_seen"] = self.overlay["version"]
+        return None
+
+    def ov_block(self, member):
+        if not self.overlay["enabled"] or not member.get("overlay_address") or member.get("overlay_freed_at"):
+            return None
+        hub = self.ov_hub()
+        is_hub = hub is not None and hub["id"] == member["id"]
+        if hub is None:
+            return None
+        return {"address": member["overlay_address"], "prefix": ipaddress.ip_network(self.overlay["range"]).prefixlen, "name": (self.ov_name(member) or "node") + ".internal",
+                "hub": None if is_hub else {"public_key": hub["public_key"], "endpoint": hub["endpoint"], "address": hub["address"]},
+                "role": "hub" if is_hub else "spoke", "listen_port": 51820 if is_hub else None}
+
+    def ov_answer(self, member):
+        hub = self.ov_hub()
+        is_hub = hub is not None and hub["id"] == member["id"]
+        members = self.ov_members()
+        me = next((m for m in members if m["id"] == member["id"]), None)
+        if is_hub:
+            peers = [{"public_key": m["public_key"], "address": m["address"], "name": m["name"]} for m in members if m["id"] != member["id"] and m["public_key"]]
+        elif hub:
+            peers = [{"public_key": hub["public_key"], "address": hub["address"], "name": self.ov_label(hub["name"])}]
+        else:
+            peers = []
+        return {"ok": True, "surface": SURFACE, "fetched_at": now(),
+                "self": {"address": me["address"], "name": me["name"] + ".internal", "role": "hub" if is_hub else "spoke"} if me else None,
+                "hub": {"public_key": hub["public_key"], "endpoint": hub["endpoint"], "address": hub["address"], "name": self.ov_label(hub["name"]) + ".internal"} if hub else None,
+                "peers": peers, "names": [{"name": m["name"], "address": m["address"], "kind": m["kind"]} for m in members],
+                "refresh_s": 60, "version": self.overlay["version"]}
+
+    def ov_changed(self, member):
+        v = self.overlay["version"]
+        if member.get("overlay_seen") == v:
+            return False
+        member["overlay_seen"] = v
+        return True
+
+    def ov_free(self, member):
+        if member.get("overlay_address") and not member.get("overlay_freed_at"):
+            member["overlay_freed_at"] = time.time(); self.overlay["version"] += 1
+        if self.overlay["hub"] == member["id"]:
+            self.overlay["hub"], self.overlay["hub_key"] = None, None; self.overlay["version"] += 1
+
+    def ov_rotate(self, member, key):
+        if not member.get("overlay_address"):
+            self.ov_allocate(member, key)
+        else:
+            member["overlay_key"] = key
+            if self.overlay["hub"] == member["id"]:
+                self.overlay["hub_key"] = key
+            self.overlay["version"] += 1
+
+    def ov_public(self):
+        return {**self.overlay, "members": self.ov_members()}
+
     def endpoints(self, base):
         return {"heartbeat": f"{base}/api/v1/desks/heartbeat", "me": f"{base}/api/v1/desks/me", "leave": f"{base}/api/v1/desks/leave",
                 "records": f"{base}/mcp/records", "activity": f"{base}/mcp/activity", "memory": f"{base}/mcp/memory", "actions": None,
@@ -76,10 +213,11 @@ class Office:
         return {k: f"{base}/api/v1/estate/{k}" for k in ("heartbeat", "me", "leave", "nodes")}
 
     def node_answer(self, node, base):
+        ov = self.ov_block(node)
         return {"ok": True, "surface": SURFACE,
                 "node": {k: node.get(k) for k in ("id", "kind", "name", "status", "presence", "last_seen_at", "last_report_at")},
-                "office": {"name": self.name, "url": base}, "endpoints": self.node_endpoints(base),
-                "heartbeat_s": self.node_heartbeat_s, "report_s": self.report_s}
+                "office": {"name": self.name, "url": base}, "endpoints": {**self.node_endpoints(base), "overlay": f"{base}/api/v1/estate/overlay" if ov else None},
+                "heartbeat_s": self.node_heartbeat_s, "report_s": self.report_s, "overlay": ov}
 
     def raise_alert(self, node, kind, severity, title, report_ts=None, key=None):
         """One open row per (node, kind, key): the title and severity follow the latest report (a disk at 90 % then 97 %
@@ -192,14 +330,16 @@ class Office:
                "updates": {k: (rep.get("updates") or {}).get(k) for k in ("pending_count", "security_count", "reboot_required")} if rep.get("updates") else None,
                "disk_max_pct": max([d.get("used_pct") or 0 for d in rep.get("disk") or []] or [None]),
                "memory_available_pct": round(100 * m["available_mb"] / m["total_mb"]) if m.get("total_mb") else None,
-               "load1": (rep.get("load") or [None])[0], "facts": node.get("facts") or {}}
+               "load1": (rep.get("load") or [None])[0], "facts": node.get("facts") or {},
+               "overlay": {"address": node["overlay_address"]} if node.get("overlay_address") and not node.get("overlay_freed_at") else None}
         if full:
             row["report"] = rep or None
         return row
 
     def desk_row(self, desk):
         return {"id": desk["id"], "kind": "desk", "name": desk["name"], "owner": desk["owner"], "presence": desk["presence"], "last_seen_at": desk["last_seen_at"],
-                "health": "retired" if desk["status"] != "active" else "ok" if desk["presence"] == "online" else "offline", "summary": desk["presence"], "facts": desk["facts"]}
+                "health": "retired" if desk["status"] != "active" else "ok" if desk["presence"] == "online" else "offline", "summary": desk["presence"], "facts": desk["facts"],
+                "overlay": {"address": desk["overlay_address"]} if desk.get("overlay_address") and not desk.get("overlay_freed_at") else None}
 
     def nodes_answer(self, base, node_id=None):
         if node_id is not None:
@@ -260,10 +400,11 @@ class Office:
         return {"ok": True, "surface": SURFACE, "apps": [dict(a, url=base + a["path"]) for a in self.APPS]}
 
     def answer(self, desk, base):
+        ov = self.ov_block(desk)
         return {"ok": True, "surface": SURFACE,
                 "desk": {k: desk[k] for k in ("id", "name", "status", "presence", "last_seen_at")},
                 "office": {"name": self.name, "url": base}, "owner": desk["owner"],
-                "endpoints": self.endpoints(base), "heartbeat_s": self.heartbeat_s}
+                "endpoints": {**self.endpoints(base), "overlay": f"{base}/api/v1/desks/overlay" if ov else None}, "heartbeat_s": self.heartbeat_s, "overlay": ov}
 
     def public(self):
         return {"office": self.name, "codes": {c: v for c, v in self.codes.items()},
@@ -369,6 +510,21 @@ class Handler(BaseHTTPRequestHandler):
         if p == "/mock/nodes":
             with o.lock:
                 return self.send(200, {"nodes": [o.node_row(n) for n in o.nodes.values()], "alerts": o.alerts})
+        if p == "/api/v1/estate/overlay":
+            node, e = self.node_from_bearer()
+            if e:
+                return self.err(*e)
+            with o.lock:
+                return self.send(200, o.ov_answer(node))
+        if p == "/api/v1/desks/overlay":
+            desk, e = self.desk_from_bearer()
+            if e:
+                return self.err(*e)
+            with o.lock:
+                return self.send(200, o.ov_answer(desk))
+        if p == "/mock/overlay":
+            with o.lock:
+                return self.send(200, o.ov_public())
         if p == "/api/v1/desks/me":
             desk, e = self.desk_from_bearer()
             if e:
@@ -466,7 +622,7 @@ class Handler(BaseHTTPRequestHandler):
                     o.evaluate(node)
                 o.set_presence(node, presence)
                 o.heartbeats.append({"ts": node["last_seen_at"], "node_id": node["id"], "presence": presence, "report": isinstance(b.get("report"), dict)})
-                return self.send(200, o.node_answer(node, self.base()))
+                return self.send(200, {**o.node_answer(node, self.base()), "overlay_changed": o.ov_changed(node)})
         if p == "/api/v1/estate/leave":
             node, e = self.node_from_bearer()
             if e:
@@ -475,8 +631,22 @@ class Handler(BaseHTTPRequestHandler):
                 node["status"], node["retired_at"] = "retired", now()
                 o.set_presence(node, "offline")
                 o.clear_alerts(node, set())
+                o.ov_free(node)
                 o.node_tokens = {t: n for t, n in o.node_tokens.items() if n != node["id"]}
             return self.send(200, {"ok": True, "surface": SURFACE, "node": {"id": node["id"], "status": "retired"}})
+        if p == "/api/v1/estate/overlay/key":
+            auth = self.headers.get("Authorization") or ""
+            tok = auth[7:].strip() if auth.lower().startswith("bearer ") else ""
+            member, e = (self.desk_from_bearer() if tok.startswith("desk_") else self.node_from_bearer())
+            if e:
+                return self.err(*e)
+            import re as _re
+            key = b.get("overlay_public_key")
+            if not isinstance(key, str) or not _re.fullmatch(r"[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=", key):
+                return self.err(400, "invalid", "overlay_public_key is a WireGuard public key (32 bytes, base64)")
+            with o.lock:
+                o.ov_rotate(member, key)
+                return self.send(200, {"ok": True, "surface": SURFACE, "overlay": o.ov_block(member)})
         if p == "/mock/report":
             with o.lock:
                 node = o.nodes.get(b.get("node_id"))
@@ -507,13 +677,14 @@ class Handler(BaseHTTPRequestHandler):
                 if isinstance(b.get("facts"), dict):
                     desk["facts"].update(b["facts"])
                 o.heartbeats.append({"ts": desk["last_seen_at"], "desk_id": desk["id"], "presence": presence})
-            return self.send(200, o.answer(desk, self.base()))
+                return self.send(200, {**o.answer(desk, self.base()), "overlay_changed": o.ov_changed(desk)})
         if p == "/api/v1/desks/leave":
             desk, e = self.desk_from_bearer()
             if e:
                 return self.err(*e)
             with o.lock:
                 desk["status"], desk["retired_at"], desk["presence"] = "retired", now(), "offline"
+                o.ov_free(desk)
                 o.tokens = {t: d for t, d in o.tokens.items() if d != desk["id"]}
             return self.send(200, {"ok": True, "surface": SURFACE, "desk": {"id": desk["id"], "status": "retired"}})
         if p == "/desk-models/v1/chat/completions":
@@ -540,6 +711,7 @@ class Handler(BaseHTTPRequestHandler):
                 targets = [o.desks[b["desk_id"]]] if b.get("desk_id") in o.desks else list(o.desks.values())
                 for d in targets:
                     d["status"], d["retired_at"], d["presence"] = "retired", now(), "offline"
+                    o.ov_free(d)
             return self.send(200, {"ok": True, "retired": [d["id"] for d in targets]})
         if p == "/mock/code":
             with o.lock:
@@ -567,8 +739,11 @@ class Handler(BaseHTTPRequestHandler):
                     "owner": {"member_id": 1, "email": "person@mock.office", "display_name": "Mock Person"},
                     "principal": b.get("principal"), "app_version": b.get("app_version"), "mcp_surface_version": b.get("mcp_surface_version"),
                     "facts": facts, "token": tok, "code": code}
+            e = o.ov_join(desk, b, allow_hub=False)
+            if e:
+                return self.err(*e)
             o.desks[did] = desk; o.tokens[tok] = did
-        ans = o.answer(desk, self.base()); ans["token"] = tok
+            ans = o.answer(desk, self.base()); ans["token"] = tok
         return self.send(201, ans)
 
     def join(self, b):
@@ -595,6 +770,9 @@ class Handler(BaseHTTPRequestHandler):
                     "last_report_at": None, "report": None, "principal": b.get("principal"), "public_key": b.get("public_key"), "app_version": b.get("app_version"),
                     "components": b.get("components") or [], "facts": facts, "token": tok, "code": code,
                     "enrolled_by": {"member_id": 1, "email": "person@mock.office", "display_name": "Mock Person"}}
+            e = o.ov_join(node, b, allow_hub=True)
+            if e:
+                return self.err(*e)
             o.nodes[nid] = node; o.node_tokens[tok] = nid
             ans = o.node_answer(node, self.base()); ans["token"] = tok; ans["enrolled_by"] = node["enrolled_by"]
         return self.send(201, ans)
@@ -660,8 +838,11 @@ def main(argv=None):
     ap.add_argument("--models", default="office-7b,office-embed"); ap.add_argument("--heartbeat-s", type=int, default=300)
     ap.add_argument("--node-code", action="append", default=[]); ap.add_argument("--report-s", type=int, default=300)
     ap.add_argument("--node-heartbeat-s", type=int, default=None, help="nodes' heartbeat interval (default: --heartbeat-s)")
+    ap.add_argument("--overlay-range", default="100.100.0.0/16", help="the estate's overlay range (slice 1b)"); ap.add_argument("--no-overlay", action="store_true")
+    ap.add_argument("--overlay-spoke", action="append", default=[], help="NAME=PUBKEY: a fake spoke with an address, so a hub under test has a peer")
     a = ap.parse_args(argv)
-    Handler.office = Office(a.name, a.code or ["mock-code"], [m.strip() for m in a.models.split(",") if m.strip()], a.heartbeat_s, a.node_code, a.report_s, a.node_heartbeat_s)
+    Handler.office = Office(a.name, a.code or ["mock-code"], [m.strip() for m in a.models.split(",") if m.strip()], a.heartbeat_s, a.node_code, a.report_s, a.node_heartbeat_s,
+                            None if a.no_overlay else a.overlay_range, a.overlay_spoke)
     srv = ThreadingHTTPServer((a.host, a.port), Handler)
     srv.daemon_threads = True
 

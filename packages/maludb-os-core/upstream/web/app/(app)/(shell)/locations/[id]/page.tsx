@@ -14,7 +14,7 @@ import { locationView } from "@/lib/schemas/estate";
 
 export const metadata: Metadata = { title: "Location" };
 
-const KIND_ICON: Record<string, string> = { building: "feather-server", office: "feather-monitor", desk: "feather-hard-drive", site: "feather-map-pin" };
+const KIND_ICON: Record<string, string> = { building: "feather-server", office: "feather-monitor", desk: "feather-hard-drive", site: "feather-map-pin", server: "feather-hard-drive", inference: "feather-cpu" };
 
 /**
  * Screen `location-view`. Data: GET /locations/{id} (insider). Both columns stack several cards,

@@ -23,9 +23,13 @@ log_screen_view($pdo, 'settings');
 if (wants_json()) {
     require_once dirname(__DIR__, 2) . '/app/features/settings/present.php';
     require_once dirname(__DIR__, 2) . '/app/features/estate/desks.php';
-    respond_screen(present_my_settings(find_member_by_id($pdo, $me), list_mcp_tokens($pdo, $me),
+    require_once dirname(__DIR__, 2) . '/app/features/estate/nodes.php';
+    $meRow = find_member_by_id($pdo, $me);
+    respond_screen(present_my_settings($meRow, list_mcp_tokens($pdo, $me),
         app_url('/mcp/records'), app_url('/mcp/activity'), find_my_desks($pdo, $me))
         + ['section' => $section, 'timezones' => timezone_identifiers_list(),
+           // db/188: an operator's Settings → Desks carries the estate's nodes and open alerts, and mints node codes.
+           'estate' => $section === 'desks' && estate_operator($meRow) ? present_estate_for_settings($pdo) : null,
            // db/142: the application app.<domain>/ opens after sign-in, and the ones they may choose.
            'default_application' => (static function () use ($pdo, $me): array {
                require_once dirname(__DIR__, 2) . '/app/features/applications/queries.php';

@@ -18,10 +18,17 @@ if ($m === null || ($m['member_kind'] ?? 'human') !== 'human' || !empty($m['is_e
     respond_invalid(['Only a person of the business can enrol a desk.']);
 }
 $name = mb_substr(request_string('name'), 0, 120);
-$c = desk_code_mint($pdo, $me, $name, $me);
-log_activity($pdo, 'desk.code.mint', 'desk_enrollment_code', $c['id'], ['after' => ['desk_name' => $name !== '' ? $name : null]]);
+// db/188: an operator mints a node code (server, inference) here too; the command shown differs.
+$kind = request_string('kind', 'desk');
+if (!in_array($kind, ['desk', 'server', 'inference'], true)) { $kind = 'desk'; }
+if ($kind !== 'desk' && !estate_operator($m)) {
+    emit_action_status(false, ['errors' => ['Only an operator (super-admin) mints a node code.']]);
+    respond_invalid(['Only an operator (super-admin) mints a node code.']);
+}
+$c = desk_code_mint($pdo, $me, $name, $me, $kind);
+log_activity($pdo, 'desk.code.mint', 'desk_enrollment_code', $c['id'], ['after' => ['desk_name' => $name !== '' ? $name : null, 'kind' => $kind]]);
 emit_action_status(true, ['did' => 'Enrolment code created']);
 if (wants_json()) {
-    respond_saved(['did' => 'Enrolment code created', 'code' => $c['code'], 'expires_at' => json_ts($c['expires_at']), 'enroll_url' => app_url('/')]);
+    respond_saved(['did' => 'Enrolment code created', 'code' => $c['code'], 'expires_at' => json_ts($c['expires_at']), 'enroll_url' => app_url('/'), 'kind' => $kind]);
 }
 echo settings_section_html($pdo, $me, 'desks', ['newCode' => $c['code']]);

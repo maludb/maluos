@@ -1,3 +1,25 @@
+maluos-estate (0.2.0) resolute; urgency=medium
+
+  * Phase 13 slice 1b, the overlay (docs/phase13-slice1b-overlay.md): the
+    estate's own WireGuard network, made when a host joins. `maluctl estate
+    join` makes the host's X25519 key (the private half into the vault beside
+    the token, estate-overlay-key), sends the public half, records the address,
+    the name (NAME.internal) and the hub the office answers with, and starts
+    maluos-overlay.service: a root reconciler with CAP_NET_ADMIN that makes the
+    `estate` interface, peers it with the hub (keepalive 25 s) or, on the hub
+    (`join --hub HOST:PORT`, listening on udp 51820, forwarding on the
+    interface only), with every spoke, keeps a marked block of names in
+    /etc/hosts, and refreshes from GET endpoints.overlay every refresh_s, at
+    once on a heartbeat's overlay_changed (the hint under /run/maluos/overlay)
+    or SIGHUP; SIGTERM leaves the tunnel up. `--no-overlay` opts a host out.
+    `maluctl estate overlay status|peers|up|down|rotate|refresh`; `leave`
+    takes the tunnel down and removes the key. The report carries `overlay`.
+    The mock office serves the overlay contract (an allocator, the hub, the
+    peers, the names, rotation, overlay_changed, /mock/overlay). Depends on
+    wireguard-tools, iproute2, python3-cryptography.
+
+ -- Edward Honour <ed@maludb.org>  Wed, 28 Oct 2026 15:00:00 +0000
+
 maluos-estate (0.1.1) resolute; urgency=medium
 
   * The daemon makes the report on a worker thread; a heartbeat waits for

@@ -9,7 +9,7 @@ Rules-Requires-Root: no
 
 Package: maluos-estate
 Architecture: all
-Depends: ${misc:Depends}, adduser, python3 (>= 3.12), python3-yaml, openssh-client, maluos-firstboot (>= 0.1.10), maluos-vault (>= 0.4.1)
+Depends: ${misc:Depends}, adduser, python3 (>= 3.12), python3-yaml, python3-cryptography, openssh-client, wireguard-tools, iproute2, maluos-firstboot (>= 0.1.10), maluos-vault (>= 0.4.1)
 Recommends: maluos-gateway (>= 0.4.2)
 Description: MaluOS estate membership: maluctl estate and the node heartbeat
  A MaluOS server joins its estate the way a desk joins an office (Phase 13
@@ -26,3 +26,9 @@ Description: MaluOS estate membership: maluctl estate and the node heartbeat
  its desk row is its node record, and `maluctl estate nodes` on a desk
  shows the estate as its owner may see it. The package also carries the
  shared estate client (maluos_estate.client) and the mock office tests use.
+ .
+ The overlay (slice 1b): the join makes the host's WireGuard key, the
+ office gives it an address and a name on the estate's own network, and
+ maluos-overlay.service keeps the tunnel to the hub (or, on the hub, to
+ every spoke) and the names in /etc/hosts (NAME.internal). `maluctl estate
+ overlay status|peers|up|down|rotate|refresh`.

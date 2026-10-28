@@ -285,27 +285,41 @@ function Tokens({ data, timeZone }: { data: Data; timeZone: string }) {
 function Desks({ data, timeZone }: { data: Data; timeZone: string }) {
   const [answer, setAnswer] = useState<SecretAnswer | null>(null);
   const [name, setName] = useState("");
+  const [kind, setKind] = useState("desk");
   const [pending, startTransition] = useTransition();
   const presence = (p: string) => p === "online" ? <span className="badge bg-success">online</span>
     : p === "offline" ? <span className="badge bg-secondary">offline</span> : <span className="badge bg-light text-dark">unknown</span>;
+  const made = answer?.status === "ok" ? answer : null;
+  const officeUrl = made?.enrollUrl || data.mcp.records_url.replace(/\/mcp\/records$/, "/");
+  const isNode = (made?.kind ?? "desk") !== "desk";
   return (
-    <Section title="Desks">
+    <Section title={data.estate ? "Desks and the estate" : "Desks"}>
       <p className="text-muted small">
         A desk is a MaluOS desktop enrolled as yours: it shows in Work Locations with its presence, reads records and activity as you, and
         its agents reach this office through your desk token. Make a code here, then on the desktop run the command it shows.
+        {data.estate && <> As an operator you also mint a <strong>node code</strong> for a MaluOS server or inference host (db/188): it joins the estate and reports to you here.</>}
       </p>
       {answer?.status === "error" && <div className="alert alert-danger py-2">{answer.message}</div>}
       {answer?.status === "ok" && answer.code && (
         <div className="alert alert-success">
-          <strong>Enrolment code (shown once; valid 15 minutes):</strong> <code className="user-select-all">{answer.code}</code><br />
-          <small>On the desktop: <code className="user-select-all">sudo maluctl office enroll {answer.enrollUrl || data.mcp.records_url.replace(/\/mcp\/records$/, "/")} --code {answer.code}</code></small>
+          <strong>{isNode ? "Node code" : "Enrolment code"} (shown once; valid 15 minutes):</strong> <code className="user-select-all">{answer.code}</code><br />
+          <small>{isNode ? "On the server" : "On the desktop"}: <code className="user-select-all">{isNode
+            ? `sudo maluctl estate join ${officeUrl} --code ${answer.code} --kind ${made?.kind}`
+            : `sudo maluctl office enroll ${officeUrl} --code ${answer.code}`}</code></small>
         </div>
       )}
-      <form className="mb-3" onSubmit={(e) => { e.preventDefault(); startTransition(async () => { setAnswer(await settingsSecret("deskCode", { name })); setName(""); }); }}>
+      <form className="mb-3" onSubmit={(e) => { e.preventDefault(); startTransition(async () => { setAnswer(await settingsSecret("deskCode", { name, kind })); setName(""); }); }}>
         <div className="input-group">
-          <input type="text" name="name" className="form-control" placeholder="Desk name (optional, e.g. Ed's laptop)"
+          {data.estate && (
+            <select name="kind" className="form-select flex-grow-0 w-auto" value={kind} onChange={(e) => setKind(e.target.value)} id="desk-code-kind">
+              <option value="desk">A desk of mine</option>
+              <option value="server">A server node</option>
+              <option value="inference">An inference node</option>
+            </select>
+          )}
+          <input type="text" name="name" className="form-control" placeholder={kind === "desk" ? "Desk name (optional, e.g. Ed's laptop)" : "Node name (optional; the hostname otherwise)"}
                  value={name} onChange={(e) => setName(e.target.value)} />
-          <button type="submit" className="btn btn-primary" disabled={pending}><i className="feather-plus me-1"></i>Enrol a desk</button>
+          <button type="submit" className="btn btn-primary" disabled={pending}><i className="feather-plus me-1"></i>{kind === "desk" ? "Enrol a desk" : "Make a node code"}</button>
         </div>
       </form>
       <div className="table-responsive">
@@ -331,6 +345,67 @@ function Desks({ data, timeZone }: { data: Data; timeZone: string }) {
           </tbody>
         </table>
       </div>
+      {data.estate && <Estate estate={data.estate} timeZone={timeZone} />}
     </Section>
+  );
+}
+
+/**
+ * The estate for an operator (db/188; maluos docs/phase13-slice1-nodes.md): every server and inference node with
+ * the health the kernel computed from its last report, and the open alerts. Read-only here; the node's own row in
+ * Work Locations has the rest, and the Desk's Estate view on a MaluOS desktop shows the same answer live.
+ */
+function Estate({ estate, timeZone }: { estate: NonNullable<Data["estate"]>; timeZone: string }) {
+  const health = (h: string) => h === "ok" ? <span className="badge bg-success">ok</span>
+    : h === "warning" ? <span className="badge bg-warning text-dark">warning</span>
+    : h === "critical" ? <span className="badge bg-danger">critical</span>
+    : <span className="badge bg-secondary">{h}</span>;
+  return (
+    <div className="mt-4" id="settings-estate">
+      <h6 className="fw-bold">The estate</h6>
+      {estate.overlay && (
+        <p className="text-muted small" id="settings-estate-overlay">
+          {/* db/189: the estate's own network (maluos docs/phase13-slice1b-overlay.md) */}
+          Overlay network {estate.overlay.range}{estate.overlay.hub
+            ? <>, hub <Link href={`/locations/${estate.overlay.hub.id}`}>{estate.overlay.hub.name}</Link> at {estate.overlay.hub.endpoint} ({estate.overlay.hub.address}), {estate.overlay.members} member{estate.overlay.members === 1 ? "" : "s"} with an address.</>
+            : <>: no hub yet — join the coordinator&apos;s own host with <code>sudo maluctl estate join … --hub HOST:51820</code> and every member gets its tunnel.</>}
+        </p>
+      )}
+      <div className="table-responsive">
+        <table className="table table-hover mb-3">
+          <thead className="thead-light"><tr><th>Node</th><th>Kind</th><th>Health</th><th>Summary</th><th>Units</th><th>Agents</th><th>Disk</th><th>Overlay</th><th>Last report</th></tr></thead>
+          <tbody>
+            {estate.nodes.length === 0 ? (
+              <tr><td colSpan={9} className="text-muted text-center py-3">No nodes yet. Make a node code above and run the command it shows on the server.</td></tr>
+            ) : estate.nodes.map((n) => (
+              <tr id={`node-${n.id}`} key={n.id}>
+                <td><Link href={`/locations/${n.id}`}>{n.name}</Link>{n.hostname && n.hostname !== n.name && <small className="text-muted"> · {n.hostname}</small>}</td>
+                <td>{n.kind}</td>
+                <td>{health(n.health)}</td>
+                <td><small>{n.summary}</small></td>
+                <td><small>{n.units.up} up{n.units.down > 0 && <span className="text-danger">, {n.units.down} down</span>}</small></td>
+                <td><small>{n.agents.running}/{n.agents.count}{n.agents.failed > 0 && <span className="text-danger">, {n.agents.failed} failed</span>}</small></td>
+                <td><small>{n.disk_max_pct !== null ? `${n.disk_max_pct} %` : "—"}</small></td>
+                <td><small>{n.overlay ? n.overlay.address : "—"}</small></td>
+                <td>{n.last_report_at ? formatDate(n.last_report_at, timeZone) : <small className="text-muted">never</small>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {estate.alerts.length > 0 && (
+        <>
+          <h6 className="fw-bold">Open alerts</h6>
+          <ul className="list-unstyled mb-0" id="settings-estate-alerts">
+            {estate.alerts.map((a) => (
+              <li key={a.id} className="mb-1">
+                <span className={`badge ${a.severity === "critical" ? "bg-danger" : "bg-warning text-dark"} me-2`}>{a.severity}</span>
+                <strong>{a.node}</strong>: {a.title} <small className="text-muted">{a.ts ? `since ${formatDate(a.ts, timeZone)}` : ""}</small>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
   );
 }

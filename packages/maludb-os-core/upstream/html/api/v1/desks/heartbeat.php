@@ -19,4 +19,6 @@ if (!in_array($presence, ['online', 'offline'], true)) {
 }
 $pdo = db();
 desk_heartbeat($pdo, (int) $ctx['desk']['id'], $presence, $body);
-api_json(desk_answer($pdo, desk_row($pdo, (int) $ctx['desk']['id']), $ctx['member']));
+$row = desk_row($pdo, (int) $ctx['desk']['id']);
+$changed = overlay_changed($pdo, $row);      // db/189: the overlay changed since this desk last heard
+api_json(desk_answer($pdo, $row, $ctx['member']) + ['overlay_changed' => $changed]);

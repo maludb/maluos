@@ -15,7 +15,7 @@ import { ApiError, apiPost } from "@/lib/api";
 export type SecretAnswer =
   | { status: "error"; message: string; expired?: boolean }
   | { status: "ok"; token?: string; enrolling?: boolean; qrDataUri?: string; manualKey?: string; recoveryCodes?: string[];
-      code?: string; codeExpiresAt?: string; enrollUrl?: string };
+      code?: string; codeExpiresAt?: string; enrollUrl?: string; kind?: string };
 
 const PATHS = {
   createToken: "/settings/tokens/create.php",
@@ -26,7 +26,7 @@ const PATHS = {
 
 export async function settingsSecret(kind: keyof typeof PATHS, fields: Record<string, string>): Promise<SecretAnswer> {
   let answer: { token?: string; enrolling?: boolean; qr_data_uri?: string; manual_key?: string; recovery_codes?: string[];
-                code?: string; expires_at?: string; enroll_url?: string };
+                code?: string; expires_at?: string; enroll_url?: string; kind?: string };
   try {
     answer = await apiPost(PATHS[kind], fields);
   } catch (err) {
@@ -39,6 +39,6 @@ export async function settingsSecret(kind: keyof typeof PATHS, fields: Record<st
   return {
     status: "ok", token: answer.token, enrolling: answer.enrolling,
     qrDataUri: answer.qr_data_uri, manualKey: answer.manual_key, recoveryCodes: answer.recovery_codes,
-    code: answer.code, codeExpiresAt: answer.expires_at, enrollUrl: answer.enroll_url,
+    code: answer.code, codeExpiresAt: answer.expires_at, enrollUrl: answer.enroll_url, kind: answer.kind,
   };
 }

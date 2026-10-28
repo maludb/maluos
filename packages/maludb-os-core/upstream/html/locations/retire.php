@@ -42,6 +42,10 @@ if ($location['kind'] === 'desk') {
     require_once dirname(__DIR__, 2) . '/app/features/estate/desks.php';
     desk_revoke_tokens($pdo, $id);
     $pdo->prepare("UPDATE locations SET presence = 'offline' WHERE id = :id")->execute(['id' => $id]);
+} elseif (in_array($location['kind'], ['server', 'inference'], true)) {
+    // db/188: a retired node's token is revoked and its alerts cleared (the next heartbeat gets 410).
+    require_once dirname(__DIR__, 2) . '/app/features/estate/nodes.php';
+    node_retire($pdo, $id);
 }
 
 log_activity($pdo, 'location.retire', 'location', $id, [

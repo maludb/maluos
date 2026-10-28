@@ -254,7 +254,17 @@ class Gateway:
     # -- G2: the TCP listener, applied live from gateway.yaml (maluctl gateway expose)
     async def apply_tcp(self):
         tcp = self.cfg["tcp"]
-        want = (tcp.get("host", "127.0.0.1"), int(tcp.get("port", 11435))) if tcp.get("enabled") else None
+        host = tcp.get("host", "127.0.0.1")
+        if host == "overlay" and tcp.get("enabled"):
+            # Phase 13 slice 1b: the node API on the estate's network only; the address comes from the enrolment
+            # (maluos-overlay brings the interface up and reloads the gateway, so the bind follows).
+            host = overlay_address()
+            if not host:
+                if self.tcp_site:
+                    await self.tcp_site.stop(); self.tcp_site = self.tcp_bound = None
+                log("tcp listener: --bind overlay but this host has no overlay address yet (not listening)")
+                return
+        want = (host, int(tcp.get("port", 11435))) if tcp.get("enabled") else None
         if want == self.tcp_bound or not self.runner:
             return
         if self.tcp_site:
@@ -1551,6 +1561,21 @@ async def h_status(request):
         for s in st["schedulers"].values():
             s["jobs"] = [j for j in s["jobs"] if j["principal"] == caller.ref]
     return web.json_response(st)
+
+
+def overlay_address():
+    """The host's address on the estate's overlay (slice 1b), from the node's or the desk's enrolment; None without one."""
+    import yaml
+    for path in (os.environ.get("MALUOS_ESTATE_CONF", "/etc/maluos/estate.yaml"), os.environ.get("MALUOS_OFFICE_CONF", "/etc/maluos/office.yaml")):
+        try:
+            with open(path) as f:
+                conf = yaml.safe_load(f) or {}
+        except (OSError, ValueError):
+            continue
+        addr = ((conf.get("overlay") or {}).get("address"))
+        if addr:
+            return addr
+    return None
 
 
 async def h_whoami(request):

@@ -27,7 +27,8 @@
                     [--tiers a,b] [--max-concurrent N] [--expires 90d]   an inference key (a caller on the network: a desk,
                     a tool, the manager's agents) or a node key (the manager); shown once (root)
   maluctl gateway key list | key revoke NAME|ID | key set NAME|ID [--class C] [--cloud-allowed yes|no] [--tiers a,b] [--max-concurrent N]
-  maluctl gateway expose [--bind ADDR] [--port 11435] | unexpose   the TCP listener for the network (root; refuses without a key)
+  maluctl gateway expose [--bind ADDR|overlay] [--port 11435] | unexpose   the TCP listener for the network (root; refuses without a key);
+                                                                   --bind overlay: on the estate's network only (slice 1b)
   maluctl gateway node status | queue | runs [--since-seq N] [--limit N] | models | cancel ID | priority ID CLASS | pause [LANE] | resume [LANE]
                                                      the node API (/node/v1) as an operator; a manager uses it with a node key
   maluctl gateway jobs [--status S] | job ID | job cancel ID    async jobs (yours; every job as root)
@@ -562,6 +563,18 @@ def expose(cmd, a):
     bind, port, force = opt(a, "--bind", "0.0.0.0"), int(opt(a, "--port", 11435)), opt(a, "--force", flag=True)
     if a:
         raise GwError(f"{cmd}: unknown argument {a[0]}")
+    if cmd == "expose" and bind == "overlay":
+        # Phase 13 slice 1b: the node API on the estate's network only; the config keeps the word, the gateway resolves it at every bind
+        import yaml as _y
+        has = False
+        for path in (os.environ.get("MALUOS_ESTATE_CONF", "/etc/maluos/estate.yaml"), os.environ.get("MALUOS_OFFICE_CONF", "/etc/maluos/office.yaml")):
+            try:
+                with open(path) as f:
+                    has = has or bool(((_y.safe_load(f) or {}).get("overlay") or {}).get("address"))
+            except (OSError, ValueError):
+                pass
+        if not has and not force:
+            raise GwError("this host has no address on the estate's overlay yet (maluctl estate overlay status); join the estate first, or --force to record the wish")
     import yaml
     conf = {}
     if os.path.exists(CONF):

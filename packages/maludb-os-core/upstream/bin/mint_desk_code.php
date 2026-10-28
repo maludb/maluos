@@ -12,7 +12,8 @@ if (PHP_SAPI !== 'cli') { fwrite(STDERR, "CLI only.\n"); exit(1); }
 require_once dirname(__DIR__) . '/app/bootstrap.php';
 require_once dirname(__DIR__) . '/app/features/estate/desks.php';
 
-$opts = getopt('', ['email:', 'name:']);
+$opts = getopt('', ['email:', 'name:', 'kind:']);
+$kind = (string) ($opts['kind'] ?? 'desk');   // db/188: server or inference mints a node code (the person must be an operator)
 $email = isset($opts['email']) ? normalize_email((string) $opts['email']) : '';
 if ($email === '') {
     fwrite(STDERR, "Usage: php bin/mint_desk_code.php --email you@example.com [--name \"Ed's desk\"]\n");
@@ -22,7 +23,15 @@ $pdo = db();
 $member = find_member_by_email($pdo, $email);
 if ($member === null || $member['status'] !== 'active') { fwrite(STDERR, "No active member for {$email}.\n"); exit(1); }
 if (($member['member_kind'] ?? 'human') !== 'human' || !empty($member['is_external'])) { fwrite(STDERR, "{$email} cannot own a desk (an agent or an external).\n"); exit(1); }
-$c = desk_code_mint($pdo, (int) $member['id'], trim((string) ($opts['name'] ?? '')), (int) $member['id']);
-log_activity($pdo, 'desk.code.mint', 'desk_enrollment_code', $c['id'], ['source' => 'cron', 'after' => ['member' => $email, 'desk_name' => $opts['name'] ?? null]]);
-echo "Desk enrolment code for {$email} — shown once, valid until {$c['expires_at']}:\n\n  {$c['code']}\n\n";
-echo "On the MaluOS desktop:\n  sudo maluctl office enroll " . app_url('/') . " --code {$c['code']}\n";
+if (!in_array($kind, ['desk', 'server', 'inference'], true)) { fwrite(STDERR, "--kind is desk, server or inference.\n"); exit(1); }
+require_once dirname(__DIR__) . '/app/features/estate/nodes.php';
+if ($kind !== 'desk' && !estate_operator($member)) { fwrite(STDERR, "{$email} is not an operator (super-admin); only an operator mints a node code.\n"); exit(1); }
+$c = desk_code_mint($pdo, (int) $member['id'], trim((string) ($opts['name'] ?? '')), (int) $member['id'], $kind);
+log_activity($pdo, 'desk.code.mint', 'desk_enrollment_code', $c['id'], ['source' => 'cron', 'after' => ['member' => $email, 'desk_name' => $opts['name'] ?? null, 'kind' => $kind]]);
+if ($kind === 'desk') {
+    echo "Desk enrolment code for {$email} — shown once, valid until {$c['expires_at']}:\n\n  {$c['code']}\n\n";
+    echo "On the MaluOS desktop:\n  sudo maluctl office enroll " . app_url('/') . " --code {$c['code']}\n";
+} else {
+    echo "Node code ({$kind}) minted by {$email} — shown once, valid until {$c['expires_at']}:\n\n  {$c['code']}\n\n";
+    echo "On the MaluOS server:\n  sudo maluctl estate join " . app_url('/') . " --code {$c['code']} --kind {$kind}\n";
+}

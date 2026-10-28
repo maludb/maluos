@@ -385,7 +385,7 @@ desktop image, one on the server image.
 
 ## Status
 
-**The host half built and boot-tested 2026-10-27** (both profiles' UEFI images, the third chain clean) against the mock estate (the kernel
+**The host half built and boot-tested 2026-10-27** (both profiles' UEFI images, the third chain clean) against the mock estate; **the kernel half built 2026-10-28** after the owner's approval (maludb-os-core 84af4f0, db/188, `bin/test_estate_nodes.php` 54 checks, vendored as maludb-os-core 2026.10.28maluos1; the operator is a super-admin, `endpoints.estate` goes to their desks, the MCP resolver never reads a node token as a person, the sweep runs every minute) (before that, the kernel
 half, db/188 and the `/api/v1/estate/*` endpoints, waits for the owner's
 approval in maludb-os-core; until it lands the mock in maluos-estate
 serves the contract and the health rules the kernel will apply):

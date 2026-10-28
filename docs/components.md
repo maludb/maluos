@@ -188,7 +188,20 @@ updates, disk, memory, load), `offline` on a clean stop. `maluctl estate
 status|report|nodes|leave`; a desk's node record is its desk row (`--kind
 desk` runs `maluctl office enroll`). The package also carries the shared
 estate client `maluctl office` uses and the mock office the tests run,
-which stands in for the kernel's estate endpoints (db/188) until they land.
+which stands in for the kernel's estate endpoints (db/188 and db/189,
+built 2026-10-28) in the image tests.
+
+The overlay (slice 1b, docs/phase13-slice1b-overlay.md): the join makes
+the host's WireGuard key (the private half in the vault as
+`estate-overlay-key`), the office gives it an address in the estate's
+range and a name (`NAME.internal`), and maluos-overlay.service, a root
+reconciler with CAP_NET_ADMIN, keeps the `estate` interface, the tunnel to
+the hub (or, on the hub, `join --hub HOST:PORT`, every spoke, with
+forwarding on the interface only) and the names in /etc/hosts, refreshed
+from `endpoints.overlay` every minute and at once on a heartbeat's
+`overlay_changed`. `maluctl estate overlay status|peers|up|down|rotate|
+refresh`; `--no-overlay` opts a host out; `maluctl gateway expose --bind
+overlay` puts the node API on the estate's network only.
 
 ## Planned
 

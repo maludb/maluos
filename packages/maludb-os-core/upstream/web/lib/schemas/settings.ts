@@ -100,6 +100,19 @@ export const mySettings = z.object({
   /** db/187: the person's enrolled MaluOS desks (Settings → Desks); a code value is never in a read. */
   desks: z.array(z.object({ id: z.number().int(), name: z.string(), presence: z.string(), last_seen_at: z.string().nullable(),
     enrolled_at: z.string().nullable(), hostname: z.string().nullable(), os: z.string().nullable(), app_version: z.string().nullable() })).default([]),
+  /** db/188: for an operator (super-admin), the estate's nodes and open alerts under Settings → Desks; null for everyone else. */
+  estate: z.object({
+    nodes: z.array(z.object({ id: z.number().int(), kind: z.string(), name: z.string(), hostname: z.string().nullable(), presence: z.string(),
+      last_seen_at: z.string().nullable(), last_report_at: z.string().nullable(), health: z.string(), summary: z.string(),
+      units: z.object({ up: z.number().int(), down: z.number().int() }), agents: z.object({ count: z.number().int(), running: z.number().int(), failed: z.number().int() }),
+      disk_max_pct: z.number().nullable(), memory_available_pct: z.number().nullable(), enrolled_at: z.string().nullable(),
+      /** db/189: the node's address on the estate's overlay network, or null. */
+      overlay: z.object({ address: z.string() }).nullable().default(null) })),
+    alerts: z.array(z.object({ id: z.number().int(), ts: z.string().nullable(), node_id: z.number().int(), node: z.string(), kind: z.string(), severity: z.string(), title: z.string() })),
+    /** db/189: the estate's overlay network: its range, the hub (null until the coordinator's host joins with --hub), the members with an address. */
+    overlay: z.object({ enabled: z.boolean(), range: z.string(), members: z.number().int(),
+      hub: z.object({ id: z.number().int(), name: z.string(), endpoint: z.string(), address: z.string() }).nullable() }).nullable().default(null),
+  }).nullable().default(null),
   section: z.enum(["profile", "notifications", "security", "tokens", "desks"]),
   timezones: z.array(z.string()),
   default_application: defaultApplication.default({ application_id: null, scope_id: null, options: [] }),

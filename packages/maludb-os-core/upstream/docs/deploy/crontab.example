@@ -17,5 +17,5 @@
 # waited on it is released (the screens sweep too; this covers the hours nobody looks)
 */10 * * * * php /var/www/bin/cron/approvals_expire.php   >> /var/log/maludb-os-cron.log 2>&1
 
-# Desk presence — every 5 minutes: a desk that missed three heartbeats is marked offline (db/187)
-*/5 * * * *  php /var/www/bin/cron/desk_presence.php     >> /var/log/maludb-os-cron.log 2>&1
+# Desk and node presence — every minute: a desk that missed three heartbeats (15 min) or a node that missed three (3 min) is marked offline (db/187, db/188)
+* * * * *  php /var/www/bin/cron/desk_presence.php     >> /var/log/maludb-os-cron.log 2>&1

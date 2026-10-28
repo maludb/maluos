@@ -1,3 +1,14 @@
+maluos-gateway (0.5.0) resolute; urgency=medium
+
+  * Phase 13 slice 1b, the overlay: `maluctl gateway expose --bind overlay`
+    puts the node API on the estate's network only. The config keeps the word;
+    the gateway resolves it to the host's overlay address (the node's or the
+    desk's enrolment) at every bind, does not listen while there is none, and
+    maluos-overlay reloads it when the interface comes up. G2's pairing recipe
+    becomes `backend add gpu-1 https://gpu-1.internal:11435 --key ...`.
+
+ -- Edward Honour <ed@maludb.org>  Wed, 28 Oct 2026 15:00:00 +0000
+
 maluos-gateway (0.4.3) resolute; urgency=medium
 
   * whoami's spend figures tolerate a ledger the gateway cannot read yet:

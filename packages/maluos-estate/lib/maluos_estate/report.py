@@ -195,6 +195,17 @@ def host():
     return h
 
 
+def overlay():
+    """The overlay service's last state (slice 1b): configured, role, address, name, the hub, the peers and their handshakes."""
+    from maluos_estate import overlay as OV
+    st = OV.read_state()
+    if not st:
+        return None
+    peers = [{"name": p.get("name"), "address": p.get("address"), "last_handshake": p.get("last_handshake")} for p in st.get("peers") or []]
+    return {"configured": bool(st.get("configured")), "role": st.get("role"), "address": st.get("address"), "name": st.get("name"),
+            "hub": (st.get("hub") or {}).get("endpoint"), "peers": peers, "names": len(st.get("names") or []), "ts": st.get("ts"), "reason": st.get("reason")}
+
+
 def report():
     """The whole report; each part guarded, the errors listed, the size bounded."""
     errors = []
@@ -213,6 +224,7 @@ def report():
     part("disk", disk)
     part("memory", memory)
     part("load", load)
+    part("overlay", overlay)
     rep["errors"] = errors
     data = json.dumps(rep)
     if len(data) > MAX_BYTES:
@@ -244,4 +256,7 @@ def summary(rep):
     lines.append(f"memory:   {m.get('available_mb')} of {m.get('total_mb')} MB available, swap used {m.get('swap_used_mb')} MB")
     if rep.get("errors"):
         lines.append("errors:   " + "; ".join(rep["errors"]))
+    o = rep.get("overlay")
+    if o:
+        lines.append(f"overlay:  {o.get('address') or '-'} {o.get('name') or ''} {o.get('role') or ''}" + (f" hub {o['hub']}" if o.get("hub") else "") + f"  {len(o.get('peers') or [])} peer(s)" if o.get("configured") else f"overlay:  not configured ({o.get('reason') or '?'})")
     return "\n".join(lines)

@@ -22,6 +22,8 @@ OFFICE_CONF = os.environ.get("MALUOS_OFFICE_CONF", "/etc/maluos/office.yaml")
 PROVISIONED = os.environ.get("MALUOS_PROVISIONED", "/var/lib/maluos/firstboot/done")
 USER = os.environ.get("MALUOS_ESTATE_USER", "maluos-estate")
 SECRET_TOKEN, SECRET_KEY = "estate-node-token", "estate-node-key"
+SECRET_OVERLAY = "estate-overlay-key"      # the WireGuard private key (slice 1b), beside the token
+OFFICE_SECRET = "office-desk-token"        # the desk's token (maluos-desk), in the owner's compartment
 KINDS = ("server", "inference")
 
 
@@ -182,7 +184,8 @@ def heartbeat(conf, tok, presence="online", report=None, timeout=20):
             body["report"] = report
         st, r = http("POST", endpoint(conf, "heartbeat"), body, token=tok, timeout=timeout)
         if st == 200:
-            res.update(ok=True, node=r.get("node"), office=r.get("office"), heartbeat_s=r.get("heartbeat_s"), report_s=r.get("report_s"))
+            res.update(ok=True, node=r.get("node"), office=r.get("office"), heartbeat_s=r.get("heartbeat_s"), report_s=r.get("report_s"),
+                       overlay_changed=bool(r.get("overlay_changed")))
         elif st in (401, 410):
             res.update(revoked=True, error=f"{st} {r.get('error') or ''}: {r.get('message') or 'the office no longer knows this node'}")
         else:
@@ -203,3 +206,19 @@ def leave(conf, tok, timeout=15):
 def nodes(url, tok, node_id=None, timeout=15):
     """GET …/nodes (or …/nodes/ID): the estate as the token's holder may see it; url is the full endpoint."""
     return http("GET", url.rstrip("/") + (f"/{node_id}" if node_id else ""), token=tok, timeout=timeout)
+
+
+def overlay(url, tok, timeout=15):
+    """GET endpoints.overlay: self, the hub, the peers, the names (slice 1b)."""
+    return http("GET", url, token=tok, timeout=timeout)
+
+
+def overlay_key(conf, tok, public_key, timeout=15):
+    """POST .../estate/overlay/key: this host's new WireGuard public key (rotation)."""
+    return http("POST", conf["url"].rstrip("/") + "/api/v1/estate/overlay/key", {"surface": SURFACE, "overlay_public_key": public_key}, token=tok, timeout=timeout)
+
+
+def overlay_hint():
+    """A heartbeat answer said overlay_changed: ask maluos-overlay to refresh now."""
+    from maluos_estate import overlay as OV
+    OV.hint()

@@ -71,6 +71,8 @@ def main(argv=None):
         res = C.heartbeat(conf, tok, "online", rep)
         if res["ok"]:
             fails = 0
+            if res.get("overlay_changed"):
+                C.overlay_hint()                  # slice 1b: the overlay service refreshes now
             if rep is not None:
                 last_report = time.time(); res["last_report_at"] = res["ts"]
             else:

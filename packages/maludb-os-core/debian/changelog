@@ -1,3 +1,17 @@
+maludb-os-core (2026.10.28maluos1) resolute; urgency=medium
+
+  * Kernel re-vendored at 6c94d29 (2026-10-28): the estate's nodes, the
+    kernel half of Phase 13 slice 1 (db/188: server and inference nodes,
+    node codes and node tokens, the five endpoints under /api/v1/estate/,
+    the report, the health rules, estate_alerts, the presence job every
+    minute, Settings -> Desks for an operator, Work Locations kinds), and
+    the overlay, the kernel half of slice 1b (db/189: estate_overlay, the
+    members' addresses and keys, /api/v1/estate/overlay, overlay/key,
+    /api/v1/desks/overlay, overlay_changed). The Apache allow-list and the
+    crontab come from the upstream deploy files as before.
+
+ -- Edward Honour <ed@maludb.org>  Wed, 28 Oct 2026 14:30:00 +0000
+
 maludb-os-core (2026.10.22maluos1) resolute; urgency=medium
 
   * Kernel re-vendored at 33c6343 (2026-10-22): desk enrolment, the kernel

@@ -18,7 +18,9 @@ export const metadata: Metadata = { title: "Work Locations" };
 /** The estate tree, top down: a building holds offices, an office holds desks. */
 const KINDS: [string, string, string][] = [["building", "Buildings", "feather-home"], ["office", "Offices", "feather-server"], ["desk", "Desks", "feather-monitor"],
   // A site is a place the business trades from, not a machine (db/141).
-  ["site", "Sites", "feather-map-pin"]];
+  ["site", "Sites", "feather-map-pin"],
+  // A node of the estate (db/188): a MaluOS server, or one that serves models.
+  ["server", "Servers", "feather-hard-drive"], ["inference", "Inference nodes", "feather-cpu"]];
 
 /**
  * Screen `locations-list` — every building, office and desk. Data: GET /locations/ (insider;
@@ -56,7 +58,7 @@ export default async function LocationsPage({
             <FilterSelect id="locations-list-filter-kind" name="kind" value={data.filters.kind}
               options={[{ value: "", label: "Any kind" }, { value: "building", label: "Building" },
                         { value: "office", label: "Office" }, { value: "desk", label: "Desk" },
-                        { value: "site", label: "Site" }]} />
+                        { value: "site", label: "Site" }, { value: "server", label: "Server" }, { value: "inference", label: "Inference node" }]} />
             <FilterCheckbox id="locations-list-filter-online" name="online" checked={data.filters.online} label="Online now" />
             <FilterCheckbox id="locations-list-filter-retired" name="status" valueOn="retired"
                             checked={data.filters.retired} label="Show retired" />

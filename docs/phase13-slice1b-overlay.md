@@ -277,3 +277,53 @@ NAME=PUBKEY`) so a hub under test has a peer to show.
 
 About the size of slice 1's host half. Two build-and-test rounds on each
 image.
+
+## Status
+
+**Both halves built 2026-10-28**, the day after the specification and the
+owner's approval of db/189:
+
+- The kernel half (maludb-os-core 6c94d29, vendored as maludb-os-core
+  2026.10.28maluos1): db/189 (`estate_overlay`, the members' keys and
+  addresses with the 30-day quarantine, a version), join and enroll taking
+  the key and `--hub`, the `overlay` block in the answers, `GET
+  /api/v1/estate/overlay` and `/api/v1/desks/overlay`, `POST
+  overlay/key`, `overlay_changed` on heartbeats, Settings → Desks showing
+  the overlay for an operator; proof `bin/test_estate_overlay.php` (48
+  checks). The kernel half of slice 1 (db/188) landed with it.
+- The host half: maluos-estate 0.2.0 (`maluos_estate.overlay`, the
+  service, the join's key, `maluctl estate overlay`, the report's
+  `overlay`, the mock's overlay contract), maluos-desk 0.5.1 (the desk's
+  key at enroll, the tunnel down at leave, the hint on `overlay_changed`),
+  maluos-gateway 0.5.0 (`expose --bind overlay`).
+- Tests: tests/desk-local-test.sh (the service in a dry run: this host as
+  the hub, a desk as its spoke, the names, rotation, the hint, down,
+  leave; 87 checks in all), tests/qcow2-boot-test.sh (both profiles: the
+  VM joins as the hub with a real `estate` interface, the mock's fake
+  spoke peered, forwarding, the names resolving, the gateway on the
+  overlay address only; the desktop's desk as the hub's spoke).
+
+Where the build departs from the text above, and why:
+
+1. **The key is made with python3-cryptography, not `wg genkey`**, so the
+   local test and a host without `wireguard-tools` at hand can still make
+   and verify keys; the private key reaches `wg` on stdin and is never
+   on disk.
+2. **The hint is a file, not a signal.** `maluos-estated` and `maluctl
+   office heartbeat` run as unprivileged users and cannot signal a root
+   service; they touch `/run/maluos/overlay/changed` (the unit's runtime
+   directory, mode 1777) and the service, which polls it every two
+   seconds, refreshes at once. SIGHUP works too.
+3. **A member that joins before any hub keeps its address** and the
+   service waits ("no hub yet") until one joins; the join answer's
+   `overlay` is null meanwhile, as specified, and the enrolment file
+   records the key was sent.
+4. **The network-namespace spoke of the boot test is not built.** The
+   hub's side is proved with a real interface and the mock's fake spoke
+   (its public key peered, its name resolving); the first real handshake
+   between two hosts waits for the three-machine proof, where the desk
+   and a server are different machines.
+5. **No Estate page or indicator change beyond the address**: the kernel's
+   node rows carry `overlay.address`, `maluctl estate nodes` and
+   `maluctl office estate` pass it through; the Network tab's rows stay
+   as G5 left them until the directory (G4) uses the names.

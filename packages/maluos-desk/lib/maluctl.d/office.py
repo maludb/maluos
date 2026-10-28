@@ -35,7 +35,7 @@ import json, os, pwd, socket, subprocess, sys, time, urllib.error, urllib.reques
 sys.path.insert(0, "/usr/lib/maluos")
 from maluos_estate.client import http as _estate_http, flat as _flat     # the shared client (maluos-estate, Phase 13 slice 1)
 
-VERSION = "0.5.0"
+VERSION = "0.5.1"
 SURFACE = 1
 CONF = os.environ.get("MALUOS_OFFICE_CONF", "/etc/maluos/office.yaml")
 ENVF = os.environ.get("MALUOS_OFFICE_ENV", "/etc/maluos/office.env")
@@ -611,13 +611,13 @@ def estate(a):
 def enroll(a):
     need_root()
     if not a or a[0].startswith("-"):
-        sys.exit("usage: maluctl office enroll URL --code CODE [--name N] [--owner LOGIN] [--no-gateway]")
+        sys.exit("usage: maluctl office enroll URL --code CODE [--name N] [--owner LOGIN] [--no-gateway] [--no-overlay]")
     url = a.pop(0).rstrip("/")
     if not url.startswith(("http://", "https://")):
         sys.exit(f"the office URL must start with http:// or https:// ({url})")
     code = opt(a, "--code") or sys.exit("--code CODE: the one-time enrolment code the office shows the person")
     name = opt(a, "--name"); owner = opt(a, "--owner") or os.environ.get("SUDO_USER")
-    no_gw = opt(a, "--no-gateway", flag=True); force = opt(a, "--force", flag=True)
+    no_gw = opt(a, "--no-gateway", flag=True); force = opt(a, "--force", flag=True); no_overlay = opt(a, "--no-overlay", flag=True)
     if not owner or owner == "root":
         sys.exit("--owner LOGIN: whose desk this is (or run sudo from that account)")
     try:
@@ -632,6 +632,12 @@ def enroll(a):
     if f"principal:  {principal}" not in who:
         sys.exit(f"{owner} is not an enrolled principal on this host (sudo maluctl principal add {principal} --kind human)")
     body = {"surface": SURFACE, "code": code, "name": name, "principal": principal, **facts()}
+    # Phase 13 slice 1b: the desk's WireGuard key, made here; the private half goes into the owner's compartment after the enrolment succeeds
+    ov_priv = ov_pub = None
+    if not no_overlay:
+        from maluos_estate import overlay as _OV
+        ov_priv, ov_pub = _OV.genkey()
+        body["overlay_public_key"] = ov_pub
     try:
         st, r = http("POST", url + "/api/v1/desks/enroll", body)
     except Exception as e:
@@ -644,9 +650,13 @@ def enroll(a):
     # 1. the token, into the owner's own compartment (as them: peer identity, their ledger rows)
     run_as(owner, ["secret", "delete", SECRET], check=False)
     run_as(owner, ["secret", "add", SECRET, "--kind", "token", "--provider", "office", "--env", "MALUOS_OFFICE_TOKEN", "--stdin"], input=token + "\n")
+    if ov_priv:
+        run_as(owner, ["secret", "delete", OVERLAY_SECRET], check=False)
+        run_as(owner, ["secret", "add", OVERLAY_SECRET, "--kind", "generic", "--provider", "estate", "--stdin"], input=ov_priv + "\n")
     conf = {"surface": r.get("surface", SURFACE), "url": url, "office": r.get("office") or {"name": None, "url": url}, "desk": desk,
             "owner": {**(r.get("owner") or {}), "login": owner, "principal": principal}, "endpoints": eps,
-            "heartbeat_s": int(r.get("heartbeat_s") or 300), "secret": SECRET, "gateway": None, "enrolled_at": utc(), "maluos_desk": VERSION}
+            "heartbeat_s": int(r.get("heartbeat_s") or 300), "secret": SECRET, "gateway": None, "enrolled_at": utc(), "maluos_desk": VERSION,
+            "overlay": (r.get("overlay") or {"role": "spoke", "address": None, "hub": None}) if ov_priv else None, "overlay_secret": OVERLAY_SECRET if ov_priv else None}
     # 2. the office's models as a rung of this desk's gateway, keyed by the token the gateway applies for the caller
     models = eps.get("models") if isinstance(eps.get("models"), dict) else None
     gw_note = "the office publishes no model endpoint to desks"
@@ -667,11 +677,27 @@ def enroll(a):
     elif no_gw:
         gw_note = "no gateway rung (--no-gateway)"
     write_conf(conf); write_env(conf)
+    if ov_priv:
+        overlay_unit("enable"); overlay_unit("restart")
     print(f"enrolled: desk '{desk.get('name')}' (#{desk.get('id')}) at {conf['office'].get('name') or url} for {principal}")
     print(f"  token:    vault {principal}/{SECRET} (the session heartbeats with it; maluctl office status)")
     print(f"  models:   {gw_note}")
     print(f"  agents:   {ENVF} names the office's endpoints; maluctl secret delegate --to agent:NAME --secret {SECRET}")
+    o = conf.get("overlay")
+    print("  overlay:  " + ("off (--no-overlay)" if o is None else (f"{o['address']} as {o.get('name')} via the hub at {(o.get('hub') or {}).get('endpoint')} (maluos-overlay.service; maluctl estate overlay status)" if o.get("address") else "a key was sent; no hub has joined the estate yet")))
     return 0
+
+
+OVERLAY_SECRET = "estate-overlay-key"       # the desk's WireGuard private key, in the owner's compartment (Phase 13 slice 1b)
+OVERLAY_UNIT = "maluos-overlay.service"
+
+
+def overlay_unit(action):
+    if os.environ.get("MALUOS_ESTATE_NO_UNIT") == "1" or not os.path.exists("/run/systemd/system"):
+        return
+    r = subprocess.run(["systemctl", action, "--quiet", OVERLAY_UNIT], capture_output=True, text=True)
+    if r.returncode != 0 and action not in ("stop", "disable"):
+        print(f"  warn: systemctl {action} {OVERLAY_UNIT}: {(r.stderr or r.stdout).strip()[-160:]}", file=sys.stderr)
 
 
 def status(a):
@@ -727,7 +753,10 @@ def heartbeat(a):
             st, r = http("POST", url, {"surface": SURFACE, "presence": presence, "app_version": f["app_version"], "mcp_surface_version": f["mcp_surface_version"],
                                        "facts": {k: f[k] for k in ("hostname", "os_release", "variant", "cpu_cores", "memory_mb", "storage_gb") if k in f}}, token=tok)
             if st == 200:
-                res.update(ok=True, desk=r.get("desk"), heartbeat_s=r.get("heartbeat_s"), office=r.get("office"))
+                res.update(ok=True, desk=r.get("desk"), heartbeat_s=r.get("heartbeat_s"), office=r.get("office"), overlay_changed=bool(r.get("overlay_changed")))
+                if r.get("overlay_changed"):
+                    from maluos_estate import overlay as _OV
+                    _OV.hint()                   # slice 1b: the overlay service refreshes now
             elif st in (401, 410):
                 res.update(revoked=True, error=f"{st} {r.get('error') or ''}: {r.get('message') or 'the office no longer knows this desk'}")
             else:
@@ -765,6 +794,18 @@ def leave(a):
             told = "told; desk retired" if st == 200 else f"answered {st} {r.get('error') or ''}: {r.get('message') or ''}".strip()
         except Exception as e:
             told = f"unreachable ({str(e)[:100]}); retire the desk from the office's Work Locations"
+    if conf.get("overlay_secret"):
+        from maluos_estate import overlay as _OV
+        overlay_unit("disable"); overlay_unit("stop")
+        try:
+            _OV.down()
+        except Exception as e:
+            print(f"  warn: overlay down: {e}", file=sys.stderr)
+        if owner and not keep:
+            try:
+                run_as(owner, ["secret", "delete", conf["overlay_secret"]])
+            except Exception as e:
+                print(f"  warn: {e}", file=sys.stderr)
     g = conf.get("gateway") or {}
     if g.get("backend"):
         for args in (["alias", "rm", g.get("alias") or "office"], ["tier", "rm", g.get("tier") or "office"], ["backend", "rm", g["backend"]]):
@@ -782,7 +823,8 @@ def leave(a):
             os.remove(p)
         except OSError:
             pass
-    print(f"left {(conf.get('office') or {}).get('name') or conf.get('url')}: the office was {told}; " + ("the gateway rung and " if g else "") + ("the token " if not keep else "") + "removed")
+    print(f"left {(conf.get('office') or {}).get('name') or conf.get('url')}: the office was {told}; " + ("the gateway rung and " if g else "") + ("the token " if not keep else "") + "removed"
+          + ("; the overlay tunnel down" if conf.get("overlay_secret") else ""))
     return 0
 
 
