@@ -1,3 +1,14 @@
+maludb-os-core (2026.10.28maluos2) resolute; urgency=medium
+
+  * Kernel re-vendored at fa6e588 (2026-10-28): the agent directory and
+    delegation, the kernel half of Phase 13 slice 2 (db/190: estate_agents,
+    estate_tasks leased to a node's long-polled inbox, estate_actions, the
+    person's estate inbox, the coordinator's key, envelope nonces; the
+    endpoints under /api/v1/estate and /api/v1/desks; Settings → Desks
+    shows the directory, the last tasks and the actions).
+
+ -- Edward Honour <ed@maludb.org>  Wed, 28 Oct 2026 23:20:00 +0000
+
 maludb-os-core (2026.10.28maluos1) resolute; urgency=medium
 
   * Kernel re-vendored at 6c94d29 (2026-10-28): the estate's nodes, the

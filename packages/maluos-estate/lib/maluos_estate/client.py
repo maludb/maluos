@@ -10,7 +10,7 @@ compartment (host:<hostname>), stored as the system user maluos-estate at `join`
 Test overrides: MALUOS_ESTATE_CONF, MALUOS_ESTATE_STATE_DIR, MALUOS_ESTATE_USER, MALUOS_ESTATE_TOKEN,
 MALUOS_OFFICE_CONF, MALUOS_PROVISIONED, MALUOS_VAULT_SOCKET.
 """
-import hashlib, json, os, shutil, socket, time, urllib.error, urllib.request
+import hashlib, json, os, shutil, socket, time, urllib.error, urllib.parse, urllib.request
 
 from . import VERSION
 
@@ -173,8 +173,9 @@ def endpoint(conf, name):
     return (conf.get("endpoints") or {}).get(name) or conf["url"].rstrip("/") + f"/api/v1/estate/{name}"
 
 
-def heartbeat(conf, tok, presence="online", report=None, timeout=20):
-    """One heartbeat: presence, facts and (when given) the report. The outcome in the shape state.json keeps."""
+def heartbeat(conf, tok, presence="online", report=None, timeout=20, agents=None):
+    """One heartbeat: presence, facts, (when given) the report and (slice 2) the agents this node registers.
+    The outcome in the shape state.json keeps."""
     res = {"ts": utc(), "ok": False, "presence": presence, "revoked": False, "error": None, "node": None, "report_sent": report is not None}
     try:
         f = facts()
@@ -182,10 +183,12 @@ def heartbeat(conf, tok, presence="online", report=None, timeout=20):
                 "facts": {k: f[k] for k in ("hostname", "os_release", "variant", "cpu_cores", "memory_mb", "storage_gb") if k in f}}
         if report is not None:
             body["report"] = report
+        if agents is not None:
+            body["agents"] = agents
         st, r = http("POST", endpoint(conf, "heartbeat"), body, token=tok, timeout=timeout)
         if st == 200:
             res.update(ok=True, node=r.get("node"), office=r.get("office"), heartbeat_s=r.get("heartbeat_s"), report_s=r.get("report_s"),
-                       overlay_changed=bool(r.get("overlay_changed")))
+                       overlay_changed=bool(r.get("overlay_changed")), agents_registered=r.get("agents_registered"))
         elif st in (401, 410):
             res.update(revoked=True, error=f"{st} {r.get('error') or ''}: {r.get('message') or 'the office no longer knows this node'}")
         else:
@@ -222,3 +225,85 @@ def overlay_hint():
     """A heartbeat answer said overlay_changed: ask maluos-overlay to refresh now."""
     from maluos_estate import overlay as OV
     OV.hint()
+
+
+# -- Phase 13 slice 2: the directory, the keys, this node's inbox, tasks and actions (docs/phase13-slice2-delegation.md)
+AGENTS_DIR = os.environ.get("MALUOS_AGENTS_DIR", "/etc/maluos/agents")
+AGENTS_HINT = os.environ.get("MALUOS_AGENTS_HINT", "/run/maluos/estate/agents-changed")
+KEYS_CACHE = os.environ.get("MALUOS_ESTATE_KEYS", "/run/maluos/estate/keys.json")
+DEFAULT_ACTIONS = ["restart_agent", "start_agent", "stop_agent", "apply_updates"]      # reboot is off unless the node's owner allows it
+
+
+def manifests():
+    """The agents this node registers: /etc/maluos/agents/*.manifest.yaml (written by maluctl agent create)."""
+    out = []
+    try:
+        names = sorted(f[:-14] for f in os.listdir(AGENTS_DIR) if f.endswith(".manifest.yaml"))
+    except OSError:
+        return out
+    for n in names:
+        try:
+            import yaml
+            with open(f"{AGENTS_DIR}/{n}.manifest.yaml") as fh:
+                m = yaml.safe_load(fh) or {}
+        except Exception:
+            continue
+        if not isinstance(m, dict) or not m.get("name"):
+            continue
+        out.append({k: m.get(k) for k in ("name", "display", "description", "capabilities", "owner", "accept_from", "max_classification", "approve", "tasks", "personal") if m.get(k) is not None})
+    return out
+
+
+def agents_hint_take():
+    """True once when `maluctl agent create|remove|policy` touched the hint since the last take."""
+    try:
+        os.remove(AGENTS_HINT)
+        return True
+    except OSError:
+        return False
+
+
+def register_agents(conf, tok, agents, timeout=15):
+    return http("POST", endpoint(conf, "agents"), {"surface": SURFACE, "agents": agents}, token=tok, timeout=timeout)
+
+
+def keys(conf_or_url, tok, timeout=15):
+    """GET endpoints.keys: every member's public key and the coordinator's."""
+    url = conf_or_url if isinstance(conf_or_url, str) else endpoint(conf_or_url, "keys")
+    return http("GET", url, token=tok, timeout=timeout)
+
+
+def agents(conf_or_url, tok, capability=None, node=None, timeout=15):
+    """GET endpoints.agents: the directory (a node or a desk token)."""
+    url = conf_or_url if isinstance(conf_or_url, str) else endpoint(conf_or_url, "agents")
+    q = {}
+    if capability:
+        q["capability"] = capability
+    if node:
+        q["node"] = node
+    return http("GET", url + ("?" + urllib.parse.urlencode(q) if q else ""), token=tok, timeout=timeout)
+
+
+def inbox(conf, tok, wait=25, timeout=None):
+    """GET endpoints.inbox?wait=N: the tasks and actions queued for this node, leased."""
+    return http("GET", endpoint(conf, "inbox") + f"?wait={int(wait)}", token=tok, timeout=timeout or (int(wait) + 15))
+
+
+def inbox_result(conf, tok, item_id, body, timeout=15):
+    """POST endpoints.inbox/ID/result: a task record or an action's outcome, or {"refused": reason}."""
+    return http("POST", endpoint(conf, "inbox").rstrip("/") + f"/{item_id}/result", body, token=tok, timeout=timeout)
+
+
+def task(conf_or_url, tok, task_id, wait=None, timeout=15):
+    url = conf_or_url if isinstance(conf_or_url, str) else endpoint(conf_or_url, "tasks")
+    return http("GET", url.rstrip("/") + f"/{task_id}" + (f"?wait={int(wait)}" if wait else ""), token=tok, timeout=(timeout + int(wait)) if wait else timeout)
+
+
+def actions(conf_or_url, tok, action_id=None, timeout=15):
+    url = conf_or_url if isinstance(conf_or_url, str) else endpoint(conf_or_url, "actions")
+    return http("GET", url.rstrip("/") + (f"/{action_id}" if action_id else ""), token=tok, timeout=timeout)
+
+
+def allowed_actions(conf):
+    a = (conf.get("actions") or {}).get("allow")
+    return list(a) if isinstance(a, list) else list(DEFAULT_ACTIONS)

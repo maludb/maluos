@@ -188,8 +188,22 @@ updates, disk, memory, load), `offline` on a clean stop. `maluctl estate
 status|report|nodes|leave`; a desk's node record is its desk row (`--kind
 desk` runs `maluctl office enroll`). The package also carries the shared
 estate client `maluctl office` uses and the mock office the tests run,
-which stands in for the kernel's estate endpoints (db/188 and db/189,
-built 2026-10-28) in the image tests.
+which stands in for the kernel's estate endpoints (db/188, db/189 and
+db/190, built 2026-10-28) in the image tests.
+
+Delegation (slice 2, docs/phase13-slice2-delegation.md): the package
+carries the envelope module (`maluos_estate.envelope`: a signed JSON
+object naming the originator, the sender, the chain, the target and the
+authority; ed25519 with the node's key or the desk's); maluos-estated
+registers the node's agents (`/etc/maluos/agents/*.manifest.yaml`, written
+by `maluctl agent create`) in the office's directory, caches the members'
+public keys in `/run/maluos/estate/keys.json`, long-polls the node's inbox
+at the office and runs each task through the agent's socket with its
+envelope (maluos-agent verifies it and applies the agent's own policy),
+posting the result with its provenance back; an operator's action
+(`restart_agent`, `start_agent`, `stop_agent`, `apply_updates`; `reboot`
+when allowed) runs under a polkit rule. `maluctl estate
+agents|tasks|keys|inbox|actions`.
 
 The overlay (slice 1b, docs/phase13-slice1b-overlay.md): the join makes
 the host's WireGuard key (the private half in the vault as

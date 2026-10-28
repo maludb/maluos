@@ -10,7 +10,7 @@ Rules-Requires-Root: no
 Package: maluos-agents
 Architecture: all
 Depends: ${misc:Depends}, python3 (>= 3.12), python3-gi, gir1.2-glib-2.0, gir1.2-gtk-4.0, gir1.2-adw-1, gir1.2-webkit-6.0, desktop-file-utils, xdg-user-dirs, maluos-desktop-session (>= 0.7.0), maluos-agent (>= 0.4.0), maluos-vault (>= 0.4.0)
-Recommends: maluos-desk (>= 0.4.0), xdg-terminal-exec
+Recommends: maluos-desk (>= 0.6.0), xdg-terminal-exec
 Description: MaluOS Agents app: talk to and control local and office agents
  One window for every agent the person can use: the agents on this desk
  (theirs first) and, on a desk enrolled with a Business OS office, the

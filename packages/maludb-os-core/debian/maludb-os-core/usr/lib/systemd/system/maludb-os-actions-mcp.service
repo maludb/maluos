@@ -1,0 +1,19 @@
+[Unit]
+Description=MaluDB OS — actions MCP server (localhost:8813, assistant-only)
+After=network.target postgresql.service apache2.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/mcp
+ExecStart=/var/www/mcp/venv/bin/python /var/www/mcp/actions_server.py
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

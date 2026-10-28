@@ -1,0 +1,8 @@
+[Unit]
+Description=MaluOS estate: apply pending software updates (a system manager's remote action)
+Documentation=https://github.com/maludb/maluos
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/maluctl update apply
+TimeoutStartSec=900

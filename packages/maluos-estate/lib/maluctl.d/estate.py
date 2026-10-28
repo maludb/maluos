@@ -6,7 +6,7 @@ compartment (host:<hostname>), stored as the system user maluos-estate; maluos-e
 facts and, every report_s, the report (units, agents, the gateway, vault alerts, updates, disk, memory, load).
 A desk does not enrol twice: its desk row is its node record.
 
-  sudo maluctl estate join URL --code CODE [--name NAME] [--kind server|inference|desk] [--hub HOST:PORT] [--no-overlay] [--force]
+  sudo maluctl estate join URL --code CODE [--name NAME] [--kind server|inference|desk] [--hub HOST:PORT] [--no-overlay] [--allow-actions a,b] [--force]
                                             --kind desk runs `maluctl office enroll` (the desk's enrolment is its node record)
                                             --hub: this host is the estate's hub (the coordinator's own host; one UDP port forwarded to it)
   maluctl estate status [--json]            the enrolment and the last heartbeat; on a desk, its desk enrolment
@@ -16,9 +16,15 @@ A desk does not enrol twice: its desk row is its node record.
   maluctl estate overlay status|peers [--json]   the estate's network on this host (slice 1b): the interface, the hub, the peers
   sudo maluctl estate overlay up|down|rotate|refresh   by hand (join and leave do it); rotate makes a new key
   sudo maluctl estate leave                 retire the node: the office is told, the units stopped, the secrets removed
+  maluctl estate agents [--capability X] [--json]   the estate's agent directory (Phase 13 slice 2), as this node may see it
+  maluctl estate tasks ID [--json]          a task's record with its provenance
+  maluctl estate keys [--json]              the members' public keys (the daemon caches them in /run/maluos/estate/keys.json)
+  maluctl estate inbox [--json]             the daemon's inbox loop: polls, items, the last error
+  sudo maluctl estate actions [allow a,b,…] what an operator may do to this node remotely (restart_agent, start_agent,
+                                            stop_agent, apply_updates; reboot is off unless allowed here)
 
 Files: /etc/maluos/estate.yaml (no secret), /var/lib/maluos/estate/state.json (the daemon's last outcome),
-/var/lib/maluos/overlay/state.json (the overlay service's).
+/var/lib/maluos/overlay/state.json (the overlay service's), /run/maluos/estate/keys.json (the directory's keys).
 """
 import json, os, pwd, re, socket, subprocess, sys, tempfile, time
 
@@ -145,6 +151,10 @@ def join(a):
     changed = map_identity(VAULT_CONF, C.USER, principal)
     if map_identity(GATEWAY_CONF, C.USER, principal) or changed:
         gateway_reload()
+    allow_actions = [x for x in (opt(a, "--allow-actions") or ",".join(C.DEFAULT_ACTIONS)).split(",") if x]
+    for x in allow_actions:
+        if x not in ("restart_agent", "start_agent", "stop_agent", "apply_updates", "reboot"):
+            sys.exit(f"--allow-actions {x}: restart_agent, start_agent, stop_agent, apply_updates or reboot")
     # 2. the node key: ed25519, made here, the private half straight into the vault as the node, never on disk after
     with tempfile.TemporaryDirectory(prefix="maluos-estate-") as d:
         kp = os.path.join(d, "key")
@@ -190,7 +200,7 @@ def join(a):
             "enrolled_by": r.get("enrolled_by") or {}, "endpoints": eps, "heartbeat_s": int(r.get("heartbeat_s") or 60), "report_s": int(r.get("report_s") or 300),
             "principal": principal, "user": C.USER, "secrets": secrets, "public_key": pub,
             "overlay": (r.get("overlay") if ov_priv else None) if r.get("overlay") or not ov_priv else {"pending": True, "role": "hub" if hub else "spoke"},
-            "joined_at": C.utc(), "maluos_estate": VERSION}
+            "actions": {"allow": allow_actions}, "joined_at": C.utc(), "maluos_estate": VERSION}
     if ov_priv and not r.get("overlay"):
         conf["overlay"] = {"role": "hub" if hub else "spoke", "address": None, "hub": None}      # a key sent, no hub yet: the service waits
     C.write_conf(conf)
@@ -207,6 +217,7 @@ def join(a):
     print(f"  reports:  every {conf['report_s']} s with the heartbeat (every {conf['heartbeat_s']} s): {UNIT}; maluctl estate report shows one")
     print(f"  estate:   maluctl estate nodes")
     print("  overlay:  " + overlay_line(conf))
+    print(f"  actions:  an operator may {', '.join(allow_actions) or 'do nothing'} here remotely (maluctl estate actions allow …)")
     return 0
 
 
@@ -262,6 +273,9 @@ def status(a):
     else:
         print("last:       no heartbeat yet")
     print("overlay:    " + overlay_line(conf))
+    ib = (hb or {}).get("inbox") or {}
+    print(f"inbox:      {ib.get('polls', 0)} polls, {ib.get('items', 0)} items" + (f", last item {ib['last_item_at']}" if ib.get("last_item_at") else "") + (f"  ({ib['error']})" if ib.get("error") else "")
+          + f"; actions allowed: {', '.join(C.allowed_actions(conf)) or 'none'}")
     return 0
 
 
@@ -284,7 +298,7 @@ def heartbeat(a):
         tok = C.token(conf)
     except Exception as e:
         sys.exit(f"the node token is not readable from the vault as {pwd.getpwuid(os.getuid()).pw_name}: {str(e)[:160]}")
-    res = C.heartbeat(conf, tok, presence, rep)
+    res = C.heartbeat(conf, tok, presence, rep, agents=C.manifests() if (with_report or opt(a, "--agents", flag=True)) else None)
     if res.get("overlay_changed"):
         C.overlay_hint()                      # slice 1b: the overlay service refreshes now
     if as_json:
@@ -455,6 +469,100 @@ def overlay_cmd(a):
     sys.exit(f"maluctl estate overlay: status|peers|up|down|rotate|refresh (not {sub!r})")
 
 
+def _viewer():
+    """(url-or-conf, token) for the directory: this node's token, or on a desk the owner's desk token."""
+    conf = C.read_conf()
+    if conf:
+        return conf, C.token(conf)
+    desk = C.desk_conf()
+    if not desk:
+        sys.exit("not joined (no /etc/maluos/estate.yaml) and not an enrolled desk (no /etc/maluos/office.yaml)")
+    tok = os.environ.get("MALUOS_OFFICE_TOKEN")
+    if not tok:
+        from maluos_vault_client import Vault
+        tok = Vault(os.environ.get("MALUOS_VAULT_SOCKET")).value(C.OFFICE_SECRET, "read", purpose="estate directory")["value"]
+    return desk, tok
+
+
+def agents_cmd(a):
+    as_json = opt(a, "--json", flag=True); cap = opt(a, "--capability")
+    conf, tok = _viewer()
+    eps = conf.get("endpoints") or {}
+    url = eps.get("agents") if "node" in conf else (conf["url"].rstrip("/") + "/api/v1/estate/agents")
+    st, r = C.agents(url, tok, capability=cap)
+    if st != 200:
+        sys.exit(f"the office answered {st} {r.get('error') or ''}: {r.get('message') or ''}")
+    rows = r.get("agents") or []
+    if as_json:
+        print(json.dumps(rows, indent=1)); return 0
+    if not rows:
+        print("no agents in the directory" + (f" with capability {cap}" if cap else "")); return 0
+    for x in rows:
+        n = x.get("node") or {}
+        print(f"  {x.get('name'):<16} {n.get('name') or n.get('ref') or '':<18} {x.get('presence') or '':<8} {', '.join(x.get('capabilities') or []) or '-':<28} "
+              f"accepts {', '.join(x.get('accept_from') or []) or 'its owner only'}" + (f"; ceiling {x['max_classification']}" if x.get("max_classification") else ""))
+    return 0
+
+
+def tasks_cmd(a):
+    as_json = opt(a, "--json", flag=True)
+    tid = a.pop(0) if a and not a[0].startswith("--") else sys.exit("tasks ID")
+    conf, tok = _viewer()
+    url = (conf.get("endpoints") or {}).get("tasks") if "node" in conf else (conf["url"].rstrip("/") + "/api/v1/estate/tasks")
+    st, r = C.task(url, tok, tid)
+    if st != 200:
+        sys.exit(f"the office answered {st} {r.get('error') or ''}: {r.get('message') or ''}")
+    t = r.get("task") or {}
+    if as_json:
+        print(json.dumps(t, indent=1)); return 0
+    p = t.get("provenance") or {}
+    print(f"task {t.get('id')}: {t.get('state')}  agent {(t.get('agent') or {}).get('name')} on {t.get('node')}  from {t.get('originator')} via {(t.get('sender') or {}).get('principal')}")
+    print(f"  input:  {(t.get('input') or {}).get('text', '')[:120]}")
+    print(f"  output: {((t.get('output') or {}).get('text') or t.get('error') or '')[:200]}")
+    if p:
+        print(f"  provenance: envelope {p.get('envelope')}; chain {' > '.join(h.get('principal') or '?' for h in p.get('chain') or [])}; {len(p.get('models') or [])} model call(s)")
+    return 0
+
+
+def keys_cmd(a):
+    as_json = opt(a, "--json", flag=True)
+    conf, tok = _viewer()
+    url = (conf.get("endpoints") or {}).get("keys") or (conf["url"].rstrip("/") + "/api/v1/estate/keys")
+    st, r = C.keys(url, tok)
+    if st != 200:
+        sys.exit(f"the office answered {st} {r.get('error') or ''}: {r.get('message') or ''}")
+    if as_json:
+        print(json.dumps(r, indent=1)); return 0
+    print(f"coordinator  {(r.get('coordinator') or {}).get('public_key', '')[:60]}…")
+    for k in r.get("keys") or []:
+        print(f"  {k.get('node'):<14} {k.get('name') or '':<20} {k.get('presence') or '':<8} {k.get('public_key', '')[:50]}…")
+    return 0
+
+
+def inbox_cmd(a):
+    hb = C.read_state() or {}
+    ib = hb.get("inbox") or {}
+    if opt(a, "--json", flag=True):
+        print(json.dumps(ib, indent=1)); return 0
+    if not ib:
+        print("no inbox figures yet (the daemon reports them with each heartbeat)"); return 1
+    print(f"polls {ib.get('polls', 0)}, items {ib.get('items', 0)}, last poll {ib.get('last_poll_at') or '-'}, last item {ib.get('last_item_at') or '-'}, keys {ib.get('keys_at') or '-'}" + (f"\nerror: {ib['error']}" if ib.get("error") else ""))
+    return 0
+
+
+def actions_cmd(a):
+    conf = C.read_conf() or sys.exit(f"not joined (no {C.CONF})")
+    if a and a[0] == "allow":
+        need_root(); a.pop(0)
+        allow = [x for x in (a.pop(0) if a else "").split(",") if x]
+        for x in allow:
+            if x not in ("restart_agent", "start_agent", "stop_agent", "apply_updates", "reboot"):
+                sys.exit(f"{x}: restart_agent, start_agent, stop_agent, apply_updates or reboot")
+        conf["actions"] = {"allow": allow}; C.write_conf(conf)
+    print(f"an operator may {', '.join(C.allowed_actions(conf)) or 'do nothing'} on this node remotely")
+    return 0
+
+
 def main(a):
     if not a or a[0] in ("-h", "--help", "help"):
         print(__doc__); return 0
@@ -474,6 +582,16 @@ def main(a):
             return leave(a)
         if cmd == "overlay":
             return overlay_cmd(a)
+        if cmd == "agents":
+            return agents_cmd(a)
+        if cmd == "tasks":
+            return tasks_cmd(a)
+        if cmd == "keys":
+            return keys_cmd(a)
+        if cmd == "inbox":
+            return inbox_cmd(a)
+        if cmd == "actions":
+            return actions_cmd(a)
     except RuntimeError as e:
         sys.exit(f"maluctl estate {cmd}: {e}")
     print(__doc__); return 2

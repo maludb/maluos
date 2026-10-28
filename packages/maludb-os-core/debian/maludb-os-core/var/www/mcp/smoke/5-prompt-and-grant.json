@@ -1,0 +1,70 @@
+[
+ {
+  "tool": "system_prompt_save",
+  "save": {
+   "sp": "record_id"
+  },
+  "args": {
+   "prompt_key": "smoke_fix_{{code}}",
+   "name": "SMOKE {{run}} Fix Prompt",
+   "system_prompt": "You are a smoke test.",
+   "description": "Smoke"
+  }
+ },
+ {
+  "lookup": {
+   "sp": "SELECT id FROM system_prompts WHERE name = 'SMOKE {{run}} Fix Prompt'"
+  }
+ },
+ {
+  "tool": "system_prompt_version_create",
+  "args": {
+   "system_prompt": "{{sp}}",
+   "body": "You are a smoke test, v2.",
+   "change_note": "smoke"
+  }
+ },
+ {
+  "tool": "system_prompt_archive",
+  "args": {
+   "system_prompt": "{{sp}}",
+   "archived": "1",
+   "confirmed": true
+  }
+ },
+ {
+  "lookup": {
+   "app": "SELECT id FROM applications WHERE name LIKE 'SMOKE % App' ORDER BY id DESC LIMIT 1"
+  }
+ },
+ {
+  "tool": "application_access_grant",
+  "args": {
+   "application": "{{app}}",
+   "member": "Sam Okafor",
+   "capability": "read"
+  }
+ },
+ {
+  "tool": "application_access_grant",
+  "expect": "error",
+  "args": {
+   "application": "{{app}}",
+   "member": "Sam Okafor",
+   "capability": "read"
+  }
+ },
+ {
+  "lookup": {
+   "acc": "SELECT id FROM application_access WHERE application_id = {{app}} AND revoked_at IS NULL ORDER BY id DESC LIMIT 1"
+  }
+ },
+ {
+  "tool": "application_access_revoke",
+  "args": {
+   "application": "{{app}}",
+   "application_access": "{{acc}}",
+   "confirmed": true
+  }
+ }
+]

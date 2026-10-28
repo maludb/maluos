@@ -1,3 +1,17 @@
+maluos-desk (0.6.0) resolute; urgency=medium
+
+  * Phase 13 slice 2, delegation (docs/phase13-slice2-delegation.md): the
+    desk's ed25519 signing key, made at enrol (office-desk-key in the
+    owner's compartment, the public half registered with the office; sudo
+    maluctl office key for a desk enrolled before); maluctl office agent ID
+    send puts the desk's signed envelope on a task to an estate agent and
+    prints the answer's provenance; maluctl office agents lists the
+    directory (node, capabilities, accept policy); maluctl office inbox
+    (list, decide, reply, read) with the desk's envelope on answers;
+    maluctl office estate action NODE ACTION [AGENT] for an operator.
+
+ -- Edward Honour <ed@maludb.org>  Wed, 28 Oct 2026 22:50:00 +0000
+
 maluos-desk (0.5.1) resolute; urgency=medium
 
   * Phase 13 slice 1b, the overlay (docs/phase13-slice1b-overlay.md): `maluctl

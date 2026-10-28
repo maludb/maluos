@@ -1,0 +1,11 @@
+[
+ {"tool": "skill_save", "args": {"name": "Smoke_{{code}}", "description": "SMOKE {{run}}", "body": "# SMOKE"}, "expect": "error"},
+ {"tool": "skill_save", "args": {"name": "smoke-{{code}}-library", "description": "SMOKE {{run}} — a skill written from the library screen.", "body": "# SMOKE\n\nVersion one."}},
+ {"tool": "skill_save", "args": {"name": "smoke-{{code}}-library", "description": "SMOKE {{run}} — a skill written from the library screen.", "body": "# SMOKE\n\nVersion two."}},
+ {"tool": "skill_save", "args": {"name": "smoke-{{code}}-library", "description": "SMOKE {{run}} — a skill written from the library screen.", "body": "# SMOKE\n\nVersion two."}},
+ {"shell": "php -r 'require \"app/bootstrap.php\"; require \"app/features/skills/library.php\"; $_SESSION[\"member_id\"]=1; $s = skill_library_get(db(), \"smoke-{{code}}-library\"); echo $s[\"chosen\"][\"id\"], \"\\n\";'", "as": "www-data", "save": "v2id"},
+ {"shell": "php -r 'require \"app/bootstrap.php\"; require \"app/features/skills/library.php\"; $_SESSION[\"member_id\"]=1; $s = skill_library_get(db(), \"smoke-{{code}}-library\"); echo count($s[\"versions\"]), \"|\", str_replace(\"\\n\", \" \", trim(skill_markdown_body($s[\"markdown\"]))), \"\\n\";'", "as": "www-data", "save": "two"},
+ {"tool": "skill_set_enabled", "args": {"name": "smoke-{{code}}-library", "skill": "{{v2id}}", "enabled": "0"}},
+ {"shell": "php -r 'require \"app/bootstrap.php\"; require \"app/features/skills/library.php\"; $_SESSION[\"member_id\"]=1; $s = skill_library_get(db(), \"smoke-{{code}}-library\"); echo str_replace(\"\\n\", \" \", trim(skill_markdown_body($s[\"markdown\"]))), \"\\n\";'", "as": "www-data", "save": "fallback"},
+ {"lookup": {"ok": "SELECT 'yes' WHERE '{{two}}' = '2|# SMOKE  Version two.' AND '{{fallback}}' = '# SMOKE  Version one.'"}}
+]

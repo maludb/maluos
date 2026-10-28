@@ -1,0 +1,18 @@
+[
+ {"lookup": {
+   "app": "SELECT id FROM applications WHERE name LIKE 'SMOKE % Scoped Reservations' AND status = 'active' ORDER BY id DESC LIMIT 1",
+   "ap": "SELECT l.id FROM locations l JOIN application_scopes s ON s.location_id = l.id WHERE l.name LIKE 'SMOKE % Airport' AND s.removed_at IS NULL ORDER BY l.id DESC LIMIT 1"
+ }},
+ {"lookup": {
+   "sap": "SELECT id FROM application_scopes WHERE application_id = {{app}} AND location_id = {{ap}} AND removed_at IS NULL",
+   "pgrant": "SELECT id FROM application_access WHERE application_id = {{app}} AND member_id = 26 AND revoked_at IS NULL"
+ }},
+ {"tool": "application_access_revoke", "args": {"application": "{{app}}", "application_access": "{{pgrant}}", "confirmed": true}},
+ {"tool": "location_remove_resident", "args": {"location": "{{ap}}", "member": "6"}},
+ {"tool": "application_scope_remove", "args": {"application": "{{app}}", "scope": "{{sap}}", "confirmed": true}},
+ {"tool": "application_scope_remove", "expect": "error", "args": {"application": "{{app}}", "scope": "{{sap}}", "confirmed": true}},
+ {"lookup": {
+   "revoked": "SELECT 'yes' WHERE NOT EXISTS (SELECT 1 FROM application_access WHERE scope_id = {{sap}} AND revoked_at IS NULL)",
+   "logged": "SELECT 'yes' FROM activity_log WHERE action = 'application_scope.remove' AND entity_id = {{app}} AND (after->>'grants_revoked')::int = 1"
+ }}
+]

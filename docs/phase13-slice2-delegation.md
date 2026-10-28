@@ -368,3 +368,75 @@ after this slice on real machines, without the inference server's part.
 | the kernel half | L | separate repository, owner's approval first |
 
 Larger than slice 1; three build-and-test rounds on the desktop image.
+
+## Status
+
+**Both halves built 2026-10-28**, the day the overlay (slice 1b) was
+boot-tested; the kernel half awaits the owner's approval of db/190 before
+it is pushed, the host half is built against the mock and the local kernel:
+
+- The kernel half (maludb-os-core fa6e588, vendored as maludb-os-core
+  2026.10.28maluos2; `docs/build-specs/estate-delegation.md` there): db/190
+  (`estate_agents`, `estate_tasks` leased to a node's long-polled inbox,
+  `estate_actions`, `estate_inbox`, the coordinator's ed25519 key,
+  `estate_nonces`); the envelope verified in PHP (libsodium) against
+  `locations.public_key` with the signer bound to the caller's token;
+  the endpoints of the contract table; desks register a key at enrol or
+  with `POST /api/v1/desks/key`; Settings → Desks shows the directory, the
+  last tasks and the actions; proof `bin/test_estate_delegation.php` (86
+  checks; it also proves the PHP and Python canonical forms agree byte
+  for byte).
+- The host half: maluos-estate 0.3.0 (`maluos_estate.envelope`; the daemon
+  registers the manifests, caches the keys in
+  `/run/maluos/estate/keys.json`, long-polls the inbox and runs tasks
+  through the agent's socket, runs the allowed actions under a polkit
+  rule; `maluctl estate agents|tasks|keys|inbox|actions`; the mock office
+  serves the whole contract and verifies envelopes), maluos-agent 0.5.0
+  (the task server verifies the envelope and applies the policy, parks for
+  approval, carries provenance and usage; `create --capability
+  --accept-from --max-classification --approve --personal`; `maluctl agent
+  policy`; the personal agent's body), maluos-desk 0.6.0 (the desk key,
+  `office agent send` with the envelope, `office inbox`, `office estate
+  action`), maluos-session 0.10.0 (the inbox thread and its notifications,
+  `TaskDecide`/`TaskReply`), maluos-agents 0.3.0 (the directory, the
+  provenance line, the Policy page, "Make my personal agent", the Inbox
+  page), maluos-gateway 0.5.2 (the envelope on the ledger row, `usage
+  --envelope`).
+- Tests: tests/envelope-test.py (the module alone), tests/desk-local-test.sh
+  (a real end-to-end run against the mock: the daemon's inbox loop, a fake
+  agent on a socket, every refusal, the approval through the inbox, an
+  action; 117 checks in all), tests/qcow2-boot-test.sh (both profiles: the
+  eight steps of the test plan above, the real demo agent answering
+  through the gateway, the ledger row with the envelope).
+
+Where the build departs from the text above, and why:
+
+1. **The migration is db/190** — db/189 became the overlay.
+2. **The person's inbox is a table of its own (`estate_inbox`), not
+   `agent_messages`**: db/155's tree rule lets only a person's own assistant
+   write to them, and an agent on a node is not a member until Agent HR
+   hires it (`estate_agents.agent_member_id` links the two then).
+3. **The coordinator's own agents are listed with `tasks: false`**;
+   running a kernel agent's turn from an estate task is the chat endpoint's
+   and waits for slice 5's work queue.
+4. **An approval goes to the task's originator** when their desk sent it,
+   else to the node's operator: a node agent's owner is a Linux login the
+   kernel cannot map until the agent is hired. One waiting state
+   (`pending_approval`) serves approvals and questions; `ask.kind` says
+   which.
+5. **The approve list admits what the ceiling alone would refuse**: a task
+   above `max_classification` whose classification (or originator) is in
+   `approve` parks for the owner instead of being refused, so an owner can
+   let a restricted task through by hand.
+6. **No ledger row on the node for a refusal**: the vault's ledger has no
+   write door for an agent; refusals are in the agent's journal and the
+   office records them on the task. The model calls of an accepted task are
+   ledgered with the envelope id.
+7. **Node-side `dept:N` rules** match only when the originator carries
+   `departments`; the kernel applies them at capability resolution, the
+   node cannot look up a membership.
+8. **`actions.allow`** defaults to the four agent and update actions;
+   `reboot` is off until `maluctl estate actions allow …` (or `join
+   --allow-actions`) names it. `apply_updates` starts
+   `maluos-estate-updates.service` (a oneshot running `maluctl update
+   apply`).

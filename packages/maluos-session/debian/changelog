@@ -1,3 +1,15 @@
+maluos-session (0.10.0) resolute; urgency=medium
+
+  * Phase 13 slice 2, delegation (docs/phase13-slice2-delegation.md): the
+    person's estate inbox is long-polled while the desk is online; a
+    question or a decision from an agent anywhere in the estate is a
+    notification with actions (Approve / Deny, Answer…), a result or a
+    note a plain one; TaskDecide and TaskReply on the bus; office.inbox in
+    the state (unread, the last ten); a desk enrolled before slice 2 is
+    told to make its signing key (sudo maluctl office key).
+
+ -- Edward Honour <ed@maludb.org>  Wed, 28 Oct 2026 23:05:00 +0000
+
 maluos-session (0.9.0) resolute; urgency=medium
 
   * Phase 13 slice 1 (docs/phase13-slice1-nodes.md): office.estate in the

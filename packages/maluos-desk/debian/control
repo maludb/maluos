@@ -9,8 +9,8 @@ Rules-Requires-Root: no
 
 Package: maluos-desk
 Architecture: all
-Depends: ${misc:Depends}, python3 (>= 3.12), python3-yaml, maluos-firstboot (>= 0.1.7), maluos-vault (>= 0.4.0), maluos-estate (>= 0.2.0)
-Recommends: maluos-gateway (>= 0.3.4), maluos-agent (>= 0.4.0)
+Depends: ${misc:Depends}, python3 (>= 3.12), python3-yaml, maluos-firstboot (>= 0.1.7), maluos-vault (>= 0.4.0), maluos-estate (>= 0.3.0)
+Recommends: maluos-gateway (>= 0.5.2), maluos-agent (>= 0.5.0)
 Description: MaluOS desk enrolment with a Business OS office: maluctl office
  A MaluOS desktop joins a Business OS office as a desk, a location in the
  office's estate that belongs to the person at the keyboard. `sudo maluctl

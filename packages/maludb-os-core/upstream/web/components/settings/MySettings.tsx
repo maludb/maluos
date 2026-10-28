@@ -393,6 +393,7 @@ function Estate({ estate, timeZone }: { estate: NonNullable<Data["estate"]>; tim
           </tbody>
         </table>
       </div>
+      {estate.delegation && <Delegation d={estate.delegation} timeZone={timeZone} />}
       {estate.alerts.length > 0 && (
         <>
           <h6 className="fw-bold">Open alerts</h6>
@@ -401,6 +402,80 @@ function Estate({ estate, timeZone }: { estate: NonNullable<Data["estate"]>; tim
               <li key={a.id} className="mb-1">
                 <span className={`badge ${a.severity === "critical" ? "bg-danger" : "bg-warning text-dark"} me-2`}>{a.severity}</span>
                 <strong>{a.node}</strong>: {a.title} <small className="text-muted">{a.ts ? `since ${formatDate(a.ts, timeZone)}` : ""}</small>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * db/190, Phase 13 slice 2 (maluos docs/phase13-slice2-delegation.md): the estate's agent directory (what every node
+ * registered, by capability and accept policy), the last tasks sent across the estate with their provenance, and the
+ * actions a system manager ran on remote nodes. The Agents app on a desk is the working surface; this is the record.
+ */
+function Delegation({ d, timeZone }: { d: NonNullable<NonNullable<Data["estate"]>["delegation"]>; timeZone: string }) {
+  const state = (s: string) => s === "completed" ? <span className="badge bg-success">completed</span>
+    : s === "queued" || s === "running" ? <span className="badge bg-info text-dark">{s}</span>
+    : s === "pending_approval" ? <span className="badge bg-warning text-dark">waiting for a person</span>
+    : <span className="badge bg-danger">{s}</span>;
+  return (
+    <div className="mb-3" id="settings-estate-delegation">
+      <h6 className="fw-bold">Agents across the estate</h6>
+      <p className="text-muted small">Every node registers its agents by what they can do; a task sent to one carries a signed envelope, and the node that hosts the agent decides on its own whether to accept it. The coordinator signs as <code>{d.coordinator_key.split(" ").slice(0, 2).join(" ").slice(0, 40)}…</code>.</p>
+      <div className="table-responsive">
+        <table className="table table-sm table-hover mb-3" id="settings-estate-agents">
+          <thead className="thead-light"><tr><th>Agent</th><th>Node</th><th>Capabilities</th><th>Accepts from</th><th>Ceiling</th><th>Presence</th><th>Owner</th></tr></thead>
+          <tbody>
+            {d.agents.length === 0 ? (
+              <tr><td colSpan={7} className="text-muted text-center py-3">No agents registered yet. A node lists its agents with its first report after <code>maluctl agent create</code>.</td></tr>
+            ) : d.agents.map((a) => (
+              <tr id={`estate-agent-${a.id}`} key={a.id}>
+                <td><strong>{a.display_name || a.name}</strong>{a.display_name && a.display_name !== a.name && <small className="text-muted"> · {a.name}</small>}{a.hired && <span className="badge bg-light text-dark ms-1">Agent HR</span>}</td>
+                <td>{a.node.id !== null ? <Link href={`/locations/${a.node.id}`}>{a.node.name}</Link> : <span>coordinator</span>}</td>
+                <td><small>{a.capabilities.join(", ") || "—"}</small></td>
+                <td><small>{a.accept_from.length ? a.accept_from.join(", ") : "its owner only"}</small></td>
+                <td><small>{a.max_classification ?? "—"}</small></td>
+                <td>{a.presence === "online" ? <span className="badge bg-success">online</span> : <span className="badge bg-secondary">{a.state === "failed" ? "failed" : a.presence}</span>}</td>
+                <td><small>{a.owner ?? "—"}</small></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {d.tasks.length > 0 && (
+        <>
+          <h6 className="fw-bold">Last tasks</h6>
+          <div className="table-responsive">
+            <table className="table table-sm table-hover mb-3" id="settings-estate-tasks">
+              <thead className="thead-light"><tr><th>When</th><th>Task</th><th>Agent</th><th>From</th><th>State</th><th>Models</th><th>Envelope</th></tr></thead>
+              <tbody>
+                {d.tasks.map((t) => (
+                  <tr key={t.id}>
+                    <td><small>{t.ts ? formatDate(t.ts, timeZone) : ""}</small></td>
+                    <td><small>{t.text}</small></td>
+                    <td><small>{t.agent} on {t.node_name}</small></td>
+                    <td><small>{t.originator}{t.sender.principal !== t.originator && ` via ${t.sender.principal}`}</small></td>
+                    <td>{state(t.state)}{t.reason && <small className="text-muted"> {t.reason}</small>}</td>
+                    <td><small>{t.models}{t.usd !== null && t.usd > 0 ? ` · $${t.usd.toFixed(4)}` : ""}</small></td>
+                    <td><small className="text-muted">{t.envelope_id.slice(0, 12)}…{t.hop > 1 ? ` hop ${t.hop}` : ""}</small></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+      {d.actions.length > 0 && (
+        <>
+          <h6 className="fw-bold">Actions on nodes</h6>
+          <ul className="list-unstyled mb-3" id="settings-estate-actions">
+            {d.actions.map((a) => (
+              <li key={a.id} className="mb-1">
+                {state(a.state)} <strong>{a.action}{a.agent ? ` ${a.agent}` : ""}</strong> on {a.node.name ?? a.node.id}
+                <small className="text-muted"> {a.created_at ? formatDate(a.created_at, timeZone) : ""}{a.reason ? ` · ${a.reason}` : ""}</small>
               </li>
             ))}
           </ul>

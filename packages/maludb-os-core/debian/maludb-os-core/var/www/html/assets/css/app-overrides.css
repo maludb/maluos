@@ -1,0 +1,145 @@
+/* app-overrides.css — the single sanctioned design-system override file.
+   ALWAYS the last stylesheet on every page, loaded after theme.min.css.
+   Plugin-level corrections to the theme live here and nowhere else.
+
+   VISIBLE SCROLLBARS
+   theme.min.css ships 5px scrollbars with a near-invisible thumb
+   (#e5e7eb on white; #19253f on #121a2d in dark mode) and hides some
+   entirely. Scrollable panels were unusable. These rules force clearly
+   visible, grabbable scrollbars everywhere, in both themes.
+   Never remove these; never use scrollbar-width:none or
+   ::-webkit-scrollbar{display:none}; never overflow:hidden on a
+   content panel. */
+
+* {
+    scrollbar-width: auto;
+    scrollbar-color: #8a94a6 #eef0f3;
+}
+
+::-webkit-scrollbar {
+    width: 12px !important;
+    height: 12px !important;
+    border-radius: 0;
+}
+
+::-webkit-scrollbar-track {
+    background-color: #eef0f3 !important;
+    border-radius: 0;
+}
+
+::-webkit-scrollbar-thumb {
+    background-color: #8a94a6 !important;
+    border-radius: 6px;
+    border: 2px solid #eef0f3;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background-color: #5b6b79 !important;
+}
+
+/* Dark mode (theme state lives on <html> as .app-skin-dark) */
+html.app-skin-dark * {
+    scrollbar-color: #54648a #1d273e;
+}
+
+html.app-skin-dark ::-webkit-scrollbar-track {
+    background-color: #1d273e !important;
+}
+
+html.app-skin-dark ::-webkit-scrollbar-thumb {
+    background-color: #54648a !important;
+    border-color: #1d273e;
+}
+
+html.app-skin-dark ::-webkit-scrollbar-thumb:hover {
+    background-color: #7286b2 !important;
+}
+
+/* Dark mode background: lighten from #121a2d to #1d273e for better card contrast */
+html.app-skin-dark {
+    --bs-body-bg: #1d273e !important;
+}
+
+html.app-skin-dark body {
+    background-color: #1d273e !important;
+}
+
+/* ==========================================================================
+   Assistant command bar (chat-actions) — plugin-level layout addition.
+   Fixed bottom bar on every screen; body reserves space so it never covers content.
+   ========================================================================== */
+.app-has-assistant-bar { padding-bottom: 84px; }
+
+#assistant-bar {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    z-index: 1030;
+    padding: 10px 16px;
+    background: var(--bs-body-bg, #fff);
+    border-top: 1px solid rgba(0,0,0,.08);
+    box-shadow: 0 -2px 10px rgba(0,0,0,.04);
+}
+/* On desktop the sidebar occupies the left; align the bar to the content area. */
+@media (min-width: 992px) {
+    #assistant-bar { left: 260px; }
+    html.minimenu #assistant-bar { left: 70px; }
+}
+#assistant-bar .assistant-form { max-width: 900px; margin: 0 auto; }
+#assistant-bar .input-group {
+    border: 1px solid rgba(0,0,0,.12);
+    border-radius: 10px;
+    overflow: hidden;
+}
+#assistant-reply {
+    max-width: 900px;
+    margin: 0 auto 8px;
+    max-height: 40vh;
+    overflow-y: auto;
+}
+#assistant-reply:empty { display: none; }
+
+html.app-skin-dark #assistant-bar {
+    background: #1b2431;
+    border-top-color: rgba(255,255,255,.08);
+}
+html.app-skin-dark #assistant-bar .input-group { border-color: rgba(255,255,255,.15); }
+
+/* The sidebar's list must scroll on a short screen. The theme leaves that to a jQuery
+   scrollbar plugin (PerfectScrollbar); the React shell loads no jQuery, so without this the
+   lower modules are unreachable. Harmless where the plugin runs — it sets its own overflow. */
+.nxl-navigation .navbar-content {
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+/* The sidebar's logo is contained by its header, whatever size the file is. The theme sizes
+   neither image — it shipped with a logo already cut to fit — so a business's own artwork
+   rendered at its natural size and was cropped by the header's overflow. The header's content
+   box is 220 x 50 (280 x 80 less its padding); the logo scales down into it, never up, and
+   keeps its proportions. */
+.nxl-navigation .m-header .b-brand {
+    display: flex;
+    align-items: center;
+    max-width: 100%;
+    height: 100%;
+}
+.nxl-navigation .m-header .logo {
+    width: auto;
+    height: auto;
+    max-width: 100%;
+    max-height: 50px;
+    object-fit: contain;
+}
+/* The theme inverts the logo on dark surfaces — right for the black mark it shipped with,
+   wrong for a business's own colours (orange came out blue). The artwork is shown as drawn. */
+html.app-skin-dark .nxl-navigation .m-header .logo-lg,
+html.app-navigation-dark .nxl-navigation .m-header .logo-lg,
+html.app-header-dark .nxl-navigation .m-header .logo-lg,
+.nxl-navigation .m-header .logo-lg {
+    filter: none;
+}
+
+/* The "brand" tone the badges name (orchestrator, office, MCP) — the theme ships soft tones for
+   primary…dark and none called brand, so those badges rendered as white text on nothing. */
+.bg-soft-brand { background-color: rgba(52, 84, 209, .075) !important; }
+.text-brand { color: #3454d1 !important; }

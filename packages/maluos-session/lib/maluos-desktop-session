@@ -105,6 +105,8 @@ XML = """<node>
   <method name="UpdateAction"><arg type="s" name="action" direction="in"/></method>
   <method name="OfficeAction"><arg type="s" name="action" direction="in"/></method>   <!-- open | heartbeat | estate -->
   <method name="NodeQueue"><arg type="s" name="json" direction="out"/></method>
+  <method name="TaskDecide"><arg type="i" name="id" direction="in"/><arg type="s" name="decision" direction="in"/><arg type="s" name="note" direction="in"/><arg type="s" name="json" direction="out"/></method>   <!-- Phase 13 slice 2: an estate inbox decision -->
+  <method name="TaskReply"><arg type="i" name="id" direction="in"/><arg type="s" name="text" direction="in"/><arg type="s" name="json" direction="out"/></method>
   <signal name="StateChanged"><arg type="s" name="json"/></signal>
   <property name="Version" type="s" access="read"/>
 </interface>
@@ -408,7 +410,7 @@ def estate_state(cat):
             "nodes": nodes, "alerts": alerts, "counts": cat.get("counts") or {}}
 
 
-def office_state(conf, hb, agents=None, apps=None, estate=None):
+def office_state(conf, hb, agents=None, apps=None, estate=None, inbox=None):
     """What the desk knows about its office: the enrolment, the last heartbeat's outcome, (slice 8) its agents and
     (Phase 13 slice 1) the estate when the office publishes it to this desk's owner."""
     if not conf:
@@ -432,7 +434,11 @@ def office_state(conf, hb, agents=None, apps=None, estate=None):
             "agents_fetched_at": agents.get("fetched_at"),
             "apps": {"count": len(apps.get("apps") or []), "installed": sum(1 for a in apps.get("apps") or [] if a.get("installed")),
                      "fetched_at": apps.get("fetched_at"), "stale": bool(apps.get("stale")), "errors": apps.get("errors") or []} if apps else None,
-            "estate": estate_state(estate)}
+            "estate": estate_state(estate),
+            # Phase 13 slice 2: the person's estate inbox (unread count, the last ten items), the desk key
+            "inbox": {"unread": (inbox or {}).get("unread", hb.get("inbox_unread") or 0), "items": [{k: i.get(k) for k in ("id", "kind", "subject", "from", "task_id", "options", "status", "created_at")} for i in ((inbox or {}).get("items") or [])[:10]],
+                      "fetched_at": (inbox or {}).get("fetched_at")},
+            "key": bool(conf.get("key"))}
 
 
 def updates_state():
@@ -468,6 +474,10 @@ class Service:
         self.state = {"version": VERSION, "ts": 0, "host": host_state(), "gateway": {"available": False}, "me": {}, "node": {"available": False, "operator": False},
                       "vault": {}, "agents": [], "alerts": [], "updates": {"available": False}, "office": {"enrolled": False}}
         self.office_hb = None            # the last heartbeat's outcome (office thread writes, under office_lock)
+        self.office_inbox = None         # Phase 13 slice 2: the last inbox read {unread, items}; the inbox thread long-polls it
+        self.inbox_notified = set()      # inbox item ids already notified
+        self.inbox_wake = threading.Event()
+        self.key_asked = False
         self.office_lock = threading.Lock()
         self.office_wake = threading.Event()
         self.office_force = False
@@ -570,7 +580,7 @@ class Service:
         with self.office_lock:
             hb = self.office_hb; oa = self.office_agents; op = self.office_apps; oe = self.office_estate
         st = {"version": VERSION, "ts": int(time.time()), "host": host_state(), "gateway": gw, "me": me_state(me), "node": node_state(gw.get("available"), me),
-              "vault": vault, "agents": agents_state(units, mine), "alerts": alerts_state(), "updates": u, "office": office_state(office_conf(), hb, oa, op, oe)}
+              "vault": vault, "agents": agents_state(units, mine), "alerts": alerts_state(), "updates": u, "office": office_state(office_conf(), hb, oa, op, oe, self.office_inbox)}
         return st
 
     def office_estate_read(self):
@@ -698,6 +708,11 @@ class Service:
                         oa = self.office_agents_read() if d.get("ok") else ({"fetched_at": int(time.time()), "agents": [], "error": "the office retired this desk"} if d.get("revoked") else None)
                         op = self.office_apps_read() if d.get("ok") else None
                         oe = self.office_estate_read() if d.get("ok") and (conf.get("endpoints") or {}).get("estate") else None
+                        if d.get("ok") and (conf.get("endpoints") or {}).get("inbox"):
+                            self.inbox_wake.set()                         # slice 2: the inbox thread reads now
+                        if d.get("ok") and (conf.get("endpoints") or {}).get("key") and not conf.get("key") and not self.key_asked:
+                            self.key_asked = True                         # slice 2: a desk enrolled before has no signing key yet
+                            log("office: this desk has no signing key; sudo maluctl office key makes and registers one")
                         with self.office_lock:
                             self.office_hb = d
                             if oa is not None:
@@ -710,6 +725,80 @@ class Service:
             except Exception as e:
                 log(f"office: {e.__class__.__name__}: {str(e)[:160]}")
             self.office_wake.wait(POLL); self.office_wake.clear()
+
+    def office_inbox_read(self, wait=0):
+        """`maluctl office inbox --json` as this user (the token from the vault, or the cached one)."""
+        env = dict(os.environ)
+        if self.office_token:
+            env["MALUOS_OFFICE_TOKEN"] = self.office_token
+        try:
+            r = subprocess.run(["maluctl", "office", "inbox", "--json", "--compact", "--wait", str(int(wait))], capture_output=True, text=True, timeout=wait + 40, env=env)
+            d = json.loads(r.stdout.strip().splitlines()[-1])
+            return d if d.get("ok") else None
+        except Exception as e:
+            log(f"office: inbox: {e.__class__.__name__}: {str(e)[:120]}"); return None
+
+    def inbox_loop(self):
+        """Its own thread (Phase 13 slice 2): while enrolled and online, long-poll the person's estate inbox (25 s a
+        call) and turn new items into notifications; a question or a decision carries actions."""
+        while True:
+            self.inbox_wake.wait(POLL); self.inbox_wake.clear()
+            try:
+                conf = office_conf()
+                hb = self.office_hb or {}
+                if not conf or not (conf.get("endpoints") or {}).get("inbox") or not hb.get("ok"):
+                    continue
+                while True:
+                    d = self.office_inbox_read(wait=25)
+                    if d is None:
+                        break
+                    with self.office_lock:
+                        self.office_inbox = d
+                    self.inbox_notify(d)
+                    self.refresh_soon(0.5)
+                    if not (d.get("items") or []) or not (self.office_hb or {}).get("ok"):
+                        break
+                    time.sleep(1.0)          # items are unread until the person acts: do not spin on them
+            except Exception as e:
+                log(f"office: inbox loop: {e.__class__.__name__}: {str(e)[:160]}")
+
+    def inbox_notify(self, d):
+        for i in d.get("items") or []:
+            iid = i.get("id")
+            if not iid or iid in self.inbox_notified or i.get("status") != "unread":
+                continue
+            self.inbox_notified.add(iid)
+            frm = i.get("from") or {}
+            who = (frm.get("principal") or "an agent").replace("agent:", "agent ") + (f" on {frm['node']}" if frm.get("node") else "")
+            kind = i.get("kind")
+            if kind == "decision_needed":
+                opts = i.get("options") or ["approve", "deny"]
+                self.notify(i.get("subject") or "An agent asks for a decision", f"{who}" + (f" · {i.get('body')[:120]}" if i.get("body") else ""), urgency=1,
+                            actions=[(f"inbox:{o}", o.capitalize()) for o in opts[:3]], ctx=("inbox", iid))
+            elif kind == "question":
+                self.notify(i.get("subject") or "An agent asks you a question", f"{who}" + (f" · {i.get('body')[:120]}" if i.get("body") else ""), urgency=1, actions=[("inbox:open", "Answer…")], ctx=("inbox", iid))
+            else:
+                self.notify(i.get("subject") or kind, who, urgency=0)
+
+    def task_decide(self, iid, decision, note=""):
+        env = dict(os.environ)
+        if self.office_token:
+            env["MALUOS_OFFICE_TOKEN"] = self.office_token
+        r = subprocess.run(["maluctl", "office", "inbox", "decide", str(int(iid)), decision] + (["--note", note] if note else []), capture_output=True, text=True, timeout=60, env=env)
+        if r.returncode != 0:
+            raise RuntimeError((r.stderr or r.stdout).strip()[-200:])
+        self.inbox_wake.set()
+        return {"ok": True, "id": int(iid), "decision": decision}
+
+    def task_reply(self, iid, text):
+        env = dict(os.environ)
+        if self.office_token:
+            env["MALUOS_OFFICE_TOKEN"] = self.office_token
+        r = subprocess.run(["maluctl", "office", "inbox", "reply", str(int(iid)), text], capture_output=True, text=True, timeout=60, env=env)
+        if r.returncode != 0:
+            raise RuntimeError((r.stderr or r.stdout).strip()[-200:])
+        self.inbox_wake.set()
+        return {"ok": True, "id": int(iid)}
 
     def office_goodbye(self):
         """The session ends: tell the office the desk is offline (best effort, a few seconds)."""
@@ -941,6 +1030,16 @@ class Service:
                     subprocess.Popen(["maluos-desk", "--window", "vault", "--request", str(rid)], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 elif key == "estate":
                     log("estate: Open Estate from the notification"); self.office_action("estate")
+                elif ctx[:1] == ("inbox",) and key.startswith("inbox:"):
+                    iid, what = ctx[1], key[6:]
+                    if what == "open":
+                        subprocess.Popen(["maluos-agents", "--inbox"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    else:
+                        log(f"inbox #{iid}: {what} from the notification")
+                        try:
+                            self.task_decide(iid, what)
+                        except Exception as e:
+                            self.notify(f"Inbox #{iid}: {what} failed", str(e)[:120], urgency=2)
                 elif key == "install":
                     log("updates: Install from the notification"); self.update_action("open")
                 elif key == "restart":
@@ -1056,6 +1155,16 @@ class Service:
             elif method == "OfficeAction":
                 self.office_action(params.unpack()[0])
                 invocation.return_value(None)
+            elif method == "TaskDecide":
+                iid, decision, note = params.unpack()
+                obj = self.task_decide(iid, decision, note)
+                self.refresh_soon(0.5)
+                invocation.return_value(GLib.Variant("(s)", (json.dumps(obj, default=str),)))
+            elif method == "TaskReply":
+                iid, text = params.unpack()
+                obj = self.task_reply(iid, text)
+                self.refresh_soon(0.5)
+                invocation.return_value(GLib.Variant("(s)", (json.dumps(obj, default=str),)))
             elif method == "NodeQueue":
                 # the gateway answers in milliseconds, but never hold the bus on it: a thread reads, the main loop replies
                 def work():
@@ -1094,6 +1203,7 @@ class Service:
         threading.Thread(target=self.poll_loop, daemon=True).start()
         threading.Thread(target=self.updates_loop, daemon=True).start()
         threading.Thread(target=self.office_loop, daemon=True).start()
+        threading.Thread(target=self.inbox_loop, daemon=True).start()        # Phase 13 slice 2: the person's estate inbox
 
         def on_term():
             self.office_goodbye(); loop.quit(); return False

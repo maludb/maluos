@@ -20,6 +20,12 @@ shows the desk and whether it is online.
                                                    a deb app installs from apt.maluos.com (pkexec apt-get)
   maluctl office agents [--json] [--refresh]       the office's agents this desk may use (endpoints.agents; Phase 12 slice 8)
   maluctl office agent ID card|activity|tasks [--json]       one of them: its card, its recent activity, the tasks sent from here
+  maluctl office agent ID send TEXT         Phase 13 slice 2: a task to an estate agent, with this desk's signed envelope
+  maluctl office inbox [--json] [--all]     the person's estate inbox (questions, decisions, results, notes)
+  maluctl office inbox decide ID approve|deny [--note TEXT] | reply ID TEXT | read ID
+  maluctl office estate action NODE restart_agent|start_agent|stop_agent|apply_updates|reboot [AGENT] [--wait S]
+  maluctl office agents [--capability X]   the directory (the estate's agents and the office's own)
+  sudo maluctl office key                   make and register this desk's signing key (desks enrolled before slice 2)
   maluctl office estate [--json] [--refresh]       the estate as this desk's owner may see it (endpoints.estate, published to
                                                    system managers; Phase 13 slice 1): nodes, their health, the open alerts
   maluctl office agent ID send TEXT [--json]       give it a task and wait for the answer (its task URL, the desk token)
@@ -40,6 +46,7 @@ SURFACE = 1
 CONF = os.environ.get("MALUOS_OFFICE_CONF", "/etc/maluos/office.yaml")
 ENVF = os.environ.get("MALUOS_OFFICE_ENV", "/etc/maluos/office.env")
 SECRET = "office-desk-token"
+KEY_SECRET = "office-desk-key"              # the desk's ed25519 signing key (Phase 13 slice 2), in the owner's compartment beside the token
 PLUGIN_DIR = os.environ.get("MALUCTL_PLUGIN_DIR", "/usr/lib/maluos/maluctl.d")
 MALUCTL = os.environ.get("MALUCTL_BIN", "/usr/bin/maluctl")
 
@@ -414,6 +421,8 @@ def _norm_agent(a, office_url, office_name):
     a["id"] = str(a.get("id"))
     a.setdefault("name", a["id"]); a.setdefault("description", ""); a.setdefault("icon", "maluos-logo")
     a.setdefault("capabilities", []); a.setdefault("presence", "unknown"); a.setdefault("state", None)
+    for k in ("agent", "node", "node_ref", "node_kind", "accept_from", "max_classification", "owner", "principal", "hired"):
+        a.setdefault(k, None)
     a["office"] = office_name; a["office_url"] = office_url
     return a
 
@@ -463,14 +472,18 @@ def fetch_agents(refresh=False):
 
 
 def agents(a):
-    cat = fetch_agents(refresh=opt(a, "--refresh", flag=True))
+    cap = opt(a, "--capability")
+    cat = fetch_agents(refresh=opt(a, "--refresh", flag=True) or bool(cap))
+    if cap:
+        cat = dict(cat, agents=[x for x in cat.get("agents") or [] if cap.lower() in [c.lower() for c in x.get("capabilities") or []]])
     if opt(a, "--json", flag=True):
         print(json.dumps(cat, indent=None if opt(a, "--compact", flag=True) else 2)); return 0
     if cat.get("error") and not cat.get("agents"):
         print(cat["error"]); return 1
     print(f"agents at {cat.get('office') or cat.get('office_url')}" + (" (cached, the office was unreachable)" if cat.get("stale") else "") + ":")
     for x in cat["agents"]:
-        print(f"  {x['id']:<16} {x['name']:<22} {x.get('presence') or '':<8} {x.get('state') or '':<8} {', '.join(x.get('capabilities') or [])}")
+        print(f"  {x['id']:<16} {x['name']:<22} {(x.get('node') or 'office'):<16} {x.get('presence') or '':<8} {', '.join(x.get('capabilities') or []):<24}"
+              + (f" accepts {', '.join(x['accept_from']) if x['accept_from'] else 'its owner only'}" if x.get("node_ref") else ""))
     return 0
 
 
@@ -508,21 +521,30 @@ def agent(a):
                 print(json.dumps(d, indent=1)); return 0
             print(f"{d.get('name')}: {d.get('description') or ''}\ncapabilities: {', '.join(d.get('capabilities') or []) or '-'}\nprotocol:     {d.get('protocol')}"); return 0
         if sub == "send":
+            cls = opt(a, "--classification", "internal")
             text = " ".join(a).strip() or sys.exit("send TEXT")
+            # Phase 13 slice 2: an estate agent (a directory row with a node) needs this desk's envelope; the office's own agents take none
+            env = None
+            if ag.get("node_ref") or (ag.get("agent") and ag.get("node")):
+                conf = read_conf()
+                env = my_envelope(conf, {"agent": ag.get("agent") or ag["id"], "node": ag.get("node_ref")}, text[:200], classification=cls)
             if as_json:
-                t = c.send(text)
+                t = c.send(text, envelope=env)
                 print(json.dumps(t, indent=1)); return 0 if t.get("state") == "completed" else 1
             shown = [""]
             def on_text(txt):          # the answer as it grows (slice 9); an office that answers at once prints once
                 sys.stdout.write(txt[len(shown[0]):] if txt.startswith(shown[0]) else "\n" + txt); sys.stdout.flush(); shown[0] = txt
-            t = c.stream(text, on_text=on_text)
+            t = c.stream(text, on_text=on_text, envelope=env)
             if t.get("state") == "completed":
                 if t["output"]["text"] != shown[0]:
                     on_text(t["output"]["text"])
                 if not shown[0].endswith("\n"):
                     print()
+                p = t.get("provenance") or {}
+                if p:
+                    print(f"— from {ag.get('agent') or ag['name']} on {p.get('node') or ag.get('node')} · {len(p.get('models') or [])} model call(s) · envelope {p.get('envelope')} · task {t.get('id')}", file=sys.stderr)
                 return 0
-            print(f"task {t['id']} {t['state']}: {t.get('error') or ''}", file=sys.stderr); return 1
+            print(f"task {t['id']} {t['state']}: {t.get('error') or t.get('reason') or ''}", file=sys.stderr); return 1
         if sub == "tasks":
             rows = c.list()
             if as_json:
@@ -592,6 +614,9 @@ def fetch_estate(refresh=False):
 
 
 def estate(a):
+    if a and a[0] == "action":
+        a.pop(0)
+        return estate_action(a, read_conf() or sys.exit(f"not enrolled (no {CONF})"))
     cat = fetch_estate(refresh=opt(a, "--refresh", flag=True))
     if opt(a, "--json", flag=True):
         print(json.dumps(cat, indent=None if opt(a, "--compact", flag=True) else 2)); return 0
@@ -605,6 +630,118 @@ def estate(a):
     for x in cat["alerts"]:
         print(f"  alert #{x.get('id')} {x.get('node') or '?'}: {x.get('severity')} {x.get('kind')}: {x.get('title')}" + (f"  (cleared {x['cleared_at']})" if x.get("cleared_at") else ""))
     return 0
+
+
+# -- Phase 13 slice 2: the desk's envelope, the directory, the inbox, an operator's actions
+def key_for_me():
+    """The desk's private signing key from the vault, as the owner (or MALUOS_OFFICE_KEY for tests)."""
+    k = os.environ.get("MALUOS_OFFICE_KEY")
+    if k:
+        return k
+    from maluos_vault_client import Vault
+    return Vault(os.environ.get("MALUOS_VAULT_SOCKET")).value(KEY_SECRET, "read", purpose="office envelope")["value"]
+
+
+def my_envelope(conf, target, purpose, classification="internal", budget=None, life_s=600):
+    """An envelope this desk's owner originates and signs: originator and sender the person, the chain one hop."""
+    from maluos_estate import envelope as E
+    w = conf.get("owner") or {}
+    node = f"desk:{(conf.get('desk') or {}).get('id')}"
+    me = {"principal": w.get("principal") or f"user:{w.get('login') or os.environ.get('USER')}", "node": node}
+    env = E.make(dict(me, kind="human", member_id=w.get("member_id")), me, target, purpose,
+                 {"scopes": [], "classification": classification, "budget": budget or {"usd": 0.5, "calls": 20}}, life_s=life_s)
+    return E.sign(env, node, key_for_me())
+
+
+def key(a):
+    """sudo maluctl office key: make this desk's signing key and register it (a desk enrolled before slice 2)."""
+    need_root()
+    conf = read_conf() or sys.exit(f"not enrolled (no {CONF})")
+    owner = (conf.get("owner") or {}).get("login") or sys.exit("the enrolment names no owner login")
+    from maluos_estate import envelope as E
+    priv, pub = E.genkey(f"desk of user:{owner}")
+    ep = (conf.get("endpoints") or {}).get("key") or conf["url"].rstrip("/") + "/api/v1/desks/key"
+    env = dict(os.environ); env.pop("MALUOS_OFFICE_TOKEN", None)
+    tok = run_as(owner, ["secret", "show", SECRET, "--value"], check=False).strip() if not os.environ.get("MALUOS_OFFICE_TOKEN") else os.environ["MALUOS_OFFICE_TOKEN"]
+    st, r = http("POST", ep, {"surface": SURFACE, "public_key": pub}, token=tok)
+    if st != 200:
+        sys.exit(f"the office refused the key ({st} {r.get('error') or ''}): {r.get('message') or r}")
+    run_as(owner, ["secret", "delete", KEY_SECRET], check=False)
+    run_as(owner, ["secret", "add", KEY_SECRET, "--kind", "generic", "--provider", "office", "--stdin"], input=priv)
+    conf["key"] = {"secret": KEY_SECRET, "public_key": pub, "registered": True}
+    write_conf(conf)
+    print(f"desk key registered as {r.get('node')}: vault user:{owner}/{KEY_SECRET}"); return 0
+
+
+def inbox(a):
+    """maluctl office inbox [--json] [--all] [--wait S] | decide ID approve|deny [--note T] | reply ID TEXT | read ID"""
+    conf = read_conf() or sys.exit(f"not enrolled (no {CONF})")
+    ep = (conf.get("endpoints") or {}).get("inbox") or conf["url"].rstrip("/") + "/api/v1/desks/inbox"
+    sub = a.pop(0) if a and not a[0].startswith("--") else "list"
+    tok = token_for_me()
+    if sub in ("decide", "reply", "read"):
+        iid = a.pop(0) if a and a[0].isdigit() else sys.exit(f"inbox {sub} ID …")
+        if sub == "read":
+            st, r = http("POST", ep.rstrip("/") + f"/{iid}/read", {}, token=tok)
+        else:
+            st0, item = http("GET", ep + "?all=1", token=tok)
+            row = next((i for i in (item.get("items") or []) if str(i.get("id")) == iid), None) if st0 == 200 else None
+            target = {"agent": (row.get("from") or {}).get("principal", "").partition(":")[2] or None, "node": (row.get("from") or {}).get("node")} if row else {"node": "coordinator"}
+            env = my_envelope(conf, {k: v for k, v in target.items() if v}, f"{sub} on inbox item {iid}")
+            if sub == "decide":
+                decision = a.pop(0) if a and not a[0].startswith("--") else sys.exit("decide ID approve|deny")
+                body = {"decision": decision, "note": opt(a, "--note"), "envelope": env}
+            else:
+                body = {"text": " ".join(a).strip() or sys.exit("reply ID TEXT"), "envelope": env}
+            st, r = http("POST", ep.rstrip("/") + f"/{iid}/{sub}", body, token=tok)
+        if st != 200:
+            raise RuntimeError(f"HTTP {st} {r.get('error') or ''}: {r.get('message') or ''}")
+        if opt(a, "--json", flag=True):
+            print(json.dumps(r, indent=1)); return 0
+        it = r.get("item") or {}
+        print(f"inbox #{iid}: {sub} {'' if sub == 'read' else (it.get('decision') or '') if sub == 'decide' else 'sent'}".rstrip() + (f"; task {r['task']['id']} {r['task']['state']}" if r.get("task") else "")); return 0
+    q = {"wait": opt(a, "--wait", "0")}
+    if opt(a, "--all", flag=True):
+        q["all"] = "1"
+    if opt(a, "--since"):
+        q["since"] = opt(a, "--since")
+    import urllib.parse
+    st, r = http("GET", ep + "?" + urllib.parse.urlencode(q), token=tok, timeout=int(q["wait"] or 0) + 15)
+    if st != 200:
+        raise RuntimeError(f"HTTP {st} {r.get('error') or ''}: {r.get('message') or ''}")
+    if opt(a, "--json", flag=True):
+        print(json.dumps(r, indent=None if opt(a, "--compact", flag=True) else 1)); return 0
+    items = r.get("items") or []
+    print(f"inbox: {r.get('unread', 0)} unread" + ("" if items else " (nothing to show)"))
+    for i in items:
+        f = i.get("from") or {}
+        print(f"  #{i['id']:<5} {i.get('kind'):<16} {f.get('principal') or ''} on {f.get('node') or ''}: {i.get('subject')}" + (f"  [{', '.join(i['options'])}]" if i.get("options") and i.get("status") != "done" else "")
+              + (f"  -> {i.get('decision') or i.get('reply') or ''}" if i.get("status") == "done" else "") + (f"  (task {i['task_id']})" if i.get("task_id") else ""))
+    return 0
+
+
+def estate_action(a, conf):
+    """maluctl office estate action NODE ACTION [AGENT] [--wait S]: an operator's action on a node, with this desk's envelope."""
+    node = a.pop(0) if a else sys.exit("estate action NODE ACTION [AGENT]")
+    action = a.pop(0) if a else sys.exit("estate action NODE ACTION [AGENT]")
+    agent = a.pop(0) if a and not a[0].startswith("--") else None
+    wait = float(opt(a, "--wait", "30") or 0)
+    cat = fetch_estate(refresh=True)
+    rows = [n for n in cat.get("nodes") or [] if n.get("kind") != "desk" and (str(n.get("id")) == node or n.get("name") == node)]
+    if not rows:
+        raise RuntimeError(f"no node {node!r} in the estate ({', '.join(str(n.get('name')) for n in cat.get('nodes') or [] if n.get('kind') != 'desk') or 'none'})")
+    n = rows[0]
+    ep = (conf.get("endpoints") or {}).get("actions") or sys.exit("the office publishes no actions endpoint to this desk (not an operator)")
+    env = my_envelope(conf, {"node": f"{n['kind']}:{n['id']}", "action": action}, f"{action} on {n['name']}")
+    st, r = http("POST", conf["url"].rstrip("/") + f"/api/v1/estate/nodes/{n['id']}/actions", {"action": action, "agent": agent, "envelope": env, "wait": wait}, token=token_for_me(), timeout=int(wait) + 20)
+    if st not in (200, 201):
+        raise RuntimeError(f"HTTP {st} {r.get('error') or ''}: {r.get('message') or ''}")
+    x = r.get("action") or {}
+    if opt(a, "--json", flag=True):
+        print(json.dumps(x, indent=1)); return 0
+    res = x.get("result") or {}
+    print(f"action {x.get('id')} {action}{' ' + agent if agent else ''} on {n['name']}: {x.get('state')}" + (f" ({x.get('reason')})" if x.get("reason") else "") + (f": {res.get('output')}" if res.get("output") else ""))
+    return 0 if x.get("state") == "completed" else 1
 
 
 # -- commands
@@ -632,6 +769,10 @@ def enroll(a):
     if f"principal:  {principal}" not in who:
         sys.exit(f"{owner} is not an enrolled principal on this host (sudo maluctl principal add {principal} --kind human)")
     body = {"surface": SURFACE, "code": code, "name": name, "principal": principal, **facts()}
+    # Phase 13 slice 2: the desk's signing key (ed25519), made here; the private half goes into the owner's compartment after the enrolment succeeds
+    from maluos_estate import envelope as _E
+    key_priv, key_pub = _E.genkey(f"desk of {principal}")
+    body["public_key"] = key_pub
     # Phase 13 slice 1b: the desk's WireGuard key, made here; the private half goes into the owner's compartment after the enrolment succeeds
     ov_priv = ov_pub = None
     if not no_overlay:
@@ -653,9 +794,11 @@ def enroll(a):
     if ov_priv:
         run_as(owner, ["secret", "delete", OVERLAY_SECRET], check=False)
         run_as(owner, ["secret", "add", OVERLAY_SECRET, "--kind", "generic", "--provider", "estate", "--stdin"], input=ov_priv + "\n")
+    run_as(owner, ["secret", "delete", KEY_SECRET], check=False)
+    run_as(owner, ["secret", "add", KEY_SECRET, "--kind", "generic", "--provider", "office", "--stdin"], input=key_priv)
     conf = {"surface": r.get("surface", SURFACE), "url": url, "office": r.get("office") or {"name": None, "url": url}, "desk": desk,
             "owner": {**(r.get("owner") or {}), "login": owner, "principal": principal}, "endpoints": eps,
-            "heartbeat_s": int(r.get("heartbeat_s") or 300), "secret": SECRET, "gateway": None, "enrolled_at": utc(), "maluos_desk": VERSION,
+            "heartbeat_s": int(r.get("heartbeat_s") or 300), "secret": SECRET, "key": {"secret": KEY_SECRET, "public_key": key_pub, "registered": True}, "gateway": None, "enrolled_at": utc(), "maluos_desk": VERSION,
             "overlay": (r.get("overlay") or {"role": "spoke", "address": None, "hub": None}) if ov_priv else None, "overlay_secret": OVERLAY_SECRET if ov_priv else None}
     # 2. the office's models as a rung of this desk's gateway, keyed by the token the gateway applies for the caller
     models = eps.get("models") if isinstance(eps.get("models"), dict) else None
@@ -680,7 +823,7 @@ def enroll(a):
     if ov_priv:
         overlay_unit("enable"); overlay_unit("restart")
     print(f"enrolled: desk '{desk.get('name')}' (#{desk.get('id')}) at {conf['office'].get('name') or url} for {principal}")
-    print(f"  token:    vault {principal}/{SECRET} (the session heartbeats with it; maluctl office status)")
+    print(f"  token:    vault {principal}/{SECRET} (the session heartbeats with it; maluctl office status); key {principal}/{KEY_SECRET} signs this desk's envelopes")
     print(f"  models:   {gw_note}")
     print(f"  agents:   {ENVF} names the office's endpoints; maluctl secret delegate --to agent:NAME --secret {SECRET}")
     o = conf.get("overlay")
@@ -721,7 +864,7 @@ def status(a):
     print(f"office:     {o.get('name') or '?'}  {conf.get('url')}  (surface {conf.get('surface')})")
     print(f"desk:       {d.get('name')}  (#{d.get('id')})  enrolled {conf.get('enrolled_at')}")
     print(f"owner:      {w.get('principal')}  {w.get('display_name') or ''} <{w.get('email') or '?'}>  member #{w.get('member_id')}")
-    print(f"token:      vault {w.get('principal')}/{conf.get('secret')}")
+    print(f"token:      vault {w.get('principal')}/{conf.get('secret')}" + (f"; key {KEY_SECRET} ({(conf.get('key') or {}).get('public_key', '')[:30]}…)" if conf.get("key") else "; no desk key yet (sudo maluctl office key)"))
     eps = conf.get("endpoints") or {}
     pub = [k for k in ("records", "activity", "memory", "actions") if eps.get(k)]
     models = eps.get("models") if isinstance(eps.get("models"), dict) else None
@@ -816,6 +959,7 @@ def leave(a):
     if owner and not keep:
         try:
             run_as(owner, ["secret", "delete", SECRET])
+            run_as(owner, ["secret", "delete", KEY_SECRET], check=False)       # slice 2: the desk key goes with the token
         except Exception as e:
             print(f"  warn: {e}", file=sys.stderr)
     for p in (CONF, ENVF):
@@ -849,6 +993,10 @@ def main(a):
             return agent(a)
         if cmd == "estate":
             return estate(a)
+        if cmd == "inbox":
+            return inbox(a)
+        if cmd == "key":
+            return key(a)
     except RuntimeError as e:
         sys.exit(f"maluctl office {cmd}: {e}")
     print(__doc__); return 2

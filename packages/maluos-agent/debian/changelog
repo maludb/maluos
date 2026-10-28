@@ -1,3 +1,26 @@
+maluos-agent (0.5.0) resolute; urgency=medium
+
+  * Phase 13 slice 2, delegation (docs/phase13-slice2-delegation.md): the
+    task interface verifies the envelope on tasks/send against the
+    directory's keys (/run/maluos/estate/keys.json), its expiry and nonce,
+    and applies the agent's own policy (/etc/maluos/agents/NAME.policy.yaml:
+    accept_from, max_classification, approve); a task the policy wants
+    approved parks as pending_approval until tasks/resume brings the
+    person's signed decision; the task record carries provenance (the
+    chain, the model calls made) and usage; the estate daemon may bring an
+    envelope-bearing task over the socket.  gateway_headers() and
+    record_model_call() for agents' model calls.
+  * maluctl agent create: --capability, --accept-from, --max-classification,
+    --approve, --personal; the manifest the node registers in the directory
+    (NAME.manifest.yaml) and the policy file; maluctl agent policy;
+    maluctl agent personal renew; the hint /run/maluos/estate/agents-changed
+    after create, remove and policy.
+  * maluos-agent-personal.py: the person's own agent ("ask NAME …" sends a
+    task with the person's envelope signed by the desk key).
+  * Depends on maluos-estate (>= 0.3.0) for the envelope module.
+
+ -- Edward Honour <ed@maludb.org>  Wed, 28 Oct 2026 22:10:00 +0000
+
 maluos-agent (0.4.0) resolute; urgency=medium
 
   * Phase 12 slice 9: answers stream. A task handler gets

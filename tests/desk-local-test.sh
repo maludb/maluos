@@ -21,6 +21,7 @@ cp "$ROOT"/packages/maluos-firstboot/lib/maluos_provision.py "$ROOT"/packages/ma
    "$ROOT"/packages/maluos-vault/components/40-maluos-vault.py "$ROOT"/packages/maluos-vault/share/schema.sql "$W/lib/"
 cp "$ROOT"/packages/maluos-vault/lib/maluctl.d/secret.py "$ROOT"/packages/maluos-desk/lib/maluctl.d/office.py "$ROOT"/packages/maluos-estate/lib/maluctl.d/estate.py "$W/lib/maluctl.d/"
 cp -r "$ROOT"/packages/maluos-desk/lib/maluos_desk "$ROOT"/packages/maluos-estate/lib/maluos_estate "$W/lib/"
+cp "$ROOT"/packages/maluos-agent/lib/maluos_agent_tasks.py "$W/lib/"     # Phase 13 slice 2: the daemon runs tasks through it
 chmod -R a+rX "$W/lib"; head -c 32 /dev/urandom > "$W/cred/maluos-vault.key"
 cat > "$W/vault.yaml" <<EOY
 socket: $W/vault.sock
@@ -54,7 +55,7 @@ echo "== daemon and mock office"
 printf '{"database":"%s","tenant":"%s","provisioned_at":"test","admin_principal":"human:admin","operators":[],"components":{"vault":{}}}\n' $DB $T > "$W/fb/done"
 trap 'kill $(cat $W/daemon.pid) $(cat $W/office.pid) 2>/dev/null' EXIT
 for i in $(seq 1 20); do [ -S "$W/vault.sock" ] && curl -fsS --max-time 1 http://127.0.0.1:$PORT/api/v1/health >/dev/null 2>&1 && break; sleep 0.25; done
-ENV="PYTHONPATH=$W/lib MALUCTL_PLUGIN_DIR=$W/lib/maluctl.d MALUCTL_BIN=$W/lib/maluctl MALUOS_VAULT_SOCKET=$W/vault.sock MALUOS_OFFICE_CONF=$W/etc/office.yaml MALUOS_OFFICE_ENV=$W/etc/office.env XDG_STATE_HOME=$W/state-$ME XDG_CACHE_HOME=$W/cache-$ME MALUOS_STATE_DIR=$W/fb MALUOS_PROVISIONED=$W/fb/done MALUOS_ESTATE_CONF=$W/etc/estate.yaml MALUOS_ESTATE_STATE_DIR=$W/estate MALUOS_ESTATE_USER=$ME MALUOS_ESTATE_NO_UNIT=1 MALUOS_VAULT_CONFIG=$W/vault.yaml MALUOS_GATEWAY_CONFIG=$W/etc/gateway.yaml MALUOS_GATEWAY_SOCKET=$W/no-gateway.sock MALUOS_OVERLAY_DRY_RUN=1 MALUOS_OVERLAY_DRY_LOG=$W/overlay-dry.log MALUOS_OVERLAY_HOSTS=$W/hosts MALUOS_OVERLAY_STATE=$W/estate/overlay.json MALUOS_OVERLAY_RUN=$W/ovrun"
+ENV="PYTHONPATH=$W/lib MALUCTL_PLUGIN_DIR=$W/lib/maluctl.d MALUCTL_BIN=$W/lib/maluctl MALUOS_VAULT_SOCKET=$W/vault.sock MALUOS_OFFICE_CONF=$W/etc/office.yaml MALUOS_OFFICE_ENV=$W/etc/office.env XDG_STATE_HOME=$W/state-$ME XDG_CACHE_HOME=$W/cache-$ME MALUOS_STATE_DIR=$W/fb MALUOS_PROVISIONED=$W/fb/done MALUOS_ESTATE_CONF=$W/etc/estate.yaml MALUOS_ESTATE_STATE_DIR=$W/estate MALUOS_ESTATE_USER=$ME MALUOS_ESTATE_NO_UNIT=1 MALUOS_VAULT_CONFIG=$W/vault.yaml MALUOS_GATEWAY_CONFIG=$W/etc/gateway.yaml MALUOS_GATEWAY_SOCKET=$W/no-gateway.sock MALUOS_OVERLAY_DRY_RUN=1 MALUOS_OVERLAY_DRY_LOG=$W/overlay-dry.log MALUOS_OVERLAY_HOSTS=$W/hosts MALUOS_OVERLAY_STATE=$W/estate/overlay.json MALUOS_OVERLAY_RUN=$W/ovrun MALUOS_AGENTS_DIR=$W/agents MALUOS_AGENTS_HINT=$W/estate-run/agents-changed MALUOS_ESTATE_KEYS=$W/estate-run/keys.json MALUOS_AGENT_SOCKET_DIR=$W/agents-run"
 me()   { env $ENV python3 "$W/lib/maluctl" "$@"; }
 root() { sudo -n env $ENV python3 "$W/lib/maluctl" "$@"; }
 mock() { curl -fsS --max-time 5 "http://127.0.0.1:$PORT$1" "${@:2}"; }
@@ -166,6 +167,104 @@ check "overlay down (root): the interface deleted, the names and the state gone"
 check "estate leave: the hub's key removed with the token; the office has no hub" "root estate leave | grep -q 'the overlay tunnel down, its key removed' && ! me secret list | grep -q 'host:$HOST/estate-overlay-key' && mock /mock/overlay | python3 -c 'import json,sys; o=json.load(sys.stdin); assert o[\"hub\"] is None, o'"
 check "office leave: the desk's tunnel down and its key removed; no member left" "root office leave | grep -q 'the overlay tunnel down' && ! me secret list | grep -q 'user:$ME/estate-overlay-key' && ! sudo -n env $ENV python3 $W/lib/maluctl secret list --all 2>/dev/null | grep -q 'estate-overlay-key' && mock /mock/overlay | python3 -c 'import json,sys; o=json.load(sys.stdin); assert o[\"members\"]==[], o'"
 check "no private key in the logs or the dry log (the keys go to wg on stdin)" "! grep -qE 'private-key +[A-Za-z0-9+/]{43}=' $W/overlay-dry.log && ! grep -qE '[A-Za-z0-9+/]{43}=' $W/overlay.log $W/daemon.log"
+
+echo "== Phase 13 slice 2: the agent directory and delegation (the mock verifies envelopes as the kernel does; the daemon's inbox loop runs tasks through a fake agent's socket)"
+mkdir -p "$W/agents" "$W/agents-run" "$W/estate-run"; chmod 755 "$W/agents" "$W/agents-run" "$W/estate-run"
+mock /mock/code -d '{"code":"d2"}' >/dev/null; mock /mock/code -d '{"code":"n2","kind":"node"}' >/dev/null
+check "enrol the desk: the signing key made and registered (office-desk-key in $ME's compartment; the office holds the public half)" "root office enroll http://127.0.0.1:$PORT --code d2 --owner $ME --name 'Desk two' --no-gateway --no-overlay | grep -q 'signs this desk' && me secret show office-desk-key | grep -q 'BEGIN OPENSSH PRIVATE KEY' && grep -q 'registered: true' $W/etc/office.yaml && mock /mock/state | python3 -c 'import json,sys; d=[x for x in json.load(sys.stdin)[\"desks\"] if x[\"status\"]==\"active\"][0]; assert d[\"public_key\"].startswith(\"ssh-ed25519 \")'"
+DESKID=$(python3 -c "import yaml; print(yaml.safe_load(open('$W/etc/office.yaml'))['desk']['id'])")
+# after the node join below, $ME's vault identity is the host principal: the desk's token and key are read now and passed to the desk-side commands
+DESKTOK=$(me secret show office-desk-token); DESKKEY=$(me secret show office-desk-key)
+desk() { env $ENV MALUOS_OFFICE_TOKEN="$DESKTOK" MALUOS_OFFICE_KEY="$DESKKEY" python3 "$W/lib/maluctl" "$@"; }
+check "office status names the key" "me office status | grep -q 'key office-desk-key'"
+check "join a node (no overlay)" "root estate join http://127.0.0.1:$PORT --code n2 --name node-two --no-overlay | grep -q \"joined: server 'node-two'\" && grep -q 'allow:' $W/etc/estate.yaml"
+NODEID=$(python3 -c "import yaml; print(yaml.safe_load(open('$W/etc/estate.yaml'))['node']['id'])")
+cat > "$W/agents/helper.manifest.yaml" <<EOM
+name: helper
+display: Helper
+description: answers through a fake gateway
+capabilities: [chat, summarise]
+owner: user:$ME
+accept_from: [org]
+max_classification: internal
+approve: []
+tasks: true
+EOM
+cat > "$W/agents/helper.policy.yaml" <<EOM
+accept_from: [org]
+max_classification: internal
+approve: []
+EOM
+cat > "$W/agents/demo.manifest.yaml" <<EOM
+name: demo
+description: the demonstration agent
+capabilities: [chat]
+owner: user:$ME
+accept_from: []
+tasks: true
+EOM
+printf 'accept_from: []\n' > "$W/agents/demo.policy.yaml"
+chmod 644 "$W"/agents/*.yaml
+check "heartbeat --agents registers the manifests: the directory lists helper and demo on node-two" "me estate heartbeat --agents | grep -q '^ok:' && me estate agents | grep -q 'helper .*node-two .*chat, summarise .*accepts org' && me estate agents | grep -q 'demo .*accepts its owner only'"
+check "the directory by capability" "me estate agents --capability summarise | grep -q helper && ! me estate agents --capability summarise | grep -q demo"
+check "the keys: the node's, the desk's and the coordinator's" "me estate keys | grep -q '^coordinator' && me estate keys | grep -q \"server:$NODEID\" && me estate keys | grep -q \"desk:$DESKID\""
+check "maluctl office agents (the desk's owner) lists the directory rows with their node, and the office's own agents after them" "desk office agents --refresh | grep -q 'Helper .*node-two .*chat, summarise .*accepts org' && desk office agents | grep -q 'helpdesk .*office'"
+HELPER=$(desk office agents --json | python3 -c 'import json,sys; print([a["id"] for a in json.load(sys.stdin)["agents"] if a.get("agent")=="helper"][0])')
+DEMO=$(desk office agents --json | python3 -c 'import json,sys; print([a["id"] for a in json.load(sys.stdin)["agents"] if a.get("agent")=="demo"][0])')
+# a fake agent on a socket, as maluos_agent_tasks serves it (the policy from $W/agents, the keys from the daemon's cache)
+cat > "$W/agent.py" <<'EOA'
+import os, sys, time
+sys.path.insert(0, os.environ["W"] + "/lib")
+import maluos_agent_tasks as T
+def handle(t):
+    T.record_model_call({"X-MaluOS-Request": "mg-fake", "X-MaluOS-Route": "mock/mock-7b (tier fast)"})
+    if t.get("answer"):
+        return "pong after %s: %s" % (t["answer"].get("decision") or t["answer"].get("text"), t["text"])
+    return "pong: " + t["text"]
+T.serve(handle, card={"description": "fake", "capabilities": ["chat", "summarise"]})
+while True:
+    time.sleep(3600)
+EOA
+for ag in helper demo; do
+  mkdir -p "$W/agents-run/$ag"
+  ( cd "$W"; exec env W=$W MALUOS_AGENT=$ag MALUOS_PRINCIPAL=agent:$ag MALUOS_AGENT_OWNER=user:$ME MALUOS_AGENTS_DIR=$W/agents MALUOS_ESTATE_KEYS=$W/estate-run/keys.json MALUOS_AGENT_SOCKET_DIR=$W/agents-run MALUOS_AGENT_TASKS_SOCKET=$W/agents-run/$ag/tasks.sock python3 "$W/agent.py" >"$W/agent-$ag.log" 2>&1 ) & echo $! > "$W/agent-$ag.pid"
+done
+for i in $(seq 1 40); do [ -S "$W/agents-run/helper/tasks.sock" ] && [ -S "$W/agents-run/demo/tasks.sock" ] && break; sleep 0.25; done
+( cd "$W"; exec env $ENV MALUOS_ESTATE_TOKEN="$(me secret show estate-node-token)" python3 -m maluos_estate >"$W/estated2.log" 2>&1 ) & echo $! > "$W/estated2.pid"
+for i in $(seq 1 80); do [ -f "$W/estate-run/keys.json" ] && grep -q "desk:$DESKID" "$W/estate-run/keys.json" && [ -f "$W/estate/state.json" ] && break; sleep 0.25; done
+check "the daemon caches the directory's keys for the agents (/run/maluos/estate/keys.json here)" "python3 -c 'import json; k=json.load(open(\"$W/estate-run/keys.json\"))[\"keys\"]; assert \"coordinator\" in k and \"desk:$DESKID\" in k, k'"
+check "maluctl office agent send: the desk's envelope, the task leased to the node, run by the fake agent, the answer with its provenance" "desk office agent $HELPER send ping 2>$W/send.err | grep -q '^pong: ping' && grep -q \"from helper on server:$NODEID · 1 model call(s) · envelope env_\" $W/send.err"
+TID=$(sed -n 's/.*· task \(t_[0-9a-f]*\).*/\1/p' $W/send.err | head -1)
+check "maluctl estate tasks ID: completed with the chain (user > agent:helper) and one model call" "me estate tasks $TID | grep -q 'completed' && me estate tasks $TID | grep -q \"chain user:$ME > agent:helper; 1 model call\""
+check "the mock holds the task's provenance (envelope, node, agent, models)" "mock /mock/delegation | python3 -c 'import json,sys; t=[x for x in json.load(sys.stdin)[\"tasks\"] if x[\"id\"]==\"$TID\"][0]; p=t[\"provenance\"]; assert t[\"state\"]==\"completed\" and p[\"node\"]==\"server:$NODEID\" and p[\"agent\"]==\"agent:helper\" and len(p[\"chain\"])==2 and p[\"models\"][0][\"model\"]==\"mock-7b\" and t[\"usage\"][\"calls\"]==1, t'"
+for i in $(seq 1 40); do me estate status 2>/dev/null | grep -q 'inbox:      [1-9][0-9]* polls, [1-9][0-9]* items' && break; sleep 0.5; done
+check "maluctl estate status: the inbox loop's polls and items" "me estate status | grep -q 'inbox:      [1-9][0-9]* polls, [1-9][0-9]* items'"
+inj() { mock /mock/task -d "$1" | python3 -c 'import json,sys; t=json.load(sys.stdin)["task"]; print(t["state"], t.get("reason") or "")'; }
+check "/mock/task tampered -> the node refuses bad_signature" "inj '{\"agent\":\"helper\",\"sign\":\"tampered\",\"text\":\"x\",\"wait\":20}' | grep -q 'refused bad_signature'"
+check "/mock/task expired -> expired" "inj '{\"agent\":\"helper\",\"sign\":\"expired\",\"text\":\"x\",\"wait\":20}' | grep -q 'refused expired'"
+check "/mock/task valid then replay -> completed, then replay" "inj '{\"agent\":\"helper\",\"sign\":\"valid\",\"text\":\"one\",\"wait\":20}' | grep -q '^completed' && inj '{\"agent\":\"helper\",\"sign\":\"replay\",\"text\":\"again\",\"wait\":20}' | grep -q 'refused replay'"
+check "/mock/task from user:stranger to demo (its owner only) -> not_accepted" "inj '{\"agent\":\"demo\",\"originator\":\"user:stranger\",\"text\":\"x\",\"wait\":20}' | grep -q 'refused not_accepted'"
+check "/mock/task restricted to helper (ceiling internal) -> classification" "inj '{\"agent\":\"helper\",\"classification\":\"restricted\",\"text\":\"x\",\"wait\":20}' | grep -q 'refused classification'"
+check "each refusal is in the agent's log" "grep -q 'refused (bad_signature)' $W/agent-helper.log && grep -q 'refused (expired)' $W/agent-helper.log && grep -q 'refused (replay)' $W/agent-helper.log && grep -q 'not_accepted' $W/agent-demo.log && grep -q '(classification)' $W/agent-helper.log"
+check "a refusal reaches the originator's inbox as an fyi" "desk office inbox | grep -q 'fyi .*agent:helper on server:$NODEID: helper refused: classification'"
+printf 'accept_from: [org]\nmax_classification: internal\napprove: [restricted]\n' > "$W/agents/helper.policy.yaml"
+desk office agent $HELPER send --classification restricted secret stuff >$W/send2.out 2>$W/send2.err; true
+check "with approve: [restricted], a restricted task parks pending_approval; the send says so" "grep -q 'pending_approval' $W/send2.err"
+TID2=$(sed -n 's/^task \(t_[0-9a-f]*\) pending_approval.*/\1/p' $W/send2.err | head -1)
+check "the person's inbox: decision_needed from helper, unread" "desk office inbox | grep -q \"decision_needed .*agent:helper on server:$NODEID: helper asks to run a restricted task .*\\[approve, deny\\]\""
+IID=$(desk office inbox --json | python3 -c 'import json,sys; print([i["id"] for i in json.load(sys.stdin)["items"] if i["kind"]=="decision_needed"][0])')
+check "decide approve (the desk's envelope): the task is queued again, the agent runs it with the answer, it completes" "desk office inbox decide $IID approve --note ok | grep -q 'decide approve; task $TID2 queued' && for i in \$(seq 1 60); do me estate tasks $TID2 | grep -q 'completed' && break; sleep 0.5; done; me estate tasks $TID2 | grep -q 'pong after approve: secret stuff'"
+check "the decided item is done, signed by the desk" "mock /mock/delegation | python3 -c 'import json,sys; i=[x for x in json.load(sys.stdin)[\"inbox\"] if x[\"id\"]==$IID][0]; assert i[\"status\"]==\"done\" and i[\"decision\"]==\"approve\" and i[\"answered_by\"]==\"desk:$DESKID\", i'"
+check "/mock/inbox injects a question; inbox shows it unread; a reply with the desk's envelope answers it" "mock /mock/inbox -d '{\"kind\":\"question\",\"subject\":\"which colour?\"}' >/dev/null && desk office inbox | grep -q 'question .*which colour' && desk office inbox reply \$(desk office inbox --json | python3 -c 'import json,sys; print([i[\"id\"] for i in json.load(sys.stdin)[\"items\"] if i[\"kind\"]==\"question\"][0])') blue | grep -q 'reply sent'"
+check "office inbox --all lists the answered items" "desk office inbox --all | grep -q -- '-> blue' && desk office inbox --all | grep -q -- '-> approve'"
+check "estate action: reboot refused not_allowed (not in actions.allow); restart_agent helper runs systemctl (no such unit here: failed) and the result reaches the inbox" "desk office estate action node-two reboot 2>&1 | grep -q 'refused\\|not_allowed' && desk office estate action node-two restart_agent helper --wait 20 2>&1 | grep -qE 'restart_agent helper on node-two: (completed|failed)' && desk office inbox | grep -q 'result .*restart_agent helper on node-two'"
+printf 'name: late\ncapabilities: [late]\nowner: user:%s\naccept_from: [org]\ntasks: true\n' "$ME" > "$W/agents/late.manifest.yaml"; chmod 644 "$W/agents/late.manifest.yaml"; date +%s > "$W/estate-run/agents-changed"
+for i in $(seq 1 60); do me estate agents 2>/dev/null | grep -q '^  late' && break; sleep 0.5; done
+check "a manifest written after the daemon started registers at once through the hint" "me estate agents | grep -q '^  late .*node-two'"
+kill -TERM $(cat "$W/estated2.pid") $(cat "$W/agent-helper.pid") $(cat "$W/agent-demo.pid") 2>/dev/null; sleep 1
+check "estate leave: the node's agents are gone from the directory and its key from the keys" "root estate leave | grep -q 'left Local Office' && ! desk office agents --refresh | grep -q 'node-two' && ! me estate keys | grep -q \"server:$NODEID\""
+check "office leave: the desk key goes with the token" "root office leave >/dev/null && ! me secret list | grep -q 'user:$ME/office-desk-key'"
+check "no private key in the logs" "! grep -q 'BEGIN OPENSSH PRIVATE KEY' $W/estated2.log $W/office.log $W/agent-helper.log $W/daemon.log"
 
 echo; echo "$n checks, $fail failed"
 [ $fail = 0 ] && echo "PASS: maluctl office against the mock office" || echo "FAIL"

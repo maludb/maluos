@@ -1,0 +1,22 @@
+Package: maludb-os-core
+Version: 2026.10.28maluos2
+Architecture: amd64
+Maintainer: Edward Honour <ed@maludb.org>
+Installed-Size: 701013
+Depends: adduser, sudo, apache2, libapache2-mod-php, php-cli, php-pgsql, php-curl, php-gd, php-mbstring, php-xml, php-zip, nodejs (>= 20), npm, python3, postgresql-client-18 | postgresql-client, cron, jq, openssl, curl, iproute2, git, maludb-api, maluos-firstboot
+Section: web
+Priority: optional
+Homepage: https://github.com/maludb/maludb-os-core
+Description: MaluDB Business OS kernel
+ The kernel of the MaluDB Business OS: the estate (buildings, offices,
+ desks), departments and people, the AI agent workforce (hiring, prompts,
+ skills, tool grants, runs and a token ledger), single sign-on and the
+ directory API for business applications, approvals and AI Ops.
+ .
+ A PHP JSON API behind Apache, a Next.js front end, Python MCP servers
+ and the agent runner, with MaluDB as activity memory. The code lives in
+ /var/www as upstream expects; the Composer dependencies, the built front
+ end and the Python virtual environment are built into the package. A
+ MaluOS first-boot component creates the kernel and memory databases, runs
+ the migrations, configures Apache and the services and creates the first
+ super-admin.

@@ -3,6 +3,7 @@
 tiers and aliases to backend models under the caller's policy, admission
 through the per-backend scheduler, streaming passthrough, a ledger row per
 call, live status, and the engine's model request queue drained as batch work."""
+import re
 import asyncio, collections, json, os, pwd, secrets, signal, socket, struct, sys, time, uuid
 import aiohttp, psycopg
 from aiohttp import web
@@ -523,6 +524,9 @@ class Gateway:
         if h["sensitivity"] and h["sensitivity"] not in SENS:
             raise ApiError(400, "bad_hint", f"sensitivity must be one of {', '.join(SENS)}")
         h["prefer"] = pick("X-MaluOS-Prefer", "prefer", lambda v: str(v).lower())
+        h["envelope"] = pick("X-MaluOS-Envelope", "envelope")        # Phase 13 slice 2: the delegation envelope's id, on the ledger row
+        if h["envelope"] and not re.fullmatch(r"env_[0-9a-f]{12,32}", h["envelope"]):
+            raise ApiError(400, "bad_hint", "envelope is env_ and hex")
         # G2: the node API's request fields (docs/inference-node-api.md §5, §6)
         node = body.pop("node", None) if isinstance(body, dict) else None
         node = node if isinstance(node, dict) else {}
@@ -804,6 +808,10 @@ class Gateway:
     def node_detail(self, call):
         """G2: what the node API's run record needs beside the row's columns."""
         d = {"request": call.id, "face": call.face, "mode": call.mode, "kind": call.kind}
+        if call.hints.get("envelope"):
+            d["envelope"] = call.hints["envelope"]                     # slice 2: maluctl gateway usage --envelope ID
+        if call.hints.get("sensitivity"):
+            d["sensitivity"] = call.hints["sensitivity"]
         if call.caller.token_name:
             d["token"] = call.caller.token_name
         if call.async_job:

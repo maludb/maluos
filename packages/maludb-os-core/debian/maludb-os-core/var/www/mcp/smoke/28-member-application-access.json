@@ -1,0 +1,16 @@
+[
+ {"lookup": {"app": "SELECT id FROM applications WHERE name = 'SMOKE 0925-233732 Scoped Reservations' AND status = 'active'",
+             "scope": "SELECT s.id FROM application_scopes s JOIN locations l ON l.id = s.location_id WHERE s.application_id = 40 AND l.name = 'SMOKE 0925-233732 Downtown' AND s.removed_at IS NULL",
+             "who": "SELECT id FROM members WHERE display_name = 'Priya Raman'"}},
+ {"lookup": {"free": "SELECT 'yes' WHERE NOT EXISTS (SELECT 1 FROM application_access WHERE application_id = {{app}} AND member_id = {{who}} AND scope_id = {{scope}} AND revoked_at IS NULL)"}},
+ {"tool": "application_access_grant", "args": {"application": "{{app}}", "member": "{{who}}", "scope": "{{scope}}", "roles": "user", "note": "SMOKE {{run}}"},
+  "save": {"grant": "record_id"}},
+ {"tool": "application_access_change", "args": {"application": "{{app}}", "application_access": "{{grant}}", "roles": "nope"}, "expect": "error"},
+ {"tool": "application_access_change", "args": {"application": "{{app}}", "application_access": "{{grant}}", "roles": "manager"},
+  "save": {"changed": "record_id"}},
+ {"lookup": {"moved": "SELECT 'yes' WHERE EXISTS (SELECT 1 FROM application_access WHERE id = {{grant}} AND revoked_at IS NOT NULL) AND EXISTS (SELECT 1 FROM application_access WHERE id = {{changed}} AND revoked_at IS NULL AND role_key = 'manager' AND capability = 'write' AND scope_id = {{scope}} AND note = 'SMOKE {{run}}')"}},
+ {"tool": "application_access_change", "args": {"application": "{{app}}", "application_access": "{{grant}}", "roles": "admin"}, "expect": "error"},
+ {"tool": "application_access_revoke", "args": {"application": "39", "application_access": "{{changed}}", "confirmed": true}, "expect": "error"},
+ {"tool": "application_access_revoke", "args": {"application": "{{app}}", "application_access": "{{changed}}", "confirmed": true}},
+ {"lookup": {"gone": "SELECT 'yes' WHERE NOT EXISTS (SELECT 1 FROM application_access WHERE application_id = {{app}} AND member_id = {{who}} AND scope_id = {{scope}} AND revoked_at IS NULL)"}}
+]

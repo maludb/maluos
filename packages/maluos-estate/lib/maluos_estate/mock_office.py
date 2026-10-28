@@ -32,8 +32,17 @@ deterministic replies. Lives in maluos-estate; maluos_desk.mock_office is the sa
   GET  /mock/state                         desks, heartbeats, chats, mcp calls (tokens hashed)
   POST /mock/retire {"desk_id": N}         retire a desk: its token answers 410 from then on
   POST /mock/code {"code": "..."}          add a one-time code
+  -- Phase 13 slice 2 (docs/phase13-slice2-delegation.md): the directory, the keys, envelopes verified as the kernel does
+  GET/POST /api/v1/estate/agents[/ID[/tasks]]   the directory; a node registers its agents; an agent's task interface (JSON-RPC)
+  GET  /api/v1/estate/keys                 every member's public key and the coordinator's
+  GET  /api/v1/estate/inbox?wait=N, POST …/inbox/ID/result    the node's inbox (tasks and actions, leased) and its results
+  GET  /api/v1/estate/tasks/ID, POST /api/v1/estate/tasks (tasks/send by target)
+  POST /api/v1/estate/nodes/ID/actions, GET /api/v1/estate/actions[/ID]
+  GET  /api/v1/desks/inbox?wait=N, POST …/inbox/ID/reply|decide|read, POST /api/v1/desks/key
+  POST /mock/task {"agent": NAME|ID, "originator": "user:x", "text": …, "sign": valid|tampered|expired|replay|stranger}   inject a task from the office
+  POST /mock/inbox {"kind": "decision_needed", "subject": …}   inject an item into the person's inbox;  GET /mock/delegation  the state
 """
-import argparse, ipaddress, hashlib, json, secrets, sys, threading, time
+import argparse, ipaddress, hashlib, json, re, secrets, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 SURFACE = 1
@@ -70,6 +79,17 @@ class Office:
         self.tasks = {a["id"]: [] for a in self.AGENTS}      # agent id -> tasks (Phase 12 slice 8)
         for f in self.fake_spokes:                           # after the tables exist: allocation looks at nodes and desks
             self.ov_allocate(f, f["overlay_key"])
+        # Phase 13 slice 2: the directory, tasks, actions, the person's inbox, the replay memory, the coordinator's key
+        from maluos_estate import envelope as E
+        self.E = E
+        self.agents = {}            # id -> directory row
+        self.next_agent_id = 101
+        self.estate_tasks = {}      # id -> task row
+        self.estate_actions = {}    # id -> action row
+        self.inbox = []             # the person's (member 1) estate inbox items
+        self.next_inbox_id = 501
+        self.nonces = E.Nonces()
+        self.coordinator_priv, self.coordinator_pub = E.genkey("coordinator")
 
     # -- the overlay (slice 1b): addresses, the hub, the peers and the names the kernel will publish
     @staticmethod
@@ -204,13 +224,14 @@ class Office:
         return {"heartbeat": f"{base}/api/v1/desks/heartbeat", "me": f"{base}/api/v1/desks/me", "leave": f"{base}/api/v1/desks/leave",
                 "records": f"{base}/mcp/records", "activity": f"{base}/mcp/activity", "memory": f"{base}/mcp/memory", "actions": None,
                 "models": {"url": f"{base}/desk-models", "models": list(self.models)}, "apps": f"{base}/api/v1/desks/apps",
-                "agents": f"{base}/api/v1/desks/agents", "estate": f"{base}/api/v1/desks/estate"}
+                "agents": f"{base}/api/v1/desks/agents", "estate": f"{base}/api/v1/desks/estate",
+                "inbox": f"{base}/api/v1/desks/inbox", "key": f"{base}/api/v1/desks/key", "keys": f"{base}/api/v1/estate/keys", "actions": f"{base}/api/v1/estate/actions"}
 
     # -- the estate (Phase 13 slice 1): nodes, the report, the health rules the kernel will apply, the alerts
     CRITICAL_UNITS = ("postgresql@18-main.service", "maluos-vault.service")
 
     def node_endpoints(self, base):
-        return {k: f"{base}/api/v1/estate/{k}" for k in ("heartbeat", "me", "leave", "nodes")}
+        return {k: f"{base}/api/v1/estate/{k}" for k in ("heartbeat", "me", "leave", "nodes", "agents", "keys", "inbox", "tasks")}
 
     def node_answer(self, node, base):
         ov = self.ov_block(node)
@@ -391,6 +412,327 @@ class Office:
             return {"jsonrpc": "2.0", "id": rid, "result": {"tasks": list(reversed(mine))[:int(params.get("limit") or 50)]}}
         return {"jsonrpc": "2.0", "id": rid, "error": {"code": -32601, "message": f"unknown method {method}"}}
 
+    # -- Phase 13 slice 2: the directory, envelopes, tasks, the node's inbox, actions, the person's inbox
+    def dg_node_ref(self, m):
+        return "desk:%d" % m["id"] if "owner" in m and "kind" not in m else "%s:%d" % (m["kind"], m["id"])
+
+    def dg_keys_table(self):
+        t = {"coordinator": self.coordinator_pub}
+        for n in self.nodes.values():
+            if n["status"] == "active" and n.get("public_key"):
+                t[self.dg_node_ref(n)] = n["public_key"]
+        for d in self.desks.values():
+            if d["status"] == "active" and d.get("public_key"):
+                t[self.dg_node_ref(d)] = d["public_key"]
+        return t
+
+    def dg_keys_answer(self):
+        keys = []
+        for n in list(self.nodes.values()) + list(self.desks.values()):
+            if n["status"] == "active" and n.get("public_key"):
+                keys.append({"node": self.dg_node_ref(n), "kind": n.get("kind", "desk"), "name": n["name"], "public_key": n["public_key"], "presence": n["presence"]})
+        return {"ok": True, "surface": SURFACE, "coordinator": {"node": "coordinator", "public_key": self.coordinator_pub}, "keys": keys, "fetched_at": now()}
+
+    def dg_register(self, node, manifests):
+        seen = set(); n = 0
+        for m in manifests:
+            if not isinstance(m, dict) or not isinstance(m.get("name"), str) or not re.fullmatch(r"[a-z][a-z0-9-]{0,30}", m["name"]):
+                continue
+            row = next((a for a in self.agents.values() if a["location_id"] == node["id"] and a["name"] == m["name"]), None)
+            if row is None:
+                row = {"id": self.next_agent_id, "location_id": node["id"]}; self.next_agent_id += 1; self.agents[row["id"]] = row
+            row.update({"name": m["name"], "principal": m.get("principal") or "agent:" + m["name"], "display_name": m.get("display") or m.get("display_name"), "description": m.get("description") or "",
+                        "capabilities": sorted({str(c).lower() for c in (m.get("capabilities") or []) if c}), "owner": m.get("owner") if m.get("owner") not in ("", "none") else None,
+                        "accept_from": [str(x) for x in (m.get("accept_from") or [])], "max_classification": m.get("max_classification"), "approve": [str(x) for x in (m.get("approve") or [])],
+                        "tasks": m.get("tasks", True) is not False, "unit_state": m.get("unit_state") or m.get("active"), "status": "active", "last_seen_at": now()})
+            seen.add(m["name"]); n += 1
+        removed = 0
+        for a in self.agents.values():
+            if a["location_id"] == node["id"] and a["status"] == "active" and a["name"] not in seen:
+                a["status"], a["removed_at"] = "removed", now(); removed += 1
+        return {"registered": n, "removed": removed}
+
+    def dg_deregister(self, node):
+        for a in self.agents.values():
+            if a["location_id"] == node["id"] and a["status"] == "active":
+                a["status"], a["removed_at"] = "removed", now()
+
+    def dg_present_agent(self, a, base):
+        n = self.nodes.get(a["location_id"]) or {}
+        node = {"id": n.get("id"), "kind": n.get("kind"), "name": n.get("name"), "presence": n.get("presence"), "ref": self.dg_node_ref(n) if n else None}
+        online = node["presence"] == "online" and (a.get("unit_state") or "active") == "active"
+        return {"id": a["id"], "name": a["name"], "principal": a["principal"], "display_name": a.get("display_name"), "description": a.get("description") or "",
+                "capabilities": a["capabilities"], "owner": a.get("owner"), "accept_from": a["accept_from"], "max_classification": a.get("max_classification"), "approve": a.get("approve") or [],
+                "node": node, "status": a["status"], "unit_state": a.get("unit_state"), "presence": "removed" if a["status"] != "active" else ("online" if online else "offline"),
+                "state": "failed" if a.get("unit_state") == "failed" else "idle", "tasks": f"{base}/api/v1/estate/agents/{a['id']}/tasks" if a["tasks"] and a["status"] == "active" else None,
+                "card": None, "hired": False, "first_seen_at": a.get("last_seen_at"), "last_seen_at": a.get("last_seen_at")}
+
+    def dg_agents_answer(self, base, capability=None, node_id=None):
+        rows = [a for a in self.agents.values() if a["status"] == "active" and (not capability or capability.lower() in a["capabilities"]) and (node_id is None or a["location_id"] == node_id)]
+        return {"ok": True, "surface": SURFACE, "agents": [self.dg_present_agent(a, base) for a in sorted(rows, key=lambda a: (a["location_id"], a["name"]))], "fetched_at": now()}
+
+    def dg_desk_agents(self, base):
+        """The directory in the slice 8 shape, beside the office's own agents."""
+        out = []
+        for a in self.agents.values():
+            if a["status"] != "active":
+                continue
+            p = self.dg_present_agent(a, base)
+            out.append({"id": str(a["id"]), "name": p["display_name"] or p["name"], "agent": p["name"], "description": p["description"], "icon": "maluos-logo", "capabilities": p["capabilities"],
+                        "owner": p["owner"], "accept_from": p["accept_from"], "max_classification": p["max_classification"], "node": p["node"]["name"], "node_ref": p["node"]["ref"], "node_kind": p["node"]["kind"],
+                        "presence": p["presence"], "state": p["state"], "principal": p["principal"], "hired": False,
+                        "tasks": f"{base}/api/v1/desks/agents/{a['id']}/tasks" if p["tasks"] else None, "activity": f"{base}/api/v1/desks/agents/{a['id']}/activity", "page": f"{base}/settings/desks"})
+        return out
+
+    def dg_accepts(self, a, originator):
+        return self.E.accepts(a["accept_from"], a.get("owner"), originator)
+
+    def dg_verify(self, env, expect_signer):
+        return self.E.verify(env, self.dg_keys_table(), expect_signer, self.nonces)
+
+    def dg_present_task(self, t):
+        res = t.get("result") or {}
+        return {"id": t["id"], "state": "queued" if t["state"] == "leased" else t["state"], "ts": t["created_at"], "input": t["input"], "output": res.get("output"),
+                "error": res.get("error") or (t.get("reason") if t["state"] in ("refused", "failed") else None), "done_ts": t.get("done_at"), "envelope_id": t["envelope"]["id"], "hop": t["hop"],
+                "agent": {"id": t["agent_id"], "name": t["agent_name"], "principal": t["agent_principal"]}, "node": t["node"], "originator": t["originator"], "sender": t["sender"],
+                "reason": t.get("reason"), "leases": t["leases"], "provenance": res.get("provenance"), "usage": res.get("usage"), "ask": res.get("ask") if t["state"] == "pending_approval" else None}
+
+    def dg_rpc(self, a, req, member, base):
+        """agent/card, tasks/send (with the envelope), tasks/get, tasks/list for a directory agent; member is the caller's desk or node row."""
+        err = lambda code, msg, reason=None: {"error": {"code": code, "message": msg, **({"data": {"reason": reason}} if reason else {})}}
+        method, params = req.get("method"), req.get("params") or {}
+        signer = self.dg_node_ref(member)
+        if method == "agent/card":
+            p = self.dg_present_agent(a, base)
+            return {"result": {"name": p["display_name"] or p["name"], "description": p["description"], "capabilities": p["capabilities"], "principal": p["principal"], "owner": p["owner"],
+                               "node": p["node"]["ref"], "accept_from": p["accept_from"], "protocol": "maluos-tasks/0.3"}}
+        if method == "tasks/send":
+            if a["status"] != "active" or not a["tasks"]:
+                return err(-32004, "This agent takes no tasks.", "not_available")
+            parts = (params.get("message") or {}).get("parts") or ([{"type": "text", "text": params["text"]}] if params.get("text") else [])
+            text = " ".join(p.get("text", "") for p in parts if isinstance(p, dict)).strip()
+            if not text:
+                return err(-32602, "tasks/send needs message.parts with text")
+            env = params.get("envelope")
+            if not isinstance(env, dict):
+                return err(-32602, "tasks/send to an estate agent needs an envelope", "envelope_required")
+            ok, reason, msg = self.dg_verify(env, signer)
+            if not ok:
+                return err(-32001, msg, reason)
+            tgt = env.get("target") or {}
+            if tgt.get("agent") and tgt["agent"] != a["name"]:
+                return err(-32602, "envelope.target.agent is not this agent", "bad_envelope")
+            if tgt.get("node") and tgt["node"] != self.dg_node_ref(self.nodes[a["location_id"]]):
+                return err(-32602, "envelope.target.node is not this agent's node", "bad_envelope")
+            hop = max(1, len(env.get("chain") or []))
+            old = next((t for t in self.estate_tasks.values() if t["envelope"]["id"] == env["id"] and t["hop"] == hop), None)
+            if old:
+                return {"result": self.dg_present_task(old)}
+            tid = "t_" + secrets.token_hex(8)
+            t = {"id": tid, "envelope": env, "hop": hop, "agent_id": a["id"], "agent_name": a["name"], "agent_principal": a["principal"], "location_id": a["location_id"],
+                 "node": self.dg_node_ref(self.nodes[a["location_id"]]), "originator": (env.get("originator") or {}).get("principal"), "originator_member": 1 if "owner" in member else None,
+                 "sender": {"principal": (env.get("sender") or {}).get("principal"), "node": signer}, "input": {"text": text, "parts": parts}, "state": "queued", "lease_until": None, "leases": 0,
+                 "result": None, "reason": None, "created_at": now(), "done_at": None}
+            self.estate_tasks[tid] = t
+            if params.get("wait", True) is not False:
+                deadline = time.time() + min(float(params.get("timeout") or 30), 60)
+                while t["state"] in ("queued", "leased", "running") and time.time() < deadline:
+                    self.lock.release()
+                    try:
+                        time.sleep(0.25)
+                    finally:
+                        self.lock.acquire()
+            return {"result": self.dg_present_task(t)}
+        if method == "tasks/get":
+            t = self.estate_tasks.get(params.get("id") or "")
+            if not t or t["agent_id"] != a["id"]:
+                return err(-32004, "no such task")
+            return {"result": self.dg_present_task(t)}
+        if method == "tasks/list":
+            rows = sorted((t for t in self.estate_tasks.values() if t["agent_id"] == a["id"]), key=lambda t: t["created_at"], reverse=True)
+            return {"result": {"tasks": [self.dg_present_task(t) for t in rows[:int(params.get("limit") or 50)]]}}
+        return err(-32601, f"unknown method {method}")
+
+    def dg_lease_sweep(self):
+        for tbl in (self.estate_tasks, self.estate_actions):
+            for t in tbl.values():
+                if t["state"] == "leased" and t["lease_until"] and t["lease_until"] < time.time():
+                    if t["leases"] >= 3:
+                        t.update(state="failed", reason="node_unresponsive", done_at=now(), lease_until=None)
+                    else:
+                        t.update(state="queued", lease_until=None)
+
+    def dg_inbox_take(self, node):
+        self.dg_lease_sweep()
+        items = []
+        for t in sorted(self.estate_tasks.values(), key=lambda t: t["created_at"]):
+            if t["location_id"] == node["id"] and t["state"] == "queued":
+                t.update(state="leased", lease_until=time.time() + 120, leases=t["leases"] + 1)
+                items.append({"id": t["id"], "kind": "task", "agent": t["agent_name"], "envelope": t["envelope"], "message": {"role": "user", "parts": t["input"]["parts"]},
+                              "answer": (t.get("result") or {}).get("answer"), "lease_until": now(), "leases": t["leases"]})
+        for x in sorted(self.estate_actions.values(), key=lambda t: t["created_at"]):
+            if x["location_id"] == node["id"] and x["state"] == "queued":
+                x.update(state="leased", lease_until=time.time() + 120, leases=x["leases"] + 1)
+                items.append({"id": x["id"], "kind": "action", "action": x["action"], "agent": x.get("agent"), "envelope": x["envelope"], "lease_until": now(), "leases": x["leases"]})
+        return items
+
+    def dg_inbox_post(self, kind, subject, body, from_principal, from_node, task_id=None, options=None):
+        item = {"id": self.next_inbox_id, "kind": kind, "subject": subject[:300] or "(no subject)", "body": (body or "")[:20000], "from": {"principal": from_principal, "node": from_node},
+                "task_id": task_id, "options": options, "status": "unread", "decision": None, "decision_note": None, "reply": None, "created_at": now(), "read_at": None, "done_at": None}
+        self.next_inbox_id += 1; self.inbox.append(item)
+        return item
+
+    def dg_result(self, node, item_id, body):
+        res = body.get("result") if isinstance(body.get("result"), dict) else {}
+        if item_id.startswith("t_"):
+            t = self.estate_tasks.get(item_id)
+            if not t or t["location_id"] != node["id"]:
+                return 404, {"error": "not_found", "message": "no such task of this node"}
+            if t["state"] in ("completed", "failed", "refused"):
+                return 200, {"ok": True, "task": self.dg_present_task(t), "note": "already done"}
+            state = res.get("state") or ("refused" if body.get("refused") else "failed")
+            reason = body.get("refused") if isinstance(body.get("refused"), str) else res.get("reason")
+            if state in ("working",):
+                state = "running"
+            if state not in ("completed", "failed", "refused", "pending_approval", "running"):
+                state = "failed"
+            keep = {k: res[k] for k in ("output", "error", "provenance", "usage", "ask", "answer") if k in res}
+            if state == "pending_approval":
+                ask = res.get("ask") or {}
+                self.dg_inbox_post("question" if ask.get("kind") == "question" else "decision_needed", ask.get("subject") or f"{t['agent_name']} asks to run a task", ask.get("body") or "",
+                                   t["agent_principal"], t["node"], t["id"], ask.get("options") or ["approve", "deny"])
+            t.update(state=state, reason=reason, result=keep, lease_until=None, done_at=now() if state in ("completed", "failed", "refused") else None)
+            if state in ("failed", "refused") and t.get("originator_member"):
+                self.dg_inbox_post("fyi", f"{t['agent_name']} {state}: {reason or keep.get('error') or 'the task did not complete'}", "", t["agent_principal"], t["node"], t["id"])
+            return 200, {"ok": True, "task": self.dg_present_task(t)}
+        if item_id.startswith("a_"):
+            x = self.estate_actions.get(item_id)
+            if not x or x["location_id"] != node["id"]:
+                return 404, {"error": "not_found", "message": "no such action of this node"}
+            if x["state"] in ("completed", "failed", "refused"):
+                return 200, {"ok": True, "action": self.dg_present_action(x), "note": "already done"}
+            state = res.get("state") or ("completed" if res.get("ok") else ("refused" if body.get("refused") else "failed"))
+            reason = body.get("refused") if isinstance(body.get("refused"), str) else (res.get("reason") or res.get("error"))
+            x.update(state=state if state in ("completed", "failed", "refused") else "failed", reason=reason, result={k: res.get(k) for k in ("ok", "output", "error", "state") if k in res}, lease_until=None, done_at=now())
+            self.dg_inbox_post("result", f"{x['action']}{' ' + x['agent'] if x.get('agent') else ''} on {node['name']}: {x['state']}" + (f" ({reason})" if reason else ""), str(res.get("output") or "")[:4000], "node", self.dg_node_ref(node))
+            return 200, {"ok": True, "action": self.dg_present_action(x)}
+        return 404, {"error": "not_found", "message": "an item id is t_… or a_…"}
+
+    def dg_present_action(self, x):
+        n = self.nodes.get(x["location_id"]) or {}
+        return {"id": x["id"], "node": {"id": x["location_id"], "name": n.get("name")}, "action": x["action"], "agent": x.get("agent"), "state": x["state"], "reason": x.get("reason"),
+                "result": x.get("result"), "requested_by": 1, "envelope_id": x["envelope"]["id"], "created_at": x["created_at"], "done_at": x.get("done_at")}
+
+    def dg_action_create(self, node, desk, b):
+        action = b.get("action"); agent = b.get("agent")
+        if action not in ("restart_agent", "start_agent", "stop_agent", "apply_updates", "reboot"):
+            return 400, {"error": "invalid", "message": "action is one of restart_agent, start_agent, stop_agent, apply_updates, reboot"}
+        if action.endswith("_agent") and not (isinstance(agent, str) and re.fullmatch(r"[a-z][a-z0-9-]{0,30}", agent)):
+            return 400, {"error": "invalid", "message": "the agent actions need agent"}
+        env = b.get("envelope")
+        if not isinstance(env, dict):
+            return 400, {"error": "envelope_required", "message": "a node action carries the desk's envelope"}
+        ok, reason, msg = self.dg_verify(env, self.dg_node_ref(desk))
+        if not ok:
+            return 403, {"error": reason, "message": msg}
+        if (env.get("target") or {}).get("node") != self.dg_node_ref(node):
+            return 400, {"error": "bad_envelope", "message": "envelope.target.node is not this node"}
+        x = {"id": "a_" + secrets.token_hex(8), "location_id": node["id"], "action": action, "agent": agent if action.endswith("_agent") else None, "envelope": env, "state": "queued",
+             "lease_until": None, "leases": 0, "result": None, "reason": None, "created_at": now(), "done_at": None}
+        self.estate_actions[x["id"]] = x
+        if b.get("wait"):
+            deadline = time.time() + min(float(b["wait"]), 60)
+            while x["state"] in ("queued", "leased") and time.time() < deadline:
+                self.lock.release()
+                try:
+                    time.sleep(0.25)
+                finally:
+                    self.lock.acquire()
+        return 201, {"ok": True, "surface": SURFACE, "action": self.dg_present_action(x)}
+
+    def dg_desk_inbox(self, all_items=False, since=0):
+        rows = [i for i in self.inbox if i["id"] > since and (all_items or i["status"] == "unread")]
+        rows.sort(key=lambda i: i["id"], reverse=True)
+        return {"ok": True, "surface": SURFACE, "unread": sum(1 for i in self.inbox if i["status"] == "unread"), "items": rows[:50], "fetched_at": now()}
+
+    def dg_inbox_answer(self, desk, item_id, what, b):
+        item = next((i for i in self.inbox if i["id"] == item_id), None)
+        if not item:
+            return 404, {"error": "not_found", "message": "no such inbox item of yours"}
+        if what == "read":
+            if item["status"] == "unread":
+                item.update(status="read", read_at=now())
+            return 200, {"ok": True, "surface": SURFACE, "read": 1}
+        if item["status"] == "done":
+            return 409, {"error": "conflict", "message": "this item was answered already"}
+        env = b.get("envelope")
+        if not isinstance(env, dict):
+            return 400, {"error": "envelope_required", "message": "a reply or decision carries the desk's envelope"}
+        ok, reason, msg = self.dg_verify(env, self.dg_node_ref(desk))
+        if not ok:
+            return 403, {"error": reason, "message": msg}
+        decision = note = reply = None
+        if what == "decide":
+            decision = str(b.get("decision") or "").lower()
+            if decision not in (item.get("options") or ["approve", "deny"]):
+                return 400, {"error": "invalid", "message": "decision is one of " + ", ".join(item.get("options") or ["approve", "deny"])}
+            note = b.get("note")
+        else:
+            reply = str(b.get("text") or "").strip()
+            if not reply:
+                return 400, {"error": "invalid", "message": "text is required"}
+        item.update(status="done", decision=decision, decision_note=note, reply=reply, answer_envelope=env, read_at=item["read_at"] or now(), done_at=now())
+        task = None
+        t = self.estate_tasks.get(item.get("task_id") or "")
+        if t and t["state"] == "pending_approval":
+            res = dict(t.get("result") or {})
+            res["answer"] = {"kind": "decision" if what == "decide" else "reply", "decision": decision, "note": note, "text": reply, "by": (env.get("sender") or {}).get("principal"), "envelope": env, "ts": now()}
+            t.update(state="queued", result=res, lease_until=None)
+            task = self.dg_present_task(t)
+        return 200, {"ok": True, "surface": SURFACE, "item": {k: v for k, v in item.items() if k != "answer_envelope"}, "task": task}
+
+    def dg_public(self):
+        return {"agents": [self.dg_present_agent(a, "") for a in self.agents.values()], "tasks": [self.dg_present_task(t) for t in self.estate_tasks.values()],
+                "actions": [self.dg_present_action(x) for x in self.estate_actions.values()],
+                "inbox": [{k: v for k, v in i.items() if k != "answer_envelope"} | {"answered_by": ((i.get("answer_envelope") or {}).get("sig") or {}).get("key")} for i in self.inbox],
+                "keys": self.dg_keys_table(), "nonces": len(self.nonces.seen)}
+
+    def dg_inject_task(self, b, base):
+        """/mock/task: a task from a named originator to a directory agent, signed valid|tampered|expired|replay|stranger (the office's own key, as the coordinator)."""
+        name = str(b.get("agent") or "")
+        a = next((x for x in self.agents.values() if x["status"] == "active" and (x["name"] == name or str(x["id"]) == name)), None)
+        if not a:
+            return 404, {"error": "not_found", "message": f"no agent {name!r} in the directory"}
+        E = self.E
+        sign = b.get("sign") or "valid"
+        originator = {"principal": b.get("originator") or "user:mock", "kind": "human", "node": "coordinator"}
+        cls = b.get("classification") or "internal"
+        env = E.make(originator, {"principal": b.get("sender") or originator["principal"], "node": "coordinator"}, {"agent": a["name"], "node": self.dg_node_ref(self.nodes[a["location_id"]])},
+                     b.get("purpose") or "injected by the mock", {"scopes": [], "classification": cls, "budget": {"usd": 0.1, "calls": 5}})
+        if sign == "expired":
+            env["issued_at"] = E.utc(time.time() - 7200); env["expires_at"] = E.utc(time.time() - 3600)
+        if sign == "replay" and getattr(self, "_last_nonce", None):
+            env["nonce"] = self._last_nonce
+        env = E.sign(env, "coordinator", self.coordinator_priv)
+        if sign == "tampered":
+            env["purpose"] = "tampered after signing"
+        self._last_nonce = env["nonce"]
+        text = b.get("text") or "injected task"
+        tid = "t_" + secrets.token_hex(8)
+        t = {"id": tid, "envelope": env, "hop": 1, "agent_id": a["id"], "agent_name": a["name"], "agent_principal": a["principal"], "location_id": a["location_id"],
+             "node": self.dg_node_ref(self.nodes[a["location_id"]]), "originator": originator["principal"], "originator_member": 1, "sender": {"principal": env["sender"]["principal"], "node": "coordinator"},
+             "input": {"text": text, "parts": [{"type": "text", "text": text}]}, "state": "queued", "lease_until": None, "leases": 0, "result": None, "reason": None, "created_at": now(), "done_at": None}
+        self.estate_tasks[tid] = t
+        if b.get("wait"):
+            deadline = time.time() + min(float(b["wait"]), 60)
+            while t["state"] in ("queued", "leased", "running") and time.time() < deadline:
+                self.lock.release()
+                try:
+                    time.sleep(0.25)
+                finally:
+                    self.lock.acquire()
+        return 201, {"ok": True, "task": self.dg_present_task(t), "envelope": env}
+
     APPS = [{"id": "malumail", "name": "MaluMail", "description": "Mail for the office, with agents that read and draft with you.", "icon": "mail-unread", "kind": "web", "path": "/apps/mail", "version": "1"},
             {"id": "helpdesk", "name": "Help Desk", "description": "Cases, queues and the Help Desk agent.", "icon": "help-faq", "kind": "web", "path": "/apps/helpdesk", "version": "1"},
             {"id": "crm", "name": "CRM", "description": "Accounts, contacts, deals.", "icon": "x-office-address-book", "kind": "web", "path": "/apps/crm", "version": "1"},
@@ -540,12 +882,94 @@ class Handler(BaseHTTPRequestHandler):
             if e:
                 return self.err(*e)
             with o.lock:
-                return self.send(200, o.agents_answer(self.base()))
+                ans = o.agents_answer(self.base())
+                ans["agents"] = o.dg_desk_agents(self.base()) + ans["agents"]     # slice 2: the directory first, the office's own agents after
+                return self.send(200, ans)
+        if p == "/api/v1/estate/keys":
+            ok, e = self.estate_viewer()
+            if not ok:
+                return self.err(*e)
+            with o.lock:
+                return self.send(200, o.dg_keys_answer())
+        if p == "/api/v1/estate/agents" or re.fullmatch(r"/api/v1/estate/agents/[0-9]+", p):
+            ok, e = self.estate_viewer()
+            if not ok:
+                return self.err(*e)
+            q = dict(x.split("=", 1) for x in (self.path.split("?", 1)[1].split("&") if "?" in self.path else []) if "=" in x)
+            with o.lock:
+                if p != "/api/v1/estate/agents":
+                    a = o.agents.get(int(p.rsplit("/", 1)[1]))
+                    return self.send(200, {"ok": True, "surface": SURFACE, "agent": o.dg_present_agent(a, self.base())}) if a else self.err(404, "not_found", "no such agent")
+                return self.send(200, o.dg_agents_answer(self.base(), q.get("capability"), int(q["node"]) if q.get("node", "").isdigit() else None))
+        if p == "/api/v1/estate/inbox":
+            node, e = self.node_from_bearer()
+            if e:
+                return self.err(*e)
+            q = dict(x.split("=", 1) for x in (self.path.split("?", 1)[1].split("&") if "?" in self.path else []) if "=" in x)
+            wait = min(float(q.get("wait") or 0), 25)
+            deadline = time.time() + wait
+            while True:
+                with o.lock:
+                    items = o.dg_inbox_take(node)
+                if items or time.time() >= deadline:
+                    return self.send(200, {"ok": True, "surface": SURFACE, "items": items, "lease_s": 120, "fetched_at": now()})
+                time.sleep(0.25)
+        if m := re.fullmatch(r"/api/v1/estate/tasks/(t_[0-9a-f]+)", p):
+            ok, e = self.estate_viewer()
+            if not ok:
+                return self.err(*e)
+            q = dict(x.split("=", 1) for x in (self.path.split("?", 1)[1].split("&") if "?" in self.path else []) if "=" in x)
+            deadline = time.time() + min(float(q.get("wait") or 0), 60)
+            while True:
+                with o.lock:
+                    t = o.estate_tasks.get(m.group(1))
+                    if not t:
+                        return self.err(404, "not_found", "no such task")
+                    if t["state"] not in ("queued", "leased", "running") or time.time() >= deadline:
+                        return self.send(200, {"ok": True, "surface": SURFACE, "task": o.dg_present_task(t)})
+                time.sleep(0.25)
+        if p == "/api/v1/estate/actions" or (m := re.fullmatch(r"/api/v1/estate/actions/(a_[0-9a-f]+)", p)):
+            ok, e = self.estate_viewer()
+            if not ok:
+                return self.err(*e)
+            q = dict(x.split("=", 1) for x in (self.path.split("?", 1)[1].split("&") if "?" in self.path else []) if "=" in x)
+            with o.lock:
+                if p == "/api/v1/estate/actions":
+                    return self.send(200, {"ok": True, "surface": SURFACE, "actions": [o.dg_present_action(x) for x in o.estate_actions.values()]})
+            deadline = time.time() + min(float(q.get("wait") or 0), 60)
+            while True:
+                with o.lock:
+                    x = o.estate_actions.get(m.group(1))
+                    if not x:
+                        return self.err(404, "not_found", "no such action")
+                    if x["state"] not in ("queued", "leased") or time.time() >= deadline:
+                        return self.send(200, {"ok": True, "surface": SURFACE, "action": o.dg_present_action(x)})
+                time.sleep(0.25)
+        if p == "/api/v1/desks/inbox":
+            desk, e = self.desk_from_bearer()
+            if e:
+                return self.err(*e)
+            q = dict(x.split("=", 1) for x in (self.path.split("?", 1)[1].split("&") if "?" in self.path else []) if "=" in x)
+            deadline = time.time() + min(float(q.get("wait") or 0), 25)
+            while True:
+                with o.lock:
+                    ans = o.dg_desk_inbox(bool(q.get("all")), int(q.get("since") or 0))
+                if ans["items"] or time.time() >= deadline:
+                    return self.send(200, ans)
+                time.sleep(0.25)
+        if p == "/mock/delegation":
+            with o.lock:
+                return self.send(200, o.dg_public())
         if p.startswith("/api/v1/desks/agents/") and p.endswith("/activity"):
             desk, e = self.desk_from_bearer()
             if e:
                 return self.err(*e)
             aid = p.split("/")[5]
+            if aid.isdigit():
+                with o.lock:
+                    rows = [{"ts": t["created_at"], "kind": "task", "actor": t["originator"], "summary": f"task {t['id']} {t['state']}: {t['input']['text'][:60]}"}
+                            for t in sorted(o.estate_tasks.values(), key=lambda t: t["created_at"], reverse=True) if t["agent_id"] == int(aid)]
+                    return self.send(200, {"ok": True, "surface": SURFACE, "activity": rows[:50]})
             if aid not in o.tasks:
                 return self.err(404, "not_found", f"no agent {aid}")
             with o.lock:
@@ -622,7 +1046,11 @@ class Handler(BaseHTTPRequestHandler):
                     o.evaluate(node)
                 o.set_presence(node, presence)
                 o.heartbeats.append({"ts": node["last_seen_at"], "node_id": node["id"], "presence": presence, "report": isinstance(b.get("report"), dict)})
-                return self.send(200, {**o.node_answer(node, self.base()), "overlay_changed": o.ov_changed(node)})
+                registered = None
+                if isinstance(b.get("agents"), list):              # slice 2: the manifests, with the report's unit states
+                    units = {a.get("name"): a.get("active") for a in ((b.get("report") or {}).get("agents") or []) if isinstance(a, dict)}
+                    registered = o.dg_register(node, [dict(m, unit_state=units.get(m.get("name"), m.get("unit_state"))) for m in b["agents"] if isinstance(m, dict)])
+                return self.send(200, {**o.node_answer(node, self.base()), "overlay_changed": o.ov_changed(node), "agents_registered": registered})
         if p == "/api/v1/estate/leave":
             node, e = self.node_from_bearer()
             if e:
@@ -632,6 +1060,7 @@ class Handler(BaseHTTPRequestHandler):
                 o.set_presence(node, "offline")
                 o.clear_alerts(node, set())
                 o.ov_free(node)
+                o.dg_deregister(node)
                 o.node_tokens = {t: n for t, n in o.node_tokens.items() if n != node["id"]}
             return self.send(200, {"ok": True, "surface": SURFACE, "node": {"id": node["id"], "status": "retired"}})
         if p == "/api/v1/estate/overlay/key":
@@ -677,7 +1106,7 @@ class Handler(BaseHTTPRequestHandler):
                 if isinstance(b.get("facts"), dict):
                     desk["facts"].update(b["facts"])
                 o.heartbeats.append({"ts": desk["last_seen_at"], "desk_id": desk["id"], "presence": presence})
-                return self.send(200, {**o.answer(desk, self.base()), "overlay_changed": o.ov_changed(desk)})
+                return self.send(200, {**o.answer(desk, self.base()), "overlay_changed": o.ov_changed(desk), "inbox_unread": sum(1 for i in o.inbox if i["status"] == "unread")})
         if p == "/api/v1/desks/leave":
             desk, e = self.desk_from_bearer()
             if e:
@@ -702,10 +1131,98 @@ class Handler(BaseHTTPRequestHandler):
             if e:
                 return self.err(*e)
             aid = p.split("/")[5]
+            if aid.isdigit():
+                with o.lock:
+                    a = o.agents.get(int(aid))
+                    if not a:
+                        return self.err(404, "not_found", f"no agent {aid}")
+                    return self.send(200, {"jsonrpc": "2.0", "id": b.get("id"), **o.dg_rpc(a, b, desk, self.base())})
             if aid not in o.tasks:
                 return self.err(404, "not_found", f"no agent {aid}")
             with o.lock:
                 return self.send(200, o.agent_rpc(aid, b, desk))
+        if m := re.fullmatch(r"/api/v1/estate/agents/([0-9]+)/tasks", p):
+            auth = self.headers.get("Authorization") or ""
+            tok = auth[7:].strip() if auth.lower().startswith("bearer ") else ""
+            member, e = (self.desk_from_bearer() if tok.startswith("desk_") else self.node_from_bearer())
+            if e:
+                return self.err(*e)
+            with o.lock:
+                a = o.agents.get(int(m.group(1)))
+                if not a:
+                    return self.err(404, "not_found", "no such agent")
+                return self.send(200, {"jsonrpc": "2.0", "id": b.get("id"), **o.dg_rpc(a, b, member, self.base())})
+        if p == "/api/v1/estate/agents":
+            node, e = self.node_from_bearer()
+            if e:
+                return self.err(*e)
+            if not isinstance(b.get("agents"), list):
+                return self.err(400, "invalid", "agents is a list of manifests")
+            with o.lock:
+                r = o.dg_register(node, [m for m in b["agents"] if isinstance(m, dict)])
+                return self.send(200, {"ok": True, "surface": SURFACE, **r, "agents": o.dg_agents_answer(self.base(), None, node["id"])["agents"]})
+        if p == "/api/v1/estate/tasks":
+            auth = self.headers.get("Authorization") or ""
+            tok = auth[7:].strip() if auth.lower().startswith("bearer ") else ""
+            member, e = (self.desk_from_bearer() if tok.startswith("desk_") else self.node_from_bearer())
+            if e:
+                return self.err(*e)
+            env = (b.get("params") or {}).get("envelope") or {}
+            tgt = env.get("target") or {} if isinstance(env, dict) else {}
+            with o.lock:
+                a = None
+                if isinstance(tgt.get("agent"), str):
+                    a = next((x for x in o.agents.values() if x["status"] == "active" and x["name"] == tgt["agent"] and (not tgt.get("node") or o.dg_node_ref(o.nodes[x["location_id"]]) == tgt["node"])), None)
+                elif isinstance(tgt.get("capability"), str):
+                    orig = dict(env.get("originator") or {}, member_id=1 if "owner" in member else None)
+                    for x in sorted(o.agents.values(), key=lambda x: (o.nodes[x["location_id"]]["presence"] != "online", x["name"])):
+                        if x["status"] == "active" and x["tasks"] and tgt["capability"].lower() in x["capabilities"] and o.dg_accepts(x, orig):
+                            a = x; break
+                if not a:
+                    return self.send(200, {"jsonrpc": "2.0", "id": b.get("id"), "error": {"code": -32004, "message": "No agent in the directory answers that target.", "data": {"reason": "no_agent"}}})
+                return self.send(200, {"jsonrpc": "2.0", "id": b.get("id"), **o.dg_rpc(a, b, member, self.base())})
+        if m := re.fullmatch(r"/api/v1/estate/inbox/([ta]_[0-9a-f]+)/result", p):
+            node, e = self.node_from_bearer()
+            if e:
+                return self.err(*e)
+            with o.lock:
+                st, ans = o.dg_result(node, m.group(1), b)
+            return self.send(st, ans)
+        if m := re.fullmatch(r"/api/v1/estate/nodes/([0-9]+)/actions", p):
+            desk, e = self.desk_from_bearer()
+            if e:
+                return self.err(*e)
+            with o.lock:
+                node = o.nodes.get(int(m.group(1)))
+                if not node or node["status"] != "active":
+                    return self.err(404, "not_found", "no such node")
+                st, ans = o.dg_action_create(node, desk, b)
+            return self.send(st, ans)
+        if m := re.fullmatch(r"/api/v1/desks/inbox/([0-9]+)/(reply|decide|read)", p):
+            desk, e = self.desk_from_bearer()
+            if e:
+                return self.err(*e)
+            with o.lock:
+                st, ans = o.dg_inbox_answer(desk, int(m.group(1)), m.group(2), b)
+            return self.send(st, ans)
+        if p == "/api/v1/desks/key":
+            desk, e = self.desk_from_bearer()
+            if e:
+                return self.err(*e)
+            key = b.get("public_key")
+            if not isinstance(key, str) or not o.E.raw_public(key):
+                return self.err(400, "invalid", "public_key is an ssh-ed25519 line")
+            with o.lock:
+                desk["public_key"] = key.strip()
+            return self.send(200, {"ok": True, "surface": SURFACE, "node": o.dg_node_ref(desk), "public_key": key.strip()})
+        if p == "/mock/task":
+            with o.lock:
+                st, ans = o.dg_inject_task(b, self.base())
+            return self.send(st, ans)
+        if p == "/mock/inbox":
+            with o.lock:
+                item = o.dg_inbox_post(b.get("kind") or "decision_needed", b.get("subject") or "a question from the office", b.get("body") or "", b.get("from") or "agent:helpdesk", "coordinator", b.get("task_id"), b.get("options") or ["approve", "deny"])
+            return self.send(201, {"ok": True, "item": item})
         if p == "/mock/retire":
             with o.lock:
                 targets = [o.desks[b["desk_id"]]] if b.get("desk_id") in o.desks else list(o.desks.values())
@@ -742,6 +1259,8 @@ class Handler(BaseHTTPRequestHandler):
             e = o.ov_join(desk, b, allow_hub=False)
             if e:
                 return self.err(*e)
+            if isinstance(b.get("public_key"), str) and o.E.raw_public(b["public_key"]):
+                desk["public_key"] = b["public_key"].strip()           # slice 2: the desk's signing key
             o.desks[did] = desk; o.tokens[tok] = did
             ans = o.answer(desk, self.base()); ans["token"] = tok
         return self.send(201, ans)

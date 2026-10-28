@@ -30,6 +30,19 @@ $pdo = db();
 $pdo->beginTransaction();
 node_heartbeat($pdo, $ctx['node'], $presence, $body);
 $row = node_row($pdo, (int) $ctx['node']['id']);
+// db/190: the node's agents (the manifest list the daemon sends with each report and after agent create|remove)
+$registered = null;
+if (isset($body['agents']) && is_array($body['agents'])) {
+    $units = [];
+    foreach (is_array($body['report']['agents'] ?? null) ? $body['report']['agents'] : [] as $ra) {
+        if (is_array($ra) && is_string($ra['name'] ?? null)) { $units[$ra['name']] = $ra['active'] ?? null; }
+    }
+    $list = [];
+    foreach ($body['agents'] as $a) {
+        if (is_array($a) && is_string($a['name'] ?? null)) { $list[] = $a + ['unit_state' => $units[$a['name']] ?? ($a['unit_state'] ?? null)]; }
+    }
+    $registered = agents_register($pdo, $row, $list);
+}
 $changed = overlay_changed($pdo, $row);      // db/189: the overlay changed since this node last heard
 $pdo->commit();
-api_json(node_answer($pdo, $row) + ['overlay_changed' => $changed]);
+api_json(node_answer($pdo, $row) + ['overlay_changed' => $changed, 'agents_registered' => $registered]);

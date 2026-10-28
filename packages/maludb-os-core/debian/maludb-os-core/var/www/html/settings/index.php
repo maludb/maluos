@@ -1,0 +1,40 @@
+<?php
+declare(strict_types=1);
+
+require_once dirname(__DIR__, 2) . '/app/bootstrap.php';
+require_once dirname(__DIR__, 2) . '/app/features/settings/queries.php';
+
+require_login();
+$pdo = db();
+$me = (int) current_member_id();
+
+$section = request_string('section', 'profile');
+if (!in_array($section, ['profile', 'notifications', 'security', 'tokens', 'desks'], true)) {
+    $section = 'profile';
+}
+
+$sectionHtml = settings_section_html($pdo, $me, $section);
+if (($_SERVER['HTTP_HX_TARGET'] ?? '') === 'settings-content') {
+    header('Vary: HX-Request');
+    echo $sectionHtml;
+    exit;
+}
+log_screen_view($pdo, 'settings');
+if (wants_json()) {
+    require_once dirname(__DIR__, 2) . '/app/features/settings/present.php';
+    require_once dirname(__DIR__, 2) . '/app/features/estate/desks.php';
+    require_once dirname(__DIR__, 2) . '/app/features/estate/nodes.php';
+    $meRow = find_member_by_id($pdo, $me);
+    respond_screen(present_my_settings($meRow, list_mcp_tokens($pdo, $me),
+        app_url('/mcp/records'), app_url('/mcp/activity'), find_my_desks($pdo, $me))
+        + ['section' => $section, 'timezones' => timezone_identifiers_list(),
+           // db/188: an operator's Settings → Desks carries the estate's nodes and open alerts, and mints node codes.
+           'estate' => $section === 'desks' && estate_operator($meRow) ? present_estate_for_settings($pdo) : null,
+           // db/142: the application app.<domain>/ opens after sign-in, and the ones they may choose.
+           'default_application' => (static function () use ($pdo, $me): array {
+               require_once dirname(__DIR__, 2) . '/app/features/applications/queries.php';
+               return present_member_default_application($pdo, find_member_by_id($pdo, $me) ?? ['id' => $me]);
+           })()]);
+}
+render_screen('Settings · MaluDb OS', view('settings/page.php', ['section' => $section, 'sectionHtml' => $sectionHtml]),
+    ['activeNav' => 'nav-settings', 'screen' => 'settings']);

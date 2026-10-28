@@ -10,7 +10,7 @@ Rules-Requires-Root: no
 Package: maluos-estate
 Architecture: all
 Depends: ${misc:Depends}, adduser, python3 (>= 3.12), python3-yaml, python3-cryptography, openssh-client, wireguard-tools, iproute2, maluos-firstboot (>= 0.1.10), maluos-vault (>= 0.4.1)
-Recommends: maluos-gateway (>= 0.4.2)
+Recommends: maluos-gateway (>= 0.5.2), maluos-agent (>= 0.5.0)
 Description: MaluOS estate membership: maluctl estate and the node heartbeat
  A MaluOS server joins its estate the way a desk joins an office (Phase 13
  slice 1, docs/phase13-slice1-nodes.md): `sudo maluctl estate join URL

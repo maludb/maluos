@@ -45,6 +45,10 @@ try {
 // db/189: the desk's place on the overlay (its WireGuard key in the body); a desk is always a spoke.
 unset($body['overlay_hub']);
 overlay_join($pdo, (int) $made['desk']['id'], $body);
+// db/190: the desk's signing key, when it brought one (else POST /api/v1/desks/key later)
+if (is_string($body['public_key'] ?? null) && ssh_ed25519_raw($body['public_key']) !== null) {
+    $pdo->prepare('UPDATE locations SET public_key = :k WHERE id = :id')->execute(['k' => trim($body['public_key']), 'id' => (int) $made['desk']['id']]);
+}
 $desk = desk_row($pdo, (int) $made['desk']['id']);
 log_activity($pdo, 'desk.enroll', 'location', (int) $desk['id'], ['source' => 'desk',
     'after' => ['name' => $desk['name'], 'hostname' => $desk['hostname'], 'app_version' => $desk['app_version'], 'principal' => $principal]]);

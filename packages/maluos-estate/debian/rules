@@ -5,6 +5,7 @@
 override_dh_installsystemd:
 	dh_installsystemd --no-enable --no-start maluos-estate.service
 	dh_installsystemd --name=maluos-overlay --no-enable --no-start
+	dh_installsystemd --name=maluos-estate-updates --no-enable --no-start
 
 override_dh_auto_clean:
 	find lib -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true

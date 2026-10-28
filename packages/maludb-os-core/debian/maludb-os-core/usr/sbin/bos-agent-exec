@@ -1,0 +1,51 @@
+#!/bin/bash
+# bos-agent-exec — run one Hermes agent process, sandboxed. Installed root-owned at
+# /usr/local/sbin/bos-agent-exec; the agent runner (user bos-runner) may run it through sudo and
+# nothing else (docs/deploy/bos-runner.sudoers).
+#
+#   bos-agent-exec <agent_dir> <agent binary> <its args…>
+#
+# The binary must be one of the two the platform pins: Hermes, or the Claude Agent SDK's CLI.
+#
+# The process runs as bos-agent — it cannot read runner.env (provider keys) or config/.env — with a
+# read-only filesystem apart from its own agent directory, no privilege escalation, and NO NETWORK
+# BEYOND LOCALHOST: it can reach the ledger proxy and the MCP servers, and nothing off the box. A
+# Hermes model slot that ignored its configured base URL would fail here, not leak a call.
+set -euo pipefail
+
+AGENT_DIR=${1:?agent dir}; AGENT_BIN=${2:?agent binary}; shift 2
+[[ "$AGENT_DIR" =~ ^/var/lib/business-os/agents/[0-9]+$ ]] || { echo "bos-agent-exec: bad agent dir" >&2; exit 64; }
+case "$AGENT_BIN" in
+    /opt/hermes/venv/bin/hermes|/opt/claude-agent/bin/claude) ;;
+    *) echo "bos-agent-exec: bad binary" >&2; exit 64 ;;
+esac
+
+# The run's environment (including its two credentials) arrives on STDIN as KEY=VALUE lines — not
+# in sudo's environment, which sudo logs, and not in a transient unit's Environment=, which any
+# local user can read with `systemctl show`. It is handed to systemd as an EnvironmentFile that
+# only root can read and that is removed the moment the run ends.
+umask 077
+install -d -m 0700 /run/bos-agent
+ENVFILE=$(mktemp /run/bos-agent/run.XXXXXXXX.env)
+trap 'rm -f "$ENVFILE"' EXIT
+INPUT=$(cat)
+# The allow-list is deliberate: only these reach the agent. ANTHROPIC_BASE_URL is the ledger
+# proxy and ANTHROPIC_API_KEY is the run's proxy key — the Claude CLI's --bare mode will
+# authenticate with nothing else, so the agent cannot reach a provider directly even in principle.
+grep -E '^(PATH|LANG|HOME|HERMES_HOME|CLAUDE_CONFIG_DIR|ANTHROPIC_BASE_URL|ANTHROPIC_API_KEY|DISABLE_TELEMETRY|DISABLE_ERROR_REPORTING|DISABLE_AUTOUPDATER|BOS_RUN_TOKEN|BOS_PROXY_KEY|BOS_RUN_ID|BOS_RUNNER_URL)=' <<<"$INPUT" > "$ENVFILE" || true
+# The instructions arrive on stdin too (sudo logs its command line) and replace their placeholder.
+INSTRUCTIONS=$(grep -E '^BOS_INSTRUCTIONS_B64=' <<<"$INPUT" | head -1 | cut -d= -f2- | base64 -d)
+ARGS=()
+for a in "$@"; do [[ "$a" == "@bos-instructions-on-stdin@" ]] && ARGS+=("$INSTRUCTIONS") || ARGS+=("$a"); done
+unset INPUT
+
+/usr/bin/systemd-run --quiet --collect --wait --pipe --description="Business OS agent run" \
+    --uid=bos-agent --gid=bos-agent \
+    --working-directory="$AGENT_DIR/cwd" \
+    -p UMask=0007 -p NoNewPrivileges=yes -p ProtectSystem=strict -p ProtectHome=yes -p PrivateTmp=yes \
+    -p PrivateDevices=yes -p ProtectKernelTunables=yes -p ProtectControlGroups=yes -p RestrictSUIDSGID=yes \
+    -p ReadWritePaths="$AGENT_DIR" \
+    -p IPAddressDeny=any -p IPAddressAllow=localhost \
+    -p MemoryMax=1500M -p TasksMax=256 \
+    -p EnvironmentFile="$ENVFILE" \
+    -- "$AGENT_BIN" "${ARGS[@]}" </dev/null

@@ -1,0 +1,15 @@
+[
+ {"lookup": {"who": "SELECT id FROM members WHERE display_name = 'SMOKE Keep Portal Customer' AND member_kind = 'human'"}},
+ {"tool": "member_update", "args": {"member": "{{who}}", "job_title": "SMOKE {{run}} Title", "phone": "+1 555 0100", "timezone": "America/Chicago"}},
+ {"lookup": {"updated": "SELECT 'yes' FROM members WHERE id = {{who}} AND job_title = 'SMOKE {{run}} Title' AND timezone = 'America/Chicago'"}},
+ {"tool": "member_update", "expect": "error", "args": {"member": "{{who}}", "timezone": "Mars/Base"}},
+ {"tool": "member_update", "expect": "error", "args": {"member": "48", "job_title": "An agent"}},
+ {"tool": "member_suspend", "args": {"member": "{{who}}", "reason": "SMOKE {{run}}", "confirmed": true}},
+ {"lookup": {"suspended": "SELECT 'yes' FROM members WHERE id = {{who}} AND status = 'suspended'",
+             "holds_nothing": "SELECT 'yes' WHERE NOT EXISTS (SELECT 1 FROM applications a, app_member_grants(a.id, {{who}}))"}},
+ {"tool": "member_suspend", "expect": "error", "args": {"member": "{{who}}", "confirmed": true}},
+ {"tool": "member_suspend", "expect": "error", "args": {"member": "1", "confirmed": true}},
+ {"tool": "member_reinstate", "args": {"member": "{{who}}"}},
+ {"lookup": {"active": "SELECT 'yes' FROM members WHERE id = {{who}} AND status = 'active'",
+             "logged": "SELECT 'yes' FROM activity_log WHERE entity_id = {{who}} AND action IN ('member.suspend', 'member.reinstate', 'member.update') HAVING count(DISTINCT action) = 3"}}
+]

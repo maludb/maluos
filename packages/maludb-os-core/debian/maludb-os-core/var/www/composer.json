@@ -1,0 +1,9 @@
+{
+    "require": {
+        "spomky-labs/otphp": "^11",
+        "endroid/qr-code": "^6",
+        "league/oauth2-client": "^2",
+        "league/oauth2-google": "^4",
+        "rlanvin/php-rrule": "^2.5"
+    }
+}

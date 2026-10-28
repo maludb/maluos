@@ -18,7 +18,7 @@
   maluctl gateway policy rm (--principal REF | --scope S)
   maluctl gateway token issue --principal REF [--name N] [--expires 90d]   bearer token for the TCP listener
   maluctl gateway token list | revoke ID
-  maluctl gateway usage [--since 7d] [--by principal|model|class|backend|user|day] [--raw]
+  maluctl gateway usage [--since 7d] [--by principal|model|class|backend|user|day] [--raw] [--envelope ID]
   maluctl gateway ollama install [--version vX.Y.Z] | pull MODEL [--backend B] | warm MODEL [--backend B] | status
   maluctl gateway alerts [--since 7d]                  alert rows (budget, backend down/recovered, usage anomaly, restart)
   maluctl gateway share [status]                     this host's GPU sharing switch and the chassis rule
@@ -327,10 +327,19 @@ def run(a):
     if cmd == "usage":
         from maluos_vault_client import Vault, VaultError
         since, by, raw = opt(a, "--since", "7d"), opt(a, "--by", "principal"), opt(a, "--raw", flag=True)
+        envelope = opt(a, "--envelope")
         try:
             rows = Vault().ledger(since=since, event="model.call", limit=opt(a, "--limit", 5000))
         except VaultError as e:
             raise GwError(f"ledger via the vault: {e.message}")
+        if envelope:
+            # Phase 13 slice 2: what a delegated task cost on this node (the envelope id the agent's calls carried)
+            rows = [r for r in rows if (r.get("detail") or {}).get("envelope") == envelope]
+            for r in reversed(rows):
+                d = r.get("detail") or {}
+                print(f"{r['ts'][:19]}  {r['status']:6} {r.get('principal_ref') or '-':22} {r.get('model') or '-':20} {d.get('sensitivity') or '-':10} "
+                      f"{str(r.get('tokens_in') or 0) + '/' + str(r.get('tokens_out') or 0):>10}  ${float(r.get('cost_actual') or 0):.5f}  {d.get('request') or ''}".rstrip())
+            print(f"({len(rows)} call(s) under envelope {envelope} since {since}; ${sum(float(r.get('cost_actual') or 0) for r in rows):.5f})"); return 0
         if raw:
             for r in reversed(rows):
                 print(f"{r['ts'][:19]}  {r['status']:6} {r.get('principal_ref') or r.get('linux_user') or '-':22} {r.get('model') or '-':20} "

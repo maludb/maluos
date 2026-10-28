@@ -1,0 +1,53 @@
+[
+ {"tool": "location_save", "args": {"name": "SMOKE {{run}} Downtown", "kind": "site", "address": "1 Main St", "timezone": "America/New_York"}},
+ {"tool": "location_save", "args": {"name": "SMOKE {{run}} Airport", "kind": "site", "address": "Terminal B", "timezone": "America/Chicago"}},
+ {"tool": "location_save", "expect": "error", "args": {"name": "SMOKE {{run}} Bad Site", "kind": "site", "parent_location_id": "1"}},
+ {"tool": "location_save", "expect": "error", "args": {"name": "SMOKE {{run}} Bad Zone", "kind": "site", "timezone": "Mars/Base"}},
+ {"lookup": {
+   "dt": "SELECT id FROM locations WHERE name = 'SMOKE {{run}} Downtown' AND kind = 'site' AND timezone = 'America/New_York'",
+   "ap": "SELECT id FROM locations WHERE name = 'SMOKE {{run}} Airport' AND kind = 'site' AND siting IS NULL"
+ }},
+ {"tool": "location_move", "expect": "error", "args": {"location": "{{ap}}", "parent_location": "1"}},
+ {"tool": "application_save", "args": {
+   "name": "SMOKE {{run}} Scoped Reservations", "app_key": "smokes{{code}}", "category": "calendar",
+   "scope_kind": "location", "url": "http://scopetest.invalid", "sso_path": "/sso"}},
+ {"lookup": {"app": "SELECT id FROM applications WHERE name = 'SMOKE {{run}} Scoped Reservations' AND scope_kind = 'location'"}},
+ {"tool": "application_roles_set", "args": {"application": "{{app}}",
+   "roles": "[{\"key\":\"admin\",\"name\":\"Admin\",\"capability\":\"admin\",\"is_admin\":true},{\"key\":\"manager\",\"name\":\"Manager\",\"capability\":\"write\"},{\"key\":\"user\",\"name\":\"Staff\",\"capability\":\"write\"}]"}},
+ {"tool": "application_roles_set", "expect": "error", "args": {"application": "{{app}}",
+   "roles": "[{\"key\":\"admin\",\"name\":\"Admin\",\"capability\":\"write\",\"is_admin\":true}]"}},
+ {"tool": "application_scope_add", "args": {"application": "{{app}}", "location": "{{dt}}"}},
+ {"tool": "application_scope_add", "args": {"application": "{{app}}", "location": "{{ap}}"}},
+ {"tool": "application_scope_add", "expect": "error", "args": {"application": "{{app}}", "location": "{{ap}}"}},
+ {"tool": "application_scope_add", "expect": "error", "args": {"application": "{{app}}", "location": "1"}},
+ {"tool": "application_scope_add", "expect": "error", "args": {"application": "{{app}}", "department": "1"}},
+ {"lookup": {
+   "sdt": "SELECT id FROM application_scopes WHERE application_id = {{app}} AND location_id = {{dt}} AND removed_at IS NULL",
+   "sap": "SELECT id FROM application_scopes WHERE application_id = {{app}} AND location_id = {{ap}} AND removed_at IS NULL"
+ }},
+ {"tool": "location_add_resident", "args": {"location": "{{ap}}", "member": "6"}},
+ {"tool": "application_access_grant", "args": {"application": "{{app}}", "member": "26", "scope": "{{sap}}", "role": "user"}},
+ {"tool": "application_access_grant", "args": {"application": "{{app}}", "residents": "{{ap}}", "scope": "{{sap}}", "role": "manager"}},
+ {"tool": "application_access_grant", "expect": "error", "args": {"application": "{{app}}", "member": "5", "role": "user"}},
+ {"tool": "application_access_grant", "expect": "error", "args": {"application": "{{app}}", "member": "5", "scope": "{{sdt}}", "role": "chef"}},
+ {"tool": "application_access_grant", "expect": "error", "args": {"application": "{{app}}", "member": "5", "scope": "{{sdt}}"}},
+ {"lookup": {
+   "priya": "SELECT 'yes' FROM app_member_application_scopes({{app}}, 26) WHERE scope_id = {{sap}} AND role_key = 'user' AND capability = 'write' HAVING count(*) = 1",
+   "sam": "SELECT 'yes' FROM app_member_application_scopes({{app}}, 6) WHERE scope_id = {{sap}} AND role_key = 'manager' HAVING count(*) = 1",
+   "owner": "SELECT 'yes' FROM app_member_application_scopes({{app}}, 1) WHERE role_key = 'admin' HAVING count(*) = 2",
+   "dana": "SELECT 'yes' WHERE NOT EXISTS (SELECT 1 FROM app_member_application_scopes({{app}}, 5))"
+ }},
+ {"tool": "application_save", "expect": "error", "args": {"application": "{{app}}", "name": "SMOKE {{run}} Scoped Reservations", "app_key": "smokes{{code}}", "category": "calendar", "scope_kind": "department"}},
+ {"tool": "application_roles_set", "expect": "error", "args": {"application": "{{app}}",
+   "roles": "[{\"key\":\"admin\",\"name\":\"Admin\",\"capability\":\"admin\",\"is_admin\":true},{\"key\":\"manager\",\"name\":\"Manager\",\"capability\":\"write\"}]"}},
+ {"tool": "application_save", "args": {
+   "name": "SMOKE {{run}} Dept Projects", "app_key": "smoked{{code}}", "category": "other", "scope_kind": "department"}},
+ {"lookup": {"papp": "SELECT id FROM applications WHERE name = 'SMOKE {{run}} Dept Projects' AND scope_kind = 'department'"}},
+ {"tool": "application_scope_add", "args": {"application": "{{papp}}", "department": "6"}},
+ {"tool": "application_scope_add", "expect": "error", "args": {"application": "{{papp}}", "location": "{{dt}}"}},
+ {"lookup": {"sit": "SELECT id FROM application_scopes WHERE application_id = {{papp}} AND department_id = 6 AND removed_at IS NULL"}},
+ {"tool": "application_access_grant", "args": {"application": "{{papp}}", "department": "6", "scope": "{{sit}}", "capability": "write"}},
+ {"lookup": {
+   "it_members": "SELECT 'yes' FROM department_members dm CROSS JOIN LATERAL app_member_application_scopes({{papp}}, dm.member_id) x WHERE dm.department_id = 6 AND dm.left_at IS NULL AND x.scope_id = {{sit}} HAVING count(*) >= 1"
+ }}
+]

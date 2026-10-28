@@ -15,19 +15,32 @@ class U(http.client.HTTPConnection):
 
 def ask(prompt):
     c = U("gateway", timeout=120)
-    c.request("POST", "/v1/chat/completions", body=json.dumps({"model": MODEL, "messages": [{"role": "user", "content": prompt}]}).encode(),
-              headers={"Content-Type": "application/json", "X-MaluOS-Task": f"demo:{os.environ.get('MALUOS_AGENT', 'agent')}"})
+    headers = {"Content-Type": "application/json", "X-MaluOS-Task": f"demo:{os.environ.get('MALUOS_AGENT', 'agent')}"}
+    if TASKS is not None:
+        headers.update(TASKS.gateway_headers())          # slice 2: an estate task's classification and envelope id reach the ledger
+    c.request("POST", "/v1/chat/completions", body=json.dumps({"model": MODEL, "messages": [{"role": "user", "content": prompt}]}).encode(), headers=headers)
     r = c.getresponse(); body = json.loads(r.read()); c.close()
     if r.status != 200:
         raise RuntimeError(json.dumps(body)[:300])
+    if TASKS is not None:
+        TASKS.record_model_call(dict(r.getheaders()))    # the provenance's models list
     return body["choices"][0]["message"]["content"]
+
+
+TASKS = None
+try:
+    sys.path.insert(0, "/usr/lib/maluos")
+    import maluos_agent_tasks as TASKS
+except Exception:
+    TASKS = None
 
 
 print(f"demo agent {os.environ.get('MALUOS_AGENT')} as {os.environ.get('MALUOS_PRINCIPAL')} via {SOCK}", flush=True)
 # Tasks from the owner (the Agents app, maluctl agent send): each one is a question to the gateway (Phase 12 slice 8).
 try:
-    sys.path.insert(0, "/usr/lib/maluos")
-    import maluos_agent_tasks
+    if TASKS is None:
+        raise RuntimeError("maluos_agent_tasks not importable")
+    maluos_agent_tasks = TASKS
     def handle(t):
         # Slice 9: partial text first (the client shows it while the gateway answers), then the answer.
         t["progress"](f"working on: {t['text'][:80]}\n")

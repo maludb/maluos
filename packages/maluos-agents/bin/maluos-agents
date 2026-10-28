@@ -42,18 +42,33 @@ def log(msg):
 
 
 # -- the model: one list of agents from the session's state
+def read_yaml(path):
+    try:
+        import yaml
+        with open(path) as f:
+            return yaml.safe_load(f) or {}
+    except Exception:
+        return {}
+
+
+def manifest_caps(name):
+    """Phase 13 slice 2: the capabilities a local agent's manifest declares (world-readable)."""
+    return [str(c) for c in (read_yaml(f"/etc/maluos/agents/{name}.manifest.yaml").get("capabilities") or [])]
+
+
 def unified(state):
     out = []
     for a in state.get("agents") or []:
         out.append({"id": f"local:{a['name']}", "kind": "local", "name": a.get("display") or a["name"], "description": a.get("exec") or "", "icon": "maluos-logo",
                     "mine": bool(a.get("mine")), "owner": a.get("owner"), "principal": a.get("principal"), "active": a.get("active"), "sub": a.get("sub"),
                     "since": a.get("since"), "exec": a.get("exec"), "unit": a.get("unit"), "sandbox": a.get("sandbox"),
-                    "tasks": os.path.exists(f"/run/maluos/agents/{a['name']}/tasks.sock"), "capabilities": [], "presence": "online" if a.get("active") == "active" else "offline"})
+                    "tasks": os.path.exists(f"/run/maluos/agents/{a['name']}/tasks.sock"), "capabilities": manifest_caps(a["name"]), "presence": "online" if a.get("active") == "active" else "offline"})
     o = state.get("office") or {}
     for a in o.get("agents") or []:
         out.append({"id": f"office:{a['id']}", "kind": "office", "name": a.get("name") or str(a["id"]), "description": a.get("description") or "", "icon": a.get("icon") or "maluos-logo",
                     "mine": False, "owner": a.get("owner"), "principal": f"agent:{a['id']}", "presence": a.get("presence") or "unknown", "state": a.get("state"),
-                    "node": a.get("node"), "capabilities": a.get("capabilities") or [], "tasks": bool(a.get("tasks")), "tasks_url": a.get("tasks"),
+                    "node": a.get("node"), "node_ref": a.get("node_ref"), "agent": a.get("agent"), "accept_from": a.get("accept_from"), "max_classification": a.get("max_classification"),
+                    "hired": bool(a.get("hired")), "capabilities": a.get("capabilities") or [], "tasks": bool(a.get("tasks")), "tasks_url": a.get("tasks"),
                     "activity_url": a.get("activity"), "page": a.get("page"), "office": o.get("office", {}).get("name") or o.get("url")})
     out.sort(key=lambda x: (x["kind"] != "local", not x.get("mine"), x["name"].lower()))
     return out
@@ -72,7 +87,7 @@ class Bridge:
         o = s.get("office") or {}
         return {"service": bool(s), "host": s.get("host") or {}, "me": s.get("me") or {}, "agents": unified(s),
                 "office": {"enrolled": bool(o.get("enrolled")), "name": (o.get("office") or {}).get("name"), "url": o.get("url"), "presence": o.get("presence"),
-                           "agents_error": o.get("agents_error")} if o else {"enrolled": False},
+                           "agents_error": o.get("agents_error"), "inbox": o.get("inbox") or {}} if o else {"enrolled": False},
                 "selected": self.app.selected, "ts": s.get("ts")}
 
     def find(self, aid):
@@ -184,6 +199,10 @@ class Bridge:
             except Exception as e:
                 out["note"] = f"vault: {e.__class__.__name__}: {str(e)[:120]}"
             out["admin_hint"] = f"pkexec maluctl agent show {a['id'][6:]}"
+            out["manifest"] = read_yaml(f"/etc/maluos/agents/{a['id'][6:]}.manifest.yaml")
+            pol = read_yaml(f"/etc/maluos/agents/{a['id'][6:]}.policy.yaml")
+            out["policy"] = {"accept_from": pol.get("accept_from") or out["manifest"].get("accept_from") or [], "max_classification": pol.get("max_classification") or out["manifest"].get("max_classification"),
+                             "approve": pol.get("approve") or out["manifest"].get("approve") or []}
         else:
             try:
                 out["card"] = self.client(a).card()
@@ -205,6 +224,66 @@ class Bridge:
         else:
             out["claims_note"] = "The office's memory endpoint answers agents, not desks, until Phase 13 slice 4."
         return out
+
+    # -- Phase 13 slice 2: the policy editor, the personal agent, the inbox
+    def m_policy_set(self, p):
+        a = self.find(p["id"])
+        if a["kind"] != "local":
+            raise ValueError("an estate agent's policy is set on its own host")
+        args = ["maluctl", "agent", "policy", a["id"][6:], "set"]
+        acc = ",".join(x.strip() for x in str(p.get("accept_from") or "").split(",") if x.strip())
+        apr = ",".join(x.strip() for x in str(p.get("approve") or "").split(",") if x.strip())
+        args += ["--accept-from", acc or "none", "--approve", apr or "none", "--max-classification", p.get("max_classification") or "none"]
+        r = subprocess.run(["pkexec"] + args, capture_output=True, text=True, timeout=120)
+        if r.returncode != 0:
+            raise ValueError((r.stderr or r.stdout).strip()[-300:] or "policy not saved")
+        return {"ok": True, "output": r.stdout.strip()}
+
+    def m_personal_create(self, p):
+        me = (self.app.state or {}).get("me") or {}
+        owner = me.get("principal") or f"user:{os.environ.get('USER')}"
+        name = p.get("name") or "me"
+        r = subprocess.run(["pkexec", "maluctl", "agent", "create", name, "--personal", "--owner", owner], capture_output=True, text=True, timeout=300)
+        if r.returncode != 0:
+            raise ValueError((r.stderr or r.stdout).strip()[-300:] or "the personal agent was not made")
+        self.app.call("Refresh", None)
+        return {"ok": True, "message": f"your personal agent {name} is made: talk to it, or say \"ask helper …\"", "output": r.stdout.strip()}
+
+    def m_personal_renew(self, p):
+        r = subprocess.run(["pkexec", "maluctl", "agent", "personal", "renew", p.get("name") or "me"], capture_output=True, text=True, timeout=120)
+        if r.returncode != 0:
+            raise ValueError((r.stderr or r.stdout).strip()[-300:])
+        return {"ok": True}
+
+    def office_cmd(self, args, timeout=40):
+        env = dict(os.environ)
+        try:
+            env["MALUOS_OFFICE_TOKEN"] = self.office_token()
+        except Exception:
+            pass
+        r = subprocess.run(["maluctl", "office"] + args, capture_output=True, text=True, timeout=timeout, env=env)
+        if r.returncode != 0:
+            raise ValueError((r.stderr or r.stdout).strip()[-300:] or "maluctl office failed")
+        return r.stdout
+
+    def m_inbox(self, p):
+        out = self.office_cmd(["inbox", "--json", "--compact"] + (["--all"] if p.get("all") else []))
+        return json.loads(out.strip().splitlines()[-1])
+
+    def m_inbox_decide(self, p):
+        self.office_cmd(["inbox", "decide", str(int(p["id"])), str(p.get("decision") or "deny")] + (["--note", p["note"]] if p.get("note") else []))
+        self.app.call("OfficeAction", ("heartbeat",))
+        return {"ok": True}
+
+    def m_inbox_reply(self, p):
+        self.office_cmd(["inbox", "reply", str(int(p["id"])), str(p.get("text") or "")])
+        self.app.call("OfficeAction", ("heartbeat",))
+        return {"ok": True}
+
+    def m_inbox_read(self, p):
+        self.office_cmd(["inbox", "read", str(int(p["id"]))])
+        self.app.call("OfficeAction", ("heartbeat",))
+        return {"ok": True}
 
     def m_open_terminal(self, p):
         argv = p.get("argv") or []
@@ -385,8 +464,11 @@ def run_gui(argv, selected, self_test):
                 def report():
                     st = self.bridge.state()
                     loc = [a for a in st["agents"] if a["kind"] == "local"]; off = [a for a in st["agents"] if a["kind"] == "office"]
+                    personal = [a for a in loc if "personal" in (a.get("capabilities") or [])]
                     print(f"self-test ok: Agents: service {'reachable' if st['service'] else 'unreachable'}, {len(loc)} local agents, {len(off)} office agents"
                           + (f" at {st['office'].get('name')}" if st["office"].get("enrolled") else ", no office")
+                          + f", directory {len([a for a in off if a.get('node_ref')])}, personal agent {'present (' + personal[0]['name'] + ')' if personal else 'absent'}"
+                          + f", inbox {((st['office'] or {}).get('inbox') or {}).get('unread', 0)} unread"
                           + (f", selected {self.selected}" if self.selected else "") + f", ui {params.get('version')}")
                     self.quit(); return False
                 GLib.timeout_add(800, report)
@@ -416,7 +498,9 @@ def main(argv):
     selected = None
     if "--agent" in argv:
         selected = argv[argv.index("--agent") + 1]
-    rest = [a for a in argv if a not in ("--self-test", "--agent", selected)]
+    if "--inbox" in argv:
+        selected = "inbox:"                   # Phase 13 slice 2: open on the person's estate inbox
+    rest = [a for a in argv if a not in ("--self-test", "--agent", "--inbox", selected)]
     return run_gui(rest, selected, "--self-test" in argv)
 
 

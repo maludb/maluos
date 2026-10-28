@@ -12,7 +12,9 @@ require_once dirname(__DIR__, 2) . '/app/features/estate/nodes.php';
 $pdo = db();
 $gone = desk_presence_sweep($pdo);
 $nodes = node_presence_sweep($pdo);
+$leases = lease_sweep($pdo);          // db/190: items a node did not answer go back to its queue, or fail after three leases
+$nonces = envelope_nonce_sweep($pdo);
 if ($gone !== [] || $nodes !== []) {
     log_activity($pdo, 'cron.run', null, null, ['source' => 'cron', 'after' => ['job' => 'desk_presence', 'offline' => array_column($gone, 'name'), 'nodes_offline' => array_column($nodes, 'name')]]);
 }
-echo 'desk_presence: ' . count($gone) . ' desk(s) and ' . count($nodes) . " node(s) marked offline\n";
+echo 'desk_presence: ' . count($gone) . ' desk(s) and ' . count($nodes) . " node(s) marked offline; {$leases} lease(s) swept, {$nonces} nonce(s) forgotten\n";

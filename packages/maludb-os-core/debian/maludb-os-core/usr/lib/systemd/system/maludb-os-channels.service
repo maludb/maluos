@@ -1,0 +1,16 @@
+[Unit]
+Description=Business OS channels worker — Telegram polling and Telegram/SMS delivery to people (db/156)
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www
+ExecStart=/usr/bin/php /var/www/bin/channels_worker.php
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

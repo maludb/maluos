@@ -1,0 +1,39 @@
+[Unit]
+Description=Business OS web front end (Next.js) on :3000 — every screen and the AI Agent View
+Documentation=file:///var/www/docs/react-migration-plan.md
+#
+# DEPLOY SEQUENCE (the build user and the run user are different on purpose):
+#   sudo chown -R maludb:maludb /var/www/web/.next      # hand the build back
+#   cd /var/www/web && npm install && npm run build      # build as the deploy user
+#   sudo chown -R www-data:www-data /var/www/web/.next   # hand it to the service
+#   sudo systemctl restart maludb-os-web
+# Skipping the first step fails with EACCES on .next/trace; skipping the third leaves the
+# service unable to write its own cache.
+#
+# CONFIG lives in /var/www/web/.env.local (gitignored, www-data:www-data 640):
+#   API_BASE_URL  server-side only, http://localhost - the browser never calls the platform
+#   LOGIN_URL     the PUBLIC login URL a browser can reach. Never localhost: it would send
+#                 the visitor to their own machine, which is how this first shipped.
+After=network.target apache2.service
+Wants=apache2.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/web
+Environment=NODE_ENV=production
+Environment=PORT=3000
+# API_BASE_URL and LOGIN_URL live in /var/www/web/.env.local (gitignored), read by Next.js.
+ExecStart=/usr/bin/npm run start
+Restart=on-failure
+RestartSec=5
+# It only ever needs to read its own build output and reach Apache on localhost.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/www/web/.next
+
+[Install]
+WantedBy=multi-user.target

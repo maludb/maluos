@@ -112,6 +112,18 @@ export const mySettings = z.object({
     /** db/189: the estate's overlay network: its range, the hub (null until the coordinator's host joins with --hub), the members with an address. */
     overlay: z.object({ enabled: z.boolean(), range: z.string(), members: z.number().int(),
       hub: z.object({ id: z.number().int(), name: z.string(), endpoint: z.string(), address: z.string() }).nullable() }).nullable().default(null),
+    /** db/190: the agent directory, the last tasks across the estate with their provenance, the actions log (maluos docs/phase13-slice2-delegation.md). */
+    delegation: z.object({
+      agents: z.array(z.object({ id: z.number().int(), name: z.string(), display_name: z.string().nullable(), description: z.string(), capabilities: z.array(z.string()),
+        owner: z.string().nullable(), accept_from: z.array(z.string()), max_classification: z.string().nullable(), presence: z.string(), state: z.string(), hired: z.boolean(),
+        node: z.object({ id: z.number().int().nullable(), kind: z.string(), name: z.string(), ref: z.string() }), last_seen_at: z.string().nullable() })),
+      tasks: z.array(z.object({ id: z.string(), state: z.string(), ts: z.string().nullable(), done_ts: z.string().nullable(), agent: z.string(), node: z.string(), node_name: z.string(),
+        originator: z.string(), sender: z.object({ principal: z.string(), node: z.string() }), text: z.string(), reason: z.string().nullable(), envelope_id: z.string(), hop: z.number().int(),
+        models: z.number().int(), usd: z.number().nullable() })),
+      actions: z.array(z.object({ id: z.string(), node: z.object({ id: z.number().int(), name: z.string().nullable() }), action: z.string(), agent: z.string().nullable(), state: z.string(),
+        reason: z.string().nullable(), created_at: z.string().nullable(), done_at: z.string().nullable() })),
+      coordinator_key: z.string(),
+    }).nullable().default(null),
   }).nullable().default(null),
   section: z.enum(["profile", "notifications", "security", "tokens", "desks"]),
   timezones: z.array(z.string()),

@@ -1,0 +1,20 @@
+[Unit]
+Description=Business OS — Memory MCP server (shared memory over MaluDB, read-only, localhost:8814)
+After=network.target postgresql.service maludb-api.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/mcp
+ExecStart=/var/www/mcp/venv/bin/python /var/www/mcp/memory_server.py
+Restart=on-failure
+RestartSec=5
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

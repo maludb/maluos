@@ -1,3 +1,18 @@
+maluos-agents (0.3.0) resolute; urgency=medium
+
+  * Phase 13 slice 2, delegation (docs/phase13-slice2-delegation.md): the
+    list shows the estate's directory with each agent's node, capability
+    tags and accept policy; an answer carries its provenance (the agent,
+    its node, the model calls, the envelope); the Policy page is real for
+    a local agent (accept_from, the classification ceiling, approve — saved
+    through pkexec maluctl agent policy) and shows the directory's policy
+    for an estate agent; "Make my personal agent" (maluctl agent create me
+    --personal) with its weekly renewal; the Inbox page (the person's
+    estate inbox: decisions, replies, read); --self-test reports the
+    directory count, the personal agent and the inbox.
+
+ -- Edward Honour <ed@maludb.org>  Wed, 28 Oct 2026 23:00:00 +0000
+
 maluos-agents (0.2.1) resolute; urgency=medium
 
   * Self-test: the UI-ready deadline is 240 s, not 90 s. A cold first

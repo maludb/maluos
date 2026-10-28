@@ -9,6 +9,10 @@ the agent's command as that user with the MaluOS endpoints in its
 environment.
 
   maluctl agent create NAME [--exec CMD] [--name "Display"] [--home SCOPE] [--scope SCOPE:read|write ...]
+                     [--capability TAG ...] [--accept-from org|dept:N|user:LOGIN|agent:NAME|node:KIND ...]
+                     [--max-classification public|internal|restricted|prohibited] [--approve CLASS|ORIGINATOR ...]
+                     [--personal]                        the person's own representative (Phase 13 slice 2)
+  maluctl agent policy NAME [set --accept-from ... --max-classification C --approve ... | --clear]
                      [--class agent] [--tiers a,b] [--backends a,b] [--cloud yes|no] [--egress public|internal|restricted]
                      [--budget usd_per_day=1] [--token] [--sandbox standard|strict] [--no-start]
                      [--owner user:NAME | --owner none]   who the agent belongs to (default: the sudo user)
@@ -42,7 +46,7 @@ directory). The socket admits its owner, root and the agent itself by
 peer credentials; the Agents app (maluos-agents) and `maluctl agent
 send|tasks|card` are its clients.
 """
-import json, os, pwd, re, subprocess, sys
+import json, os, pwd, re, subprocess, sys, time
 sys.path.insert(0, "/usr/lib/maluos")
 
 AGENTS = "/etc/maluos/agents"
@@ -59,6 +63,51 @@ polkit.addRule(function(action, subject) {{
 }});
 """
 NAME_RE = re.compile(r"^[a-z][a-z0-9-]{0,30}$")
+MANIFEST = AGENTS + "/{}.manifest.yaml"      # Phase 13 slice 2: what the node registers in the estate's directory
+POLICY = AGENTS + "/{}.policy.yaml"          # who may task the agent, on its host
+AGENTS_HINT = "/run/maluos/estate/agents-changed"   # touched after create|remove|policy: maluos-estated re-registers at once
+CLASSIFICATIONS = ("public", "internal", "restricted", "prohibited")
+ACCEPT_RE = re.compile(r"^(org|dept:[0-9]+|user:[a-z_][a-z0-9_-]{0,31}|agent:[a-z][a-z0-9-]{0,30}|node:(desk|server|inference))$")
+
+
+def read_yaml(path):
+    try:
+        import yaml
+        with open(path) as f:
+            return yaml.safe_load(f) or {}
+    except Exception:
+        return {}
+
+
+def write_yaml(path, data, mode=0o644):
+    import yaml
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        yaml.safe_dump(data, f, sort_keys=True)
+    os.chmod(tmp, mode); os.replace(tmp, path)
+
+
+def agents_hint():
+    try:
+        os.makedirs(os.path.dirname(AGENTS_HINT), exist_ok=True)
+        with open(AGENTS_HINT, "w") as f:
+            f.write(str(int(time.time())))
+    except OSError:
+        pass
+
+
+def check_accept(rules):
+    for r in rules:
+        if not ACCEPT_RE.match(r):
+            sys.exit(f"--accept-from {r}: org, dept:N, user:LOGIN, agent:NAME or node:desk|server|inference")
+    return rules
+
+
+def check_approve(rules):
+    for r in rules:
+        if r not in CLASSIFICATIONS and not ACCEPT_RE.match(r):
+            sys.exit(f"--approve {r}: a classification or an originator rule")
+    return rules
 SANDBOX = {
     "standard": "",
     "strict": "[Service]\nIPAddressDeny=any\nIPAddressAllow=localhost\n",
@@ -269,6 +318,10 @@ def run(a):
         os.execvpe("runuser", ["runuser", "-u", f"agent-{n}", "--", *a], env)
     if cmd == "create":
         return create(a)
+    if cmd == "policy":
+        return policy(a)
+    if cmd == "personal":
+        return personal(a)
     if cmd == "remove":
         return remove(a)
     print(__doc__); return 2
@@ -284,6 +337,19 @@ def create(a):
     egress = opt(a, "--egress"); budget = opt(a, "--budget"); token = opt(a, "--token", flag=True)
     sandbox = opt(a, "--sandbox", "standard"); nostart = opt(a, "--no-start", flag=True); exe = opt(a, "--exec")
     owner_opt = opt(a, "--owner")
+    caps = [c.strip().lower() for c in opt(a, "--capability", multi=True) for c in c.split(",") if c.strip()]
+    accept = check_accept([x for x in opt(a, "--accept-from", multi=True) for x in x.split(",") if x])
+    approve = check_approve([x for x in opt(a, "--approve", multi=True) for x in x.split(",") if x])
+    maxc = opt(a, "--max-classification")
+    personal = opt(a, "--personal", flag=True)
+    if maxc is not None and maxc not in CLASSIFICATIONS:
+        sys.exit("--max-classification public|internal|restricted|prohibited")
+    if personal:
+        # the person's representative (decision 8): capability personal, its owner only, an internal egress ceiling, a small budget, the personal body
+        caps = sorted(set(caps) | {"personal"}); accept = []; egress = egress or "internal"; budget = budget or "1/day"
+        exe = exe or "/usr/lib/maluos/maluos-agent-personal.py"
+        if owner_opt == "none":
+            sys.exit("--personal needs an owner")
     if sandbox not in SANDBOX:
         sys.exit("--sandbox standard|strict")
     mp, st = state()
@@ -366,6 +432,12 @@ def create(a):
                           ON CONFLICT (name) DO UPDATE SET principal_ref=EXCLUDED.principal_ref, owner_principal_ref=EXCLUDED.owner_principal_ref, exec=EXCLUDED.exec, sandbox=EXCLUDED.sandbox, removed_at=NULL;""", db)
     except Exception as e:
         print(f"  warning: agent registry row not written (maluos-vault schema missing?): {str(e)[-200:]}", file=sys.stderr)
+    # 7b. Phase 13 slice 2: the manifest the node registers in the estate's directory, and the accept policy
+    write_yaml(MANIFEST.format(n), {"name": n, "display": display, "description": opt_desc(exe, personal), "capabilities": caps, "owner": owner,
+                                    "accept_from": accept, "max_classification": maxc, "approve": approve, "tasks": True, "personal": bool(personal)})
+    if not os.path.exists(POLICY.format(n)) or accept or approve or maxc is not None:
+        write_yaml(POLICY.format(n), {"accept_from": accept, "max_classification": maxc, "approve": approve})
+    agents_hint()
     ou = owner_user(owner)
     if ou:
         os.makedirs(os.path.dirname(POLKIT.format(n)), exist_ok=True)
@@ -381,6 +453,8 @@ def create(a):
             f.write(SANDBOX[sandbox])
     elif os.path.exists(f"{dd}/sandbox.conf"):
         os.remove(f"{dd}/sandbox.conf")
+    if personal:
+        personal_delegate(n, owner)
     sh("systemctl", "daemon-reload")
     sh("systemctl", "enable", "--quiet", UNIT.format(n))
     if not nostart:
@@ -388,8 +462,84 @@ def create(a):
     print(f"agent {n}: user {user}, principal {ref} (home scope {home}{', scopes ' + ', '.join(scopes) if scopes else ''}), "
           f"owner {owner or 'none'}, class {cls}{', token' if tok else ''}, sandbox {sandbox}, unit {UNIT.format(n)} {'started' if not nostart else 'enabled (not started)'}")
     print(f"  exec: {exe or '/usr/lib/maluos/maluos-agent-idle (placeholder; set --exec)'}")
+    if caps or accept or approve or maxc:
+        print(f"  directory: capabilities {', '.join(caps) or '-'}; accepts from {', '.join(accept) or 'its owner only'}" + (f"; ceiling {maxc}" if maxc else "") + (f"; approve {', '.join(approve)}" if approve else ""))
+    if personal:
+        print(f"  personal: the desk token and the desk key delegated use-only for a week (maluctl agent personal renew); ask it: maluctl agent send {n} \"ask helper …\"")
     print(f"  try:  maluctl agent run {n} -- maluctl gateway whoami")
     return 0
+
+
+def opt_desc(exe, personal):
+    if personal:
+        return "the person's own agent: answers them, and asks other agents in the estate on their behalf"
+    return ""
+
+
+def personal_delegate(n, owner, days=7):
+    """The owner's desk token and desk key reach the personal agent use-only, for a week (renewed by the Agents app)."""
+    ou = owner_user(owner)
+    if not ou:
+        print("  warning: the personal agent's owner is not a Linux user here; the desk token is not delegated", file=sys.stderr); return
+    import datetime
+    exp = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    for secret in ("office-desk-token", "office-desk-key"):
+        r = subprocess.run(["runuser", "-u", ou, "--", "maluctl", "secret", "delegate", "--to", f"agent:{n}", "--secret", secret, "--expires", exp], capture_output=True, text=True)
+        if r.returncode != 0:
+            print(f"  warning: {secret} not delegated to agent:{n}: {(r.stderr or r.stdout).strip()[-160:]}", file=sys.stderr)
+
+
+def policy(a):
+    """maluctl agent policy NAME [set --accept-from ... --max-classification C --approve ... | --clear]: the accept policy on this host."""
+    if not a or a[0].startswith("--"):
+        sys.exit("policy NAME [set ...]")
+    n = a.pop(0)
+    if not os.path.exists(f"{AGENTS}/{n}.env"):
+        sys.exit(f"no agent {n}")
+    sub = a.pop(0) if a and not a[0].startswith("--") else "show"
+    pol = read_yaml(POLICY.format(n))
+    if sub == "set" or opt(a, "--clear", flag=True):
+        need_root()
+        if opt(a, "--clear", flag=True):
+            pol = {"accept_from": [], "max_classification": None, "approve": []}
+        else:
+            if "--accept-from" in a:
+                pol["accept_from"] = check_accept([x for x in opt(a, "--accept-from", multi=True) for x in x.split(",") if x and x != "none"])
+            if "--approve" in a:
+                pol["approve"] = check_approve([x for x in opt(a, "--approve", multi=True) for x in x.split(",") if x and x != "none"])
+            if "--max-classification" in a:
+                m = opt(a, "--max-classification")
+                if m not in CLASSIFICATIONS + ("none",):
+                    sys.exit("--max-classification public|internal|restricted|prohibited|none")
+                pol["max_classification"] = None if m == "none" else m
+        pol = {"accept_from": list(pol.get("accept_from") or []), "max_classification": pol.get("max_classification"), "approve": list(pol.get("approve") or [])}
+        write_yaml(POLICY.format(n), pol)
+        m = read_yaml(MANIFEST.format(n))
+        if m:
+            m.update(pol); write_yaml(MANIFEST.format(n), m)
+        agents_hint()
+    if opt(a, "--json", flag=True):
+        print(json.dumps({"agent": n, **{"accept_from": pol.get("accept_from") or [], "max_classification": pol.get("max_classification"), "approve": pol.get("approve") or []}, "manifest": read_yaml(MANIFEST.format(n))}, indent=1)); return 0
+    print(f"agent {n}: accepts tasks from {', '.join(pol.get('accept_from') or []) or 'its owner only'}; ceiling {pol.get('max_classification') or 'none'}; "
+          f"approve {', '.join(pol.get('approve') or []) or 'nothing (runs what it accepts)'}")
+    m = read_yaml(MANIFEST.format(n))
+    if m:
+        print(f"  directory: {', '.join(m.get('capabilities') or []) or 'no capabilities'}; owner {m.get('owner') or 'none'}")
+    return 0
+
+
+def personal(a):
+    """maluctl agent personal renew [NAME]: renew the personal agent's delegations (the Agents app calls it weekly)."""
+    sub = a.pop(0) if a else "renew"
+    n = a.pop(0) if a and not a[0].startswith("--") else "me"
+    env = read_env(n)
+    if not env:
+        sys.exit(f"no agent {n}")
+    if sub != "renew":
+        sys.exit("personal renew [NAME]")
+    need_root()
+    personal_delegate(n, env.get("MALUOS_AGENT_OWNER"))
+    print(f"agent {n}: delegations renewed for a week"); return 0
 
 
 def remove(a):
@@ -397,9 +547,10 @@ def remove(a):
     n = a.pop(0); purge = opt(a, "--purge", flag=True)
     ref, user = f"agent:{n}", f"agent-{n}"
     subprocess.run(["systemctl", "disable", "--now", "--quiet", UNIT.format(n)], check=False)
-    for f in (f"{AGENTS}/{n}.env", f"{AGENTS}/{n}.token", f"/etc/systemd/system/{UNIT.format(n)}.d/sandbox.conf", POLKIT.format(n)):
+    for f in (f"{AGENTS}/{n}.env", f"{AGENTS}/{n}.token", f"/etc/systemd/system/{UNIT.format(n)}.d/sandbox.conf", POLKIT.format(n), MANIFEST.format(n), POLICY.format(n)):
         if os.path.exists(f):
             os.remove(f)
+    agents_hint()
     sh("systemctl", "daemon-reload")
     mp, st = state()
     pre = f"SET ROLE {mp.qi(st['tenant'])}; SET search_path TO {mp.qi(st['tenant'])}, maludb_core, public; "

@@ -14,6 +14,9 @@ Environment=PYTHONPATH=/usr/lib/maluos
 Environment=PYTHONUNBUFFERED=1
 ExecStart=/usr/bin/python3 -s -m maluos_estate
 StateDirectory=maluos/estate
+RuntimeDirectory=maluos/estate
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=yes
 TimeoutStopSec=20
 Restart=on-failure
 RestartSec=5

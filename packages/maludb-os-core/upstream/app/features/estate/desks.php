@@ -267,6 +267,9 @@ function desk_endpoints(?array $member = null): array
         'records' => app_url('/mcp/records'), 'activity' => app_url('/mcp/activity'),
         'memory' => null, 'actions' => null, 'models' => null,
         'estate' => estate_operator($member) ? app_url('/api/v1/desks/estate') : null,
+        // db/190: the directory as this desk sees it, the person's estate inbox, the desk's key registration, the keys
+        'agents' => app_url('/api/v1/desks/agents'), 'inbox' => app_url('/api/v1/desks/inbox'), 'key' => app_url('/api/v1/desks/key'), 'keys' => app_url('/api/v1/estate/keys'),
+        'actions' => estate_operator($member) ? app_url('/api/v1/estate/actions') : null,
     ];
 }
 
@@ -314,3 +317,5 @@ function present_desk(array $l): array
 
 // db/189: the overlay's functions (desk_answer and desk_retire call them); loaded last so the circular require is harmless.
 require_once __DIR__ . '/overlay.php';
+// db/190: the agent directory and delegation (heartbeats register agents, leave deregisters them, desks read their inbox).
+require_once __DIR__ . '/delegation.php';

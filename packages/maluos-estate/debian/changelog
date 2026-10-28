@@ -1,3 +1,23 @@
+maluos-estate (0.3.0) resolute; urgency=medium
+
+  * Phase 13 slice 2, the agent directory and delegation
+    (docs/phase13-slice2-delegation.md): maluos_estate.envelope (the
+    signed envelope: canonical form, ed25519 signing with ssh-keygen keys,
+    verification, the keys cache, the accept policy); maluos-estated
+    registers this node's agents (the manifests of maluctl agent create)
+    with each report and after the agents hint, caches the directory's
+    keys in /run/maluos/estate/keys.json, long-polls the node's inbox at
+    the office and runs each task through the agent's socket with its
+    envelope (the result with its provenance posted back), and runs an
+    operator's actions (restart_agent, start_agent, stop_agent,
+    apply_updates; reboot only when allowed) under a polkit rule;
+    maluctl estate agents | tasks | keys | inbox | actions; join
+    --allow-actions.  The mock office serves the whole contract and
+    verifies envelopes as the kernel does.
+  * maluos-estate-updates.service: the oneshot the apply_updates action starts.
+
+ -- Edward Honour <ed@maludb.org>  Wed, 28 Oct 2026 22:30:00 +0000
+
 maluos-estate (0.2.1) resolute; urgency=medium
 
   * maluos-overlay.service keeps its state in its own directory,

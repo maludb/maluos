@@ -104,6 +104,7 @@ function node_revoke_tokens(PDO $pdo, int $id): void
 /** Retire a node: status retired, offline, the token revoked, every open alert cleared. Work Locations' retire.php calls it too. */
 function node_retire(PDO $pdo, int $id): void
 {
+    agents_deregister($pdo, $id);      // db/190: its agents leave the directory
     $pdo->prepare("UPDATE locations SET status = 'retired', retired_at = COALESCE(retired_at, now()), presence = 'offline', updated_at = now() WHERE id = :id")
         ->execute(['id' => $id]);
     node_revoke_tokens($pdo, $id);
@@ -294,7 +295,9 @@ function node_endpoints(bool $overlay = false): array
 {
     return ['heartbeat' => app_url('/api/v1/estate/heartbeat'), 'me' => app_url('/api/v1/estate/me'),
             'leave' => app_url('/api/v1/estate/leave'), 'nodes' => app_url('/api/v1/estate/nodes'),
-            'overlay' => $overlay ? app_url('/api/v1/estate/overlay') : null];
+            'overlay' => $overlay ? app_url('/api/v1/estate/overlay') : null,
+            // db/190: the directory, the keys, this node's inbox and where it registers its agents
+            'agents' => app_url('/api/v1/estate/agents'), 'keys' => app_url('/api/v1/estate/keys'), 'inbox' => app_url('/api/v1/estate/inbox'), 'tasks' => app_url('/api/v1/estate/tasks')];
 }
 
 /** The contract's answer for join (with the token and enrolled_by added by the caller), heartbeat and me. */
@@ -431,5 +434,6 @@ function present_estate_for_settings(PDO $pdo): array
     $ans = estate_nodes_answer($pdo);
     return ['nodes' => array_values(array_filter($ans['nodes'], static fn ($n) => $n['kind'] !== 'desk')),
             'alerts' => array_values(array_filter($ans['alerts'], static fn ($a) => $a['cleared_at'] === null)),
-            'overlay' => present_overlay_for_settings($pdo)];
+            'overlay' => present_overlay_for_settings($pdo),
+            'delegation' => present_delegation_for_settings($pdo)];      // db/190
 }

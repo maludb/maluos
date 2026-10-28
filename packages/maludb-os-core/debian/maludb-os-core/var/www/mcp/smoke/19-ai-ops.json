@@ -1,0 +1,299 @@
+[
+ {
+  "lookup": {
+   "runs_before": "SELECT count(*) FROM eval_runs"
+  }
+ },
+ {
+  "tool": "eval_set_save",
+  "expect": "error",
+  "args": {
+   "name": ""
+  }
+ },
+ {
+  "tool": "eval_set_save",
+  "expect": "error",
+  "args": {
+   "name": "SMOKE {{run}} no target"
+  }
+ },
+ {
+  "tool": "eval_set_save",
+  "expect": "error",
+  "args": {
+   "name": "SMOKE {{run}} bad threshold",
+   "role_key": "bookkeeper",
+   "pass_threshold": "140"
+  }
+ },
+ {
+  "tool": "eval_set_save",
+  "expect": "error",
+  "args": {
+   "name": "SMOKE {{run}} not an agent",
+   "agent": "6"
+  }
+ },
+ {
+  "tool": "eval_set_save",
+  "save": {
+   "set": "record_id"
+  },
+  "args": {
+   "name": "SMOKE {{run}} bookkeeping basics",
+   "role_key": "bookkeeper",
+   "pass_threshold": "85",
+   "description": "SMOKE set"
+  }
+ },
+ {
+  "tool": "eval_set_save",
+  "args": {
+   "eval_set": "{{set}}",
+   "name": "SMOKE {{run}} bookkeeping basics",
+   "status": "draft"
+  }
+ },
+ {
+  "lookup": {
+   "partial_kept": "SELECT status || ' | role=' || role_key || ' | threshold=' || pass_threshold || ' | ' || description FROM eval_sets WHERE id = {{set}}"
+  }
+ },
+ {
+  "tool": "eval_run_start",
+  "expect": "error",
+  "args": {
+   "eval_set": "{{set}}"
+  }
+ },
+ {
+  "tool": "eval_case_save",
+  "expect": "error",
+  "args": {
+   "eval_set": "{{set}}",
+   "title": "SMOKE no input",
+   "input": ""
+  }
+ },
+ {
+  "tool": "eval_case_save",
+  "expect": "error",
+  "args": {
+   "eval_set": "{{set}}",
+   "title": "SMOKE exact without answer",
+   "input": "2+2",
+   "grader": "exact"
+  }
+ },
+ {
+  "tool": "eval_case_save",
+  "expect": "error",
+  "args": {
+   "eval_set": "{{set}}",
+   "title": "SMOKE nothing says good",
+   "input": "Categorise this receipt"
+  }
+ },
+ {
+  "tool": "eval_case_save",
+  "save": {
+   "case": "record_id"
+  },
+  "args": {
+   "eval_set": "{{set}}",
+   "title": "SMOKE {{run}} fuel receipt",
+   "input": "Categorise: Shell 48.20 USD fuel",
+   "expected": "Vehicle expenses",
+   "grader": "exact"
+  }
+ },
+ {
+  "lookup": {
+   "case": "SELECT max(id) FROM eval_cases WHERE eval_set_id = {{set}}"
+  }
+ },
+ {
+  "lookup": {
+   "case_stored": "SELECT input::text || ' | ' || expected::text || ' | ' || grader || ' | ' || origin FROM eval_cases WHERE id = {{case}}"
+  }
+ },
+ {
+  "tool": "eval_case_save",
+  "args": {
+   "eval_set": "{{set}}",
+   "eval_case": "{{case}}",
+   "title": "SMOKE {{run}} fuel receipt",
+   "input": "{\"receipt\": \"Shell 48.20 USD fuel\"}",
+   "rubric": "Names a vehicle or fuel category",
+   "grader": "rubric_llm",
+   "weight": "2"
+  }
+ },
+ {
+  "lookup": {
+   "case_json_kept": "SELECT input::text || ' | w=' || weight || ' | ' || grader FROM eval_cases WHERE id = {{case}}"
+  }
+ },
+ {
+  "lookup": {
+   "ledger": "SELECT max(pl.id) FROM prompt_ledger pl JOIN prompt_payloads pp ON pp.ledger_id = pl.id WHERE pp.context IS NOT NULL AND pp.archived_at IS NULL"
+  }
+ },
+ {
+  "tool": "eval_case_promote_trace",
+  "expect": "error",
+  "args": {
+   "eval_set": "{{set}}"
+  }
+ },
+ {
+  "tool": "eval_case_promote_trace",
+  "expect": "error",
+  "args": {
+   "eval_set": "{{set}}",
+   "ledger_entry": "999999999"
+  }
+ },
+ {
+  "tool": "eval_case_promote_trace",
+  "args": {
+   "eval_set": "{{set}}",
+   "ledger_entry": "{{ledger}}",
+   "title": "SMOKE {{run}} from a real call"
+  }
+ },
+ {
+  "lookup": {
+   "promoted": "SELECT origin || ' | source=' || (source_ledger_id = {{ledger}}) || ' | input bytes>100=' || (length(input::text) > 100) || ' | by=' || promoted_by FROM eval_cases WHERE eval_set_id = {{set}} AND origin = 'promoted_trace'"
+  }
+ },
+ {
+  "lookup": {
+   "no_prompt_in_activity": "SELECT 'activity rows over 2KB for this set=' || count(*) FROM activity_log WHERE action LIKE 'eval_case.%' AND occurred_at > now() - interval '5 minutes' AND length(coalesce(after::text, '')) > 2000"
+  }
+ },
+ {
+  "tool": "eval_case_set_active",
+  "expect": "error",
+  "args": {
+   "eval_case": "999999999",
+   "active": "0"
+  }
+ },
+ {
+  "tool": "eval_case_set_active",
+  "args": {
+   "eval_case": "{{case}}",
+   "active": "0"
+  }
+ },
+ {
+  "tool": "eval_case_set_active",
+  "args": {
+   "eval_case": "{{case}}",
+   "active": "1"
+  }
+ },
+ {
+  "tool": "eval_run_start",
+  "expect": "error",
+  "args": {
+   "eval_set": "{{set}}"
+  }
+ },
+ {
+  "lookup": {
+   "no_fake_run": "SELECT 'eval_runs added=' || (count(*) - {{runs_before}}) FROM eval_runs"
+  }
+ },
+ {
+  "lookup": {
+   "attempt_logged": "SELECT after::text FROM activity_log WHERE action = 'eval_run.start' AND entity_id = {{set}} ORDER BY id DESC LIMIT 1"
+  }
+ },
+ {
+  "tool": "eval_schedule_save",
+  "expect": "error",
+  "args": {
+   "eval_set": "{{set}}",
+   "kind": "hourly",
+   "cadence": "weekly"
+  }
+ },
+ {
+  "tool": "eval_schedule_save",
+  "expect": "error",
+  "args": {
+   "eval_set": "{{set}}",
+   "kind": "trace_sampling",
+   "cadence": "daily"
+  }
+ },
+ {
+  "tool": "eval_schedule_save",
+  "args": {
+   "eval_set": "{{set}}",
+   "kind": "scheduled_run",
+   "cadence": "weekly",
+   "regression_delta": "7"
+  }
+ },
+ {
+  "lookup": {
+   "sched": "SELECT max(id) FROM eval_schedules WHERE eval_set_id = {{set}}"
+  }
+ },
+ {
+  "tool": "eval_schedule_save",
+  "args": {
+   "eval_set": "{{set}}",
+   "schedule": "{{sched}}",
+   "kind": "trace_sampling",
+   "cadence": "daily",
+   "sample_size": "10",
+   "active": "0"
+  }
+ },
+ {
+  "lookup": {
+   "schedule_kept": "SELECT kind || ' ' || cadence || ' n=' || sample_size || ' active=' || active || ' next_run_at null=' || (next_run_at IS NULL) FROM eval_schedules WHERE id = {{sched}}"
+  }
+ },
+ {
+  "tool": "eval_result_grade",
+  "expect": "error",
+  "args": {
+   "eval_result": "999999999",
+   "passed": "1"
+  }
+ },
+ {
+  "tool": "eval_alert_acknowledge",
+  "expect": "error",
+  "args": {
+   "eval_alert": "999999999"
+  }
+ },
+ {
+  "tool": "eval_alert_resolve",
+  "expect": "error",
+  "args": {
+   "eval_alert": "999999999",
+   "resolution": "SMOKE"
+  }
+ },
+ {
+  "lookup": {
+   "this_month": "SELECT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM')"
+  }
+ },
+ {
+  "tool": "eval_set_save",
+  "args": {
+   "eval_set": "{{set}}",
+   "name": "SMOKE {{run}} bookkeeping basics",
+   "status": "retired"
+  }
+ }
+]
