@@ -371,9 +371,12 @@ Larger than slice 1; three build-and-test rounds on the desktop image.
 
 ## Status
 
-**Both halves built 2026-10-28**, the day the overlay (slice 1b) was
-boot-tested; the kernel half awaits the owner's approval of db/190 before
-it is pushed, the host half is built against the mock and the local kernel:
+**Both halves built 2026-10-28, both images boot-tested 2026-10-29** (the
+third image chain: desktop UEFI 357 checks ok, server UEFI 181 ok; the first
+two runs found the fixes listed under "What the image chain found" at the
+end of this section).
+The owner approved db/190 and both repositories were pushed on 2026-10-29.
+The host half is built against the mock and the kernel:
 
 - The kernel half (maludb-os-core fa6e588, vendored as maludb-os-core
   2026.10.28maluos2; `docs/build-specs/estate-delegation.md` there): db/190
@@ -447,3 +450,33 @@ Where the build departs from the text above, and why:
    key itself, and the vault hands a use-only value to brokers alone
    (`use_requires_broker`). A later broker for the office API could take
    them back to use-only.
+
+### What the image chain found
+
+Three runs of the slice 2 image chain (publish, both rootfs and qcow2
+images, the desktop then the server UEFI boot test) on 2026-10-28/29:
+
+- **Run 1** (21:34): the server block's mock backend was stopped before the
+  helper's task ran (fixture); the task id came from the wrong column
+  (fixture); `maluctl estate tasks` as a user tried the node token and was
+  refused (estate 0.3.1: a user's viewer reads the desk token, root and
+  `MALUOS_ESTATE_TOKEN` the node's); the personal agent's use-only
+  delegations could not be read by the agent itself (agent 0.5.1: read
+  grants, deviation 9); the Agents app folder write made dconf
+  notifications at every sync (agents 0.3.1: write on change only). The
+  desktop's gnome-shell then froze: its "dconf worker" thread spun at 100%
+  inside libgjs under the GSettings backend dispatch while the main thread
+  waited, every GUI self-test and notification timed out, and the test took
+  2 h 46 min instead of 53. The cause is not known; the test now measures
+  the shell before the first GUI self-test and takes a symbolised gdb
+  backtrace when it is hot.
+- **Run 2** (01:28): the shell was idle (32% of a core over 3 s), every GUI
+  self-test ran. `maluctl gateway usage --envelope` found no row: the
+  agent's `gateway_headers()` read the task record's envelope under the
+  wrong key, so a working agent's model calls carried no `X-MaluOS-Envelope`
+  (agent 0.5.2). Two fixture bugs: the Agents self-test line gained the
+  directory, personal agent and inbox counts in 0.3.0 and one expectation
+  still read the old form; the desk-key-at-enrol check ran before the
+  enrolment.
+- **Run 3** (03:39): desktop UEFI 357 ok, server UEFI 181 ok, the shell at
+  2% of a core; no failures.
