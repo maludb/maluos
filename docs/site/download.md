@@ -6,7 +6,7 @@ holds it, so a site script can substitute it at render time.
 
 ---
 
-## MaluOS 26.04.20261024
+## MaluOS 26.04.20261029
 
 MaluOS is an operating system built around MaluDB: the database, its API,
 the credential vault, the model gateway and the agent runtime install and
@@ -15,16 +15,16 @@ no account or licence is needed. It comes as a server and as a desktop.
 
 | File | Size | Use |
 |---|---|---|
-| [maluos-26.04.20261024-server-amd64.iso](https://download.maluos.com/26.04.20261024/maluos-26.04.20261024-server-amd64.iso) | 4.9 GB | Server installer for physical machines and VMs (BIOS and UEFI, Secure Boot) |
-| [maluos-26.04.20261024-server-amd64.qcow2](https://download.maluos.com/26.04.20261024/maluos-26.04.20261024-server-amd64.qcow2) | 1.7 GB | Server cloud image with cloud-init, for KVM, Proxmox, OpenStack and similar |
-| [maluos-26.04.20261024-desktop-amd64.iso](https://download.maluos.com/26.04.20261024/maluos-26.04.20261024-desktop-amd64.iso) | 5.0 GB | Desktop installer (GNOME) for workstations, laptops and VMs (BIOS and UEFI, Secure Boot) |
-| [maluos-26.04.20261024-desktop-amd64.qcow2](https://download.maluos.com/26.04.20261024/maluos-26.04.20261024-desktop-amd64.qcow2) | 1.9 GB | Desktop image with cloud-init, for a workstation VM |
-| [SHA256SUMS](https://download.maluos.com/26.04.20261024/SHA256SUMS) · [SHA256SUMS.gpg](https://download.maluos.com/26.04.20261024/SHA256SUMS.gpg) | | Checksums and their signature |
-| [RELEASE-NOTES.md](https://download.maluos.com/26.04.20261024/RELEASE-NOTES.md) | | Package versions and changes in this release |
+| [maluos-26.04.20261029-server-amd64.iso](https://download.maluos.com/26.04.20261029/maluos-26.04.20261029-server-amd64.iso) | 4.9 GB | Server installer for physical machines and VMs (BIOS and UEFI, Secure Boot) |
+| [maluos-26.04.20261029-server-amd64.qcow2](https://download.maluos.com/26.04.20261029/maluos-26.04.20261029-server-amd64.qcow2) | 1.7 GB | Server cloud image with cloud-init, for KVM, Proxmox, OpenStack and similar |
+| [maluos-26.04.20261029-desktop-amd64.iso](https://download.maluos.com/26.04.20261029/maluos-26.04.20261029-desktop-amd64.iso) | 5.0 GB | Desktop installer (GNOME) for workstations, laptops and VMs (BIOS and UEFI, Secure Boot) |
+| [maluos-26.04.20261029-desktop-amd64.qcow2](https://download.maluos.com/26.04.20261029/maluos-26.04.20261029-desktop-amd64.qcow2) | 1.9 GB | Desktop image with cloud-init, for a workstation VM |
+| [SHA256SUMS](https://download.maluos.com/26.04.20261029/SHA256SUMS) · [SHA256SUMS.gpg](https://download.maluos.com/26.04.20261029/SHA256SUMS.gpg) | | Checksums and their signature |
+| [RELEASE-NOTES.md](https://download.maluos.com/26.04.20261029/RELEASE-NOTES.md) | | Package versions and changes in this release |
 
-Releases are dated: `26.04` is the package base, `20261024` the build
+Releases are dated: `26.04` is the package base, `20261029` the build
 date. Every release is also on GitHub with the cloud images and checksums
-attached: https://github.com/maludb/maluos/releases/tag/v26.04.20261024
+attached: https://github.com/maludb/maluos/releases/tag/v26.04.20261029
 
 ## The desktop
 
@@ -39,17 +39,20 @@ snaps; the browser is Firefox from Mozilla's own apt repository, GNOME
 Software installs debs only, and security and MaluOS updates install
 themselves through apt (`maluctl update status` shows what is pending).
 
-The desktop is the fifth desktop release, and the first to carry two
-slices at once. The desk now protects agents from a sleeping machine
-(the screen never blanks and nothing suspends on its own), and five new
-windows sit in the dock: the Upgrade Manager (pending updates, install
-now, the automatic-update switches, the history), the Tools Installer
-(Google Chrome, VS Code, Claude Code, Codex and Ollama in one click),
-MaluApps (the office's applications and the public catalogue as
-launchers), the Credential Manager (your vault secrets, delegations and
-requests) and the Agents app: one window to talk to and control the
-agents on your desk and, on an enrolled desk, the office's, with each
-agent an icon in the Agents folder of the app grid and in ~/Desktop/Agents.
+The desktop is the ninth desktop release and the first that joins an
+estate. A desk enrols with an office (`sudo maluctl office enroll`) and
+gets its own signing key; every agent in the estate is listed in the
+Agents app by what it can do, and a task sent to one of them travels in an
+envelope the desk signs, so the node that runs it can verify who asked
+and with what authority. An agent that needs a decision asks through
+the estate inbox, which arrives as a desktop notification with Approve
+and Deny on it. A personal agent (`maluctl agent create me --personal`)
+acts for you under your own key with a weekly grant. The machines of an
+estate talk over a WireGuard overlay the estate brings up on join. Since
+26.04.20261024 the desk also decides grant requests with a level, an
+expiry and a budget, re-authenticates through polkit before a reveal,
+streams agents' answers, and the System Monitor shows the GPUs the host
+shares and the estate's network and queue.
 Agents gain a task interface (`maluctl agent send NAME "…"`); the server
 images carry it too. It is tested in virtual machines (BIOS and UEFI)
 and installed on a laptop and on Proxmox; the graphics stack and the
@@ -70,7 +73,7 @@ Fetch the key from the package repository, check the signature on the
 checksum file, then check the file you downloaded:
 
 ```sh
-V=26.04.20261024
+V=26.04.20261029
 curl -fsSLO https://download.maluos.com/$V/SHA256SUMS
 curl -fsSLO https://download.maluos.com/$V/SHA256SUMS.gpg
 curl -fsSL  https://apt.maluos.com/bootstrap/maluos-archive-keyring.gpg -o maluos-archive-keyring.gpg
@@ -139,7 +142,7 @@ users:
 UD
 echo 'instance-id: maluos-1' > meta-data
 cloud-localds seed.iso user-data meta-data
-qemu-img create -f qcow2 -b maluos-26.04.20261024-server-amd64.qcow2 -F qcow2 disk.qcow2 40G
+qemu-img create -f qcow2 -b maluos-26.04.20261029-server-amd64.qcow2 -F qcow2 disk.qcow2 40G
 qemu-system-x86_64 -enable-kvm -m 4096 -smp 2 -drive file=disk.qcow2,if=virtio \
   -drive file=seed.iso,if=virtio,format=raw -nic user,hostfwd=tcp::2222-:22
 ssh -p 2222 maluos@127.0.0.1 maluctl status
