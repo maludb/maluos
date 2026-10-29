@@ -23,3 +23,5 @@ packages/maluos-system-monitor/debian/gnome-system-monitor.1
 packages/maluos-system-monitor/debian/debhelper-build-stamp
 packages/*.deb
 packages/*/debian/.[a-z]*/
+packages/*/debian/maludb-*/
+packages/*/debian/debhelper-build-stamp

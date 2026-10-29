@@ -1,7 +1,0 @@
-#!/bin/sh
-set -e
-# Automatically added by dh_installsystemd/13.31ubuntu1
-if [ -z "$DPKG_ROOT" ] && [ "$1" = remove ] && [ -d /run/systemd/system ] ; then
-	deb-systemd-invoke stop 'maludb-os-actions-mcp.service' 'maludb-os-activity-ingest.service' 'maludb-os-activity-ingest.timer' 'maludb-os-activity-mcp.service' 'maludb-os-agent-runner.service' 'maludb-os-channels.service' 'maludb-os-memory-mcp.service' 'maludb-os-records-mcp.service' 'maludb-os-web.service' >/dev/null || true
-fi
-# End automatically added section
