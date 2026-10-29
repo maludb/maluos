@@ -22,7 +22,13 @@ QUIRK_FILES = ("brcmfmac4364b2-pcie.txt", "brcmfmac4364b2-pcie.txcap_blob")   # 
 
 
 def sh(*argv, check=False, timeout=120):
-    r = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+    try:
+        r = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+    except FileNotFoundError:
+        # the tool is not installed (a build host without pciutils, a container): nothing to report, not an error
+        if check:
+            raise RuntimeError(f"{argv[0]}: not installed")
+        return ""
     if check and r.returncode:
         raise RuntimeError(f"{' '.join(argv)}: {r.stderr.strip() or r.stdout.strip()}")
     return r.stdout

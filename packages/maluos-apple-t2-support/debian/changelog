@@ -1,3 +1,12 @@
+maluos-apple-t2-support (0.1.3) resolute; urgency=medium
+
+  * The firmware helper tolerates a tool that is not installed (lspci on a
+    build host without pciutils, the CI container): sh() answers an empty
+    output, so status() reports no Broadcom device instead of raising. The
+    packages CI job had failed on this since the T2 round.
+
+ -- Edward Honour <ed@maludb.org>  Thu, 29 Oct 2026 07:03:51 +0000
+
 maluos-apple-t2-support (0.1.2) resolute; urgency=medium
 
   * t2fanrd's drop-in also requires the SMC device (applesmc.*): without it
