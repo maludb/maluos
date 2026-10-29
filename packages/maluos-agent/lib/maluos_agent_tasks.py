@@ -83,7 +83,7 @@ def gateway_headers():
     """Headers a model call made during an estate task carries: the envelope's classification and id (the gateway's
     egress gate holds the originator's ceiling; the ledger row carries the envelope)."""
     t = current()
-    env = (t or {}).get("envelope") if t else None
+    env = (t.get("_envelope") or t.get("envelope")) if t else None    # the record keeps it as _envelope (the handler's copy says envelope)
     if not env:
         return {}
     h = {"X-MaluOS-Envelope": env.get("id") or ""}
