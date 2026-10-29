@@ -470,17 +470,25 @@ def overlay_cmd(a):
 
 
 def _viewer():
-    """(url-or-conf, token) for the directory: this node's token, or on a desk the owner's desk token."""
+    """(url-or-conf, token) for the directory: this node's token (as root, or with MALUOS_ESTATE_TOKEN), else on a desk
+    the owner's desk token. A person on a host that is both a node and their desk reads as the desk: the node token is
+    the host principal's, and asking the vault for it as a user files a grant request in their name. A desk whose token
+    cannot be read falls back to the node's."""
     conf = C.read_conf()
-    if conf:
-        return conf, C.token(conf)
     desk = C.desk_conf()
+    if conf and (os.geteuid() == 0 or os.environ.get("MALUOS_ESTATE_TOKEN") or not desk):
+        return conf, C.token(conf)
     if not desk:
         sys.exit("not joined (no /etc/maluos/estate.yaml) and not an enrolled desk (no /etc/maluos/office.yaml)")
     tok = os.environ.get("MALUOS_OFFICE_TOKEN")
     if not tok:
         from maluos_vault_client import Vault
-        tok = Vault(os.environ.get("MALUOS_VAULT_SOCKET")).value(C.OFFICE_SECRET, "read", purpose="estate directory")["value"]
+        try:
+            tok = Vault(os.environ.get("MALUOS_VAULT_SOCKET")).value(C.OFFICE_SECRET, "read", purpose="estate directory")["value"]
+        except Exception as e:
+            if conf:
+                return conf, C.token(conf)
+            sys.exit(f"the desk token: {e}")
     return desk, tok
 
 

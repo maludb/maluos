@@ -117,7 +117,7 @@ maluos-agents                                          # the Agents app: the dir
    agent" in the Agents app runs `maluctl agent create me --personal`
    (polkit, as the Tools Installer): an agent owned by the person,
    capability `personal`, `accept_from` its owner only, the desk token
-   and the desk key delegated to it use-only with a one-week expiry
+   and the desk key granted to it to read with a one-week expiry (see deviation 9)
    that the Agents app renews, a policy of `--egress internal` and a
    small budget, and the demo agent's chat loop as its first body. It
    sends tasks to office agents as the person (originator the person,
@@ -440,3 +440,10 @@ Where the build departs from the text above, and why:
    --allow-actions`) names it. `apply_updates` starts
    `maluos-estate-updates.service` (a oneshot running `maluctl update
    apply`).
+9. **The personal agent's desk token and key are read grants, not
+   use-only delegations** (`maluctl secret grant NAME --to agent:me --level
+   read --expires …`, a week, renewed by `maluctl agent personal renew`):
+   the agent presents the token to the office and signs envelopes with the
+   key itself, and the vault hands a use-only value to brokers alone
+   (`use_requires_broker`). A later broker for the office API could take
+   them back to use-only.

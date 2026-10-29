@@ -93,15 +93,23 @@ def set_app_folder(file_ids):
     folders = Gio.Settings.new("org.gnome.desktop.app-folders")
     children = list(folders.get_strv("folder-children"))
     if file_ids:
+        # written only on a change: every write is a dconf notification the shell dispatches to its own JS, and the
+        # fewer of those the better (2026-10-28: a run where the shell's dconf worker locked up against its main thread)
         f = Gio.Settings.new_with_path("org.gnome.desktop.app-folders.folder", f"/org/gnome/desktop/app-folders/folders/{FOLDER}/")
-        f.set_string("name", "Agents"); f.set_boolean("translate", False)
-        f.set_strv("apps", [f"{PREFIX}{i}.desktop" for i in file_ids])
+        if f.get_string("name") != "Agents":
+            f.set_string("name", "Agents")
+        if f.get_boolean("translate"):
+            f.set_boolean("translate", False)
+        apps = [f"{PREFIX}{i}.desktop" for i in file_ids]
+        if list(f.get_strv("apps")) != apps:
+            f.set_strv("apps", apps)
         if FOLDER not in children:
             folders.set_strv("folder-children", children + [FOLDER])
     elif FOLDER in children:
         folders.set_strv("folder-children", [c for c in children if c != FOLDER])
         f = Gio.Settings.new_with_path("org.gnome.desktop.app-folders.folder", f"/org/gnome/desktop/app-folders/folders/{FOLDER}/")
-        f.set_strv("apps", [])
+        if f.get_strv("apps"):
+            f.set_strv("apps", [])
     Gio.Settings.sync()
     return True
 

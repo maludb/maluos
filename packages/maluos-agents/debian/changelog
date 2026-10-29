@@ -1,3 +1,11 @@
+maluos-agents (0.3.1) resolute; urgency=medium
+
+  * The Agents app folder is written only when its name, flag or app list
+    changed: every write is a dconf change the shell dispatches to its own
+    JS, and fewer of those is better.
+
+ -- Edward Honour <ed@maludb.org>  Thu, 29 Oct 2026 01:12:52 +0000
+
 maluos-agents (0.3.0) resolute; urgency=medium
 
   * Phase 13 slice 2, delegation (docs/phase13-slice2-delegation.md): the

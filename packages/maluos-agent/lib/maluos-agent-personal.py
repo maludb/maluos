@@ -42,7 +42,7 @@ def office():
 
 def vault_value(name):
     from maluos_vault_client import Vault
-    return Vault(os.environ.get("MALUOS_VAULT_SOCKET")).value(name, "use", purpose=f"personal agent: {name}")["value"]
+    return Vault(os.environ.get("MALUOS_VAULT_SOCKET")).value(name, "read", purpose=f"personal agent: {name}")["value"]
 
 
 def ask_agent(name, text, task):

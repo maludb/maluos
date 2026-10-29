@@ -21,3 +21,5 @@ __pycache__/
 packages/maluos-system-monitor/obj-*/
 packages/maluos-system-monitor/debian/gnome-system-monitor.1
 packages/maluos-system-monitor/debian/debhelper-build-stamp
+packages/*.deb
+packages/*/debian/.[a-z]*/

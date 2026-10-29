@@ -465,7 +465,7 @@ def create(a):
     if caps or accept or approve or maxc:
         print(f"  directory: capabilities {', '.join(caps) or '-'}; accepts from {', '.join(accept) or 'its owner only'}" + (f"; ceiling {maxc}" if maxc else "") + (f"; approve {', '.join(approve)}" if approve else ""))
     if personal:
-        print(f"  personal: the desk token and the desk key delegated use-only for a week (maluctl agent personal renew); ask it: maluctl agent send {n} \"ask helper …\"")
+        print(f"  personal: the desk token and the desk key granted to it to read for a week (maluctl agent personal renew); ask it: maluctl agent send {n} \"ask helper …\"")
     print(f"  try:  maluctl agent run {n} -- maluctl gateway whoami")
     return 0
 
@@ -477,16 +477,18 @@ def opt_desc(exe, personal):
 
 
 def personal_delegate(n, owner, days=7):
-    """The owner's desk token and desk key reach the personal agent use-only, for a week (renewed by the Agents app)."""
+    """The owner's desk token and desk key are granted to the personal agent to read, for a week (renewed by the Agents
+    app): it presents the token to the office and signs envelopes with the key itself, so a use-only delegation (whose
+    value only a broker may take) cannot serve it."""
     ou = owner_user(owner)
     if not ou:
         print("  warning: the personal agent's owner is not a Linux user here; the desk token is not delegated", file=sys.stderr); return
     import datetime
     exp = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
     for secret in ("office-desk-token", "office-desk-key"):
-        r = subprocess.run(["runuser", "-u", ou, "--", "maluctl", "secret", "delegate", "--to", f"agent:{n}", "--secret", secret, "--expires", exp], capture_output=True, text=True)
+        r = subprocess.run(["runuser", "-u", ou, "--", "maluctl", "secret", "grant", secret, "--to", f"agent:{n}", "--level", "read", "--expires", exp], capture_output=True, text=True)
         if r.returncode != 0:
-            print(f"  warning: {secret} not delegated to agent:{n}: {(r.stderr or r.stdout).strip()[-160:]}", file=sys.stderr)
+            print(f"  warning: {secret} not granted to agent:{n}: {(r.stderr or r.stdout).strip()[-160:]}", file=sys.stderr)
 
 
 def policy(a):
@@ -529,7 +531,7 @@ def policy(a):
 
 
 def personal(a):
-    """maluctl agent personal renew [NAME]: renew the personal agent's delegations (the Agents app calls it weekly)."""
+    """maluctl agent personal renew [NAME]: renew the personal agent's grants (the Agents app calls it weekly)."""
     sub = a.pop(0) if a else "renew"
     n = a.pop(0) if a and not a[0].startswith("--") else "me"
     env = read_env(n)
@@ -539,7 +541,7 @@ def personal(a):
         sys.exit("personal renew [NAME]")
     need_root()
     personal_delegate(n, env.get("MALUOS_AGENT_OWNER"))
-    print(f"agent {n}: delegations renewed for a week"); return 0
+    print(f"agent {n}: grants renewed for a week"); return 0
 
 
 def remove(a):

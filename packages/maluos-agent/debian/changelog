@@ -1,3 +1,13 @@
+maluos-agent (0.5.1) resolute; urgency=medium
+
+  * The personal agent: the desk token and the desk key are granted to it
+    to read for a week (maluctl secret grant --level read), not delegated
+    use-only: it presents the token to the office and signs envelopes with
+    the key itself, and the vault hands a use-only value to brokers alone
+    (use_requires_broker). It reads them with mode read.
+
+ -- Edward Honour <ed@maludb.org>  Thu, 29 Oct 2026 01:12:52 +0000
+
 maluos-agent (0.5.0) resolute; urgency=medium
 
   * Phase 13 slice 2, delegation (docs/phase13-slice2-delegation.md): the
