@@ -15,10 +15,10 @@ no account or licence is needed. It comes as a server and as a desktop.
 
 | File | Size | Use |
 |---|---|---|
-| [maluos-26.04.20261029-server-amd64.iso](https://download.maluos.com/26.04.20261029/maluos-26.04.20261029-server-amd64.iso) | 4.9 GB | Server installer for physical machines and VMs (BIOS and UEFI, Secure Boot) |
+| [maluos-26.04.20261029-server-amd64.iso](https://download.maluos.com/26.04.20261029/maluos-26.04.20261029-server-amd64.iso) | 5.2 GB | Server installer for physical machines and VMs (BIOS and UEFI, Secure Boot) |
 | [maluos-26.04.20261029-server-amd64.qcow2](https://download.maluos.com/26.04.20261029/maluos-26.04.20261029-server-amd64.qcow2) | 1.7 GB | Server cloud image with cloud-init, for KVM, Proxmox, OpenStack and similar |
-| [maluos-26.04.20261029-desktop-amd64.iso](https://download.maluos.com/26.04.20261029/maluos-26.04.20261029-desktop-amd64.iso) | 5.0 GB | Desktop installer (GNOME) for workstations, laptops and VMs (BIOS and UEFI, Secure Boot) |
-| [maluos-26.04.20261029-desktop-amd64.qcow2](https://download.maluos.com/26.04.20261029/maluos-26.04.20261029-desktop-amd64.qcow2) | 1.9 GB | Desktop image with cloud-init, for a workstation VM |
+| [maluos-26.04.20261029-desktop-amd64.iso](https://download.maluos.com/26.04.20261029/maluos-26.04.20261029-desktop-amd64.iso) | 5.4 GB | Desktop installer (GNOME) for workstations, laptops and VMs (BIOS and UEFI, Secure Boot) |
+| [maluos-26.04.20261029-desktop-amd64.qcow2](https://download.maluos.com/26.04.20261029/maluos-26.04.20261029-desktop-amd64.qcow2) | 2.0 GB | Desktop image with cloud-init, for a workstation VM |
 | [SHA256SUMS](https://download.maluos.com/26.04.20261029/SHA256SUMS) · [SHA256SUMS.gpg](https://download.maluos.com/26.04.20261029/SHA256SUMS.gpg) | | Checksums and their signature |
 | [RELEASE-NOTES.md](https://download.maluos.com/26.04.20261029/RELEASE-NOTES.md) | | Package versions and changes in this release |
 
