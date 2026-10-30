@@ -1,3 +1,19 @@
+maluos-estate (0.4.0) resolute; urgency=medium
+
+  * Phase 13 slice 3: the heartbeat carries the gateway's inference
+    facts; the daemon keeps the directory's backends
+    (/run/maluos/estate/inference.json, hourly and on inference_changed)
+    and the peers allowed to call this host (peers.json, every five
+    minutes and on peers_changed) for the gateway; the join stores the
+    inference key the office issues beside the node token with a `use`
+    grant to the gateway; maluctl estate inference [--refresh] [--peers]
+    [--new-key]; leave removes the key and the caches. The mock office
+    serves the whole contract (the facts, the backends, the peers, keys,
+    placement, the policy and the entitlement through /mock/inference,
+    /mock/inference/policy, /mock/editions, /mock/peer).
+
+ -- Edward Honour <ed@maludb.org>  Thu, 29 Oct 2026 18:30:00 +0000
+
 maluos-estate (0.3.1) resolute; urgency=medium
 
   * maluctl estate agents/tasks/keys: a person on a host that is both a

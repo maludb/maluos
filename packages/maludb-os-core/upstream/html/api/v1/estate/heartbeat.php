@@ -44,5 +44,12 @@ if (isset($body['agents']) && is_array($body['agents'])) {
     $registered = agents_register($pdo, $row, $list);
 }
 $changed = overlay_changed($pdo, $row);      // db/189: the overlay changed since this node last heard
+// db/191: the node's inference facts (its gateway's models, queue, wait and sharing switch), ≤ 8 KB
+if (isset($body['inference'])) {
+    $err = inference_facts_store($pdo, $row, $body['inference']);
+    if ($err !== null) { $pdo->rollBack(); api_error('invalid', $err, 400); }
+}
+$inf = inference_changed($pdo, $row);
+$peers = peers_changed($pdo, $row);
 $pdo->commit();
-api_json(node_answer($pdo, $row) + ['overlay_changed' => $changed, 'agents_registered' => $registered]);
+api_json(node_answer($pdo, $row) + ['overlay_changed' => $changed, 'agents_registered' => $registered, 'inference_changed' => $inf, 'peers_changed' => $peers]);

@@ -124,6 +124,17 @@ export const mySettings = z.object({
         reason: z.string().nullable(), created_at: z.string().nullable(), done_at: z.string().nullable() })),
       coordinator_key: z.string(),
     }).nullable().default(null),
+    /** db/191: shared inference — every member's gateway facts, which are published, the policy rules, the scheduler entitlement (maluos docs/phase13-slice3-inference.md). */
+    inference: z.object({
+      backends: z.array(z.object({ node: z.string(), id: z.number().int(), kind: z.string(), name: z.string(), display_name: z.string(), address: z.string().nullable(),
+        port: z.number().int(), api_version: z.number().int(), models: z.array(z.object({ name: z.string(), loaded: z.boolean() })),
+        expected_wait_s: z.record(z.string(), z.number()).default({}), queue: z.object({ queued: z.number().int().default(0), running: z.number().int().default(0) }).default({ queued: 0, running: 0 }),
+        share: z.boolean(), contribution: z.string(), updated_at: z.string().nullable(), presence: z.string(), published: z.boolean(), why: z.string().nullable() })),
+      rules: z.array(z.object({ id: z.number().int(), subject: z.string(), backend_location_id: z.number().int().nullable(), backend_name: z.string().nullable(), allow: z.boolean(),
+        max_class: z.string().nullable(), max_classification: z.string().nullable(), priority: z.number().int(), note: z.string().nullable(), created_at: z.string().nullable() })),
+      scheduler: z.boolean(), lease_s: z.number().int(), version: z.number().int(), peers_version: z.number().int(), members_with_keys: z.number().int(),
+      queue: z.object({ queued: z.number().int(), running: z.number().int(), backends: z.number().int() }),
+    }).nullable().default(null),
   }).nullable().default(null),
   section: z.enum(["profile", "notifications", "security", "tokens", "desks"]),
   timezones: z.array(z.string()),

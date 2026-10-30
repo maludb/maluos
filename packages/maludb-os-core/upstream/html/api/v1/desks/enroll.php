@@ -49,9 +49,11 @@ overlay_join($pdo, (int) $made['desk']['id'], $body);
 if (is_string($body['public_key'] ?? null) && ssh_ed25519_raw($body['public_key']) !== null) {
     $pdo->prepare('UPDATE locations SET public_key = :k WHERE id = :id')->execute(['k' => trim($body['public_key']), 'id' => (int) $made['desk']['id']]);
 }
+$infKey = inference_key_mint($pdo, (int) $made['desk']['id']);      // db/191: the desk's inference key, shown once
+inference_mark_seen($pdo, (int) $made['desk']['id']);
 $desk = desk_row($pdo, (int) $made['desk']['id']);
 log_activity($pdo, 'desk.enroll', 'location', (int) $desk['id'], ['source' => 'desk',
     'after' => ['name' => $desk['name'], 'hostname' => $desk['hostname'], 'app_version' => $desk['app_version'], 'principal' => $principal]]);
 $pdo->commit();
 
-api_json(desk_answer($pdo, $desk, $member) + ['token' => $made['token']], 201);
+api_json(desk_answer($pdo, $desk, $member) + ['token' => $made['token'], 'inference_key' => $infKey], 201);

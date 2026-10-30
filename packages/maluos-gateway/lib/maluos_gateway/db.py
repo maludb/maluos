@@ -26,7 +26,14 @@ class Catalog:
         """[(backend, model, reason)] in ladder order for a requested name."""
         if requested in self.tiers:
             rows = sorted((a for a in self.aliases if a["tier"] == requested and a["enabled"]), key=lambda a: (a["position"], a["name"]))
-            return [(a["backend"], a["model"], f"tier {requested}") for a in rows if self.backends.get(a["backend"], {}).get("enabled")]
+            out = [(a["backend"], a["model"], f"tier {requested}") for a in rows if self.backends.get(a["backend"], {}).get("enabled")]
+            # slice 3: an estate backend that serves one of the tier's models is a rung of the tier too, after the catalogue's own
+            for a in rows:
+                for name, models in known_models.items():
+                    b = self.backends.get(name)
+                    if b and b["kind"] == "estate" and b["enabled"] and (a["model"] in models or a["model"] + ":latest" in models) and (name, a["model"]) not in {(o[0], o[1]) for o in out}:
+                        out.append((name, a["model"], f"tier {requested} via the estate"))
+            return out
         rows = sorted((a for a in self.aliases if a["name"] == requested and a["enabled"] and a["tier"] is None), key=lambda a: a["position"])
         if rows:
             return [(a["backend"], a["model"], "alias") for a in rows if self.backends.get(a["backend"], {}).get("enabled")]
@@ -37,7 +44,7 @@ class Catalog:
                 out.append((name, requested, "direct"))
         # local backends first, then remote nodes, then cloud, as a stable default ladder for bare model names
         cloud = ("anthropic", "openai", "openai_compat", "ollama_cloud")
-        return sorted(out, key=lambda c: (self.backends[c[0]]["kind"] in cloud, self.backends[c[0]]["kind"] == "remote", c[0]))
+        return sorted(out, key=lambda c: (self.backends[c[0]]["kind"] in cloud, self.backends[c[0]]["kind"] in ("remote", "estate"), c[0]))
 
     def policy_for(self, principal_ref, scopes=()):
         merged = {"allowed_tiers": None, "allowed_backends": None, "cloud_allowed": True, "remote_allowed": True, "default_class": None,

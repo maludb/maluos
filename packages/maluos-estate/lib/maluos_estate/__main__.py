@@ -16,6 +16,7 @@ from maluos_estate import client as C, report as R
 
 LADDER = (10, 30, 60)
 KEYS_EVERY = 300          # the directory's keys are re-read this often (and at once after a bad signature)
+INFERENCE_HINT = os.environ.get("MALUOS_ESTATE_INFERENCE_HINT", "/run/maluos/estate/inference-refresh")   # slice 3: `maluctl estate inference --refresh` asks the daemon too
 TASK_WAIT_S = 100         # how long a task is waited for before it is reported running and followed up
 TASK_MAX_S = 1800
 
@@ -192,6 +193,23 @@ def main(argv=None):
     inbox = Inbox(stop, log)
     threading.Thread(target=inbox.loop, daemon=True).start()
     manifests_due = True                      # slice 2: the agents are registered with the first heartbeat, each report, and after the hint
+    inf_at, peers_at = 0.0, 0.0               # slice 3: when the backends and the peers caches were last written
+
+    def inference_refresh(conf, tok, which):
+        nonlocal inf_at, peers_at
+        try:
+            for name, (st, r) in C.refresh_inference(conf, tok, which).items():
+                if st == 200:
+                    if name == "backends":
+                        inf_at = time.time()
+                        log(f"inference: {len(r.get('backends') or [])} backend(s) published to this node (version {r.get('version')}; editions {', '.join(r.get('editions') or []) or 'none'})")
+                    else:
+                        peers_at = time.time()
+                        log(f"inference: {len(r.get('peers') or [])} peer(s) may call this host (version {r.get('version')})")
+                else:
+                    log(f"inference {name}: {st} {r.get('error') or ''}: {r.get('message') or ''}")
+        except Exception as e:
+            log(f"inference: {e.__class__.__name__}: {str(e)[:120]}")
     while not stop.is_set():
         conf = C.read_conf()
         if not conf:
@@ -220,7 +238,8 @@ def main(argv=None):
         if C.agents_hint_take():
             manifests_due = True
         agents = C.manifests() if (manifests_due or rep is not None) else None
-        res = C.heartbeat(conf, tok, "online", rep, agents=agents)
+        inference = C.gateway_inference()         # slice 3: what this host's gateway serves, its queue and its sharing switch
+        res = C.heartbeat(conf, tok, "online", rep, agents=agents, inference=inference)
         if res["ok"]:
             fails = 0
             inbox.set(conf, tok)
@@ -228,6 +247,20 @@ def main(argv=None):
                 manifests_due = False
             if res.get("overlay_changed"):
                 C.overlay_hint()                  # slice 1b: the overlay service refreshes now
+            # slice 3: the directory's backends (hourly, on inference_changed, on the hint) and the peers (every 5 min, on peers_changed)
+            hinted = False
+            try:
+                os.remove(INFERENCE_HINT); hinted = True
+            except OSError:
+                pass
+            which = []
+            if (conf.get("endpoints") or {}).get("inference") and (res.get("inference_changed") or hinted or time.time() - inf_at > C.INFERENCE_REFRESH_S):
+                which.append("backends")
+            if (conf.get("endpoints") or {}).get("inference") and (res.get("peers_changed") or hinted or time.time() - peers_at > C.PEERS_REFRESH_S):
+                which.append("peers")
+            if which:
+                inference_refresh(conf, tok, which)
+            res["inference"] = {"sent": inference is not None, "backends_at": inf_at or None, "peers_at": peers_at or None, "editions": res.get("editions")}
             if rep is not None:
                 last_report = time.time(); res["last_report_at"] = res["ts"]
             else:

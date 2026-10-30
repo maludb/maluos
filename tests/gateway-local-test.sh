@@ -114,7 +114,7 @@ echo "== mock ollama + gateway"
 PYTHONPATH=$W/lib python3 -m maluos_gateway.mock_ollama --port $MOCK --token-delay 0.005 --models mock-7b,mock-13b,mock-embed,mock-fail >"$W/mock.log" 2>&1 & echo $! > "$W/mock.pid"; disown
 CREDENTIALS_DIRECTORY=$W/vcred MALUOS_VAULT_CONFIG=$W/vault.yaml PYTHONPATH=$W/lib python3 "$W/lib/maluos_vault.py" --socket "$W/vault.sock" >"$W/vault.log" 2>&1 & echo $! > "$W/vault.pid"; disown
 for i in $(seq 1 20); do [ -S "$W/vault.sock" ] && break; sleep 0.25; done
-PYTHONPATH=$W/lib MALUOS_GATEWAY_CONFIG=$W/gateway.yaml python3 -m maluos_gateway --socket "$W/gw.sock" >"$W/gw.log" 2>&1 & echo $! > "$W/gw.pid"; disown
+PYTHONPATH=$W/lib MALUOS_GATEWAY_CONFIG=$W/gateway.yaml MALUOS_ESTATE_INFERENCE=$W/estate-inference.json MALUOS_ESTATE_PEERS=$W/estate-peers.json MALUOS_SESSION_IDLE_FILE=$W/session-idle python3 -m maluos_gateway --socket "$W/gw.sock" >"$W/gw.log" 2>&1 & echo $! > "$W/gw.pid"; disown
 trap 'kill $(cat $W/gw.pid) $(cat $W/mock.pid) $(cat $W/vault.pid) 2>/dev/null' EXIT
 for i in $(seq 1 40); do [ -S "$W/gw.sock" ] && curl -sf --unix-socket "$W/gw.sock" http://g/v1/maluos/health >/dev/null && break; sleep 0.25; done
 sleep 1.5   # first health probe of the backends
@@ -285,7 +285,7 @@ check "backend recovered -> alert" "SQL \"select count(*) from maluos_ledger whe
 check "backend serves again after recovery" "chat $U/v1/chat/completions -d '{\"model\":\"fast\",\"messages\":[{\"role\":\"user\",\"content\":\"back\"}]}' | grep -q 'mock reply to: back'"
 RID3=$(SQL "select submit_request('chat', 'lose me', NULL, NULL, '{\"options\": {\"mock_delay_s\": 8}}', 60000)"); sleep 2.5
 kill $(cat $W/gw.pid); sleep 1
-PYTHONPATH=$W/lib MALUOS_GATEWAY_CONFIG=$W/gateway.yaml python3 -m maluos_gateway --socket "$W/gw.sock" >>"$W/gw.log" 2>&1 & echo $! > "$W/gw.pid"; disown
+PYTHONPATH=$W/lib MALUOS_GATEWAY_CONFIG=$W/gateway.yaml MALUOS_ESTATE_INFERENCE=$W/estate-inference.json MALUOS_ESTATE_PEERS=$W/estate-peers.json MALUOS_SESSION_IDLE_FILE=$W/session-idle python3 -m maluos_gateway --socket "$W/gw.sock" >>"$W/gw.log" 2>&1 & echo $! > "$W/gw.pid"; disown
 for i in $(seq 1 40); do [ -S "$W/gw.sock" ] && curl -sf --unix-socket "$W/gw.sock" http://g/v1/maluos/health >/dev/null && break; sleep 0.25; done; sleep 2
 check "restart accounting: the lost engine request is failed as gateway_restart" "SQL \"select status || ' ' || coalesce((select error_class from maludb_core.\\\"malu\\\$model_response\\\" r where r.request_id=$RID3), '-') from maludb_core.\\\"malu\\\$model_request\\\" where request_id=$RID3\" | grep -q 'failed gateway_restart'"
 check "restart recorded in the ledger with an alert" "SQL \"select count(*) from maluos_ledger where event='gateway.restart' and detail->'lost' @> '[$RID3]'\" | grep -qE '^[1-9]' && SQL \"select count(*) from maluos_ledger where event='alert.restart_lost_work'\" | grep -qE '^[1-9]'"
@@ -371,6 +371,88 @@ check "expose moves the TCP listener live (gateway.yaml + reload), refusing with
 check "unexpose closes it; expose back on the test port" "rmctl unexpose | grep -q 'tcp listener off' && curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$TCP2/node/v1/health | grep -q 000 && rmctl expose --bind 127.0.0.1 --port $TCP >/dev/null && curl -s http://127.0.0.1:$TCP/node/v1/health | grep -q '\"ok\": true' && mctl share | grep -q \"tcp on 127.0.0.1:$TCP only\""
 check "key revoke by maluctl; the key then fails (401)" "rmctl key revoke ed-desk | grep -q 'revoked key ed-desk' && sleep 0.5 && curl -s -o /dev/null -w '%{http_code}' -H \"Authorization: Bearer $EDKEY\" $EU/v1/models | grep -q 401"
 rmctl backend rm self-remote >/dev/null 2>&1
+
+echo "== Phase 13 slice 3: shared inference (docs/phase13-slice3-inference.md): the estate's directory as a cache, an estate rung to this host's own listener, the peers, the ceilings, placement"
+INFKEY="inf_$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+INFHASH=$(printf %s "$INFKEY" | sha256sum | cut -d' ' -f1)
+# this host's inference key, in the vault for the gateway's own use (the enrolment side stores it with a `use` grant; here by hand)
+sudo -n env $ENV python3 - "$INFKEY" "$ME" <<'PY'
+import sys; sys.path.insert(0, "/var/tmp/maluos-gateway-test/lib")
+from maluos_vault_client import Vault, VaultError
+key, me = sys.argv[1:3]
+v = Vault()
+try: v.create_compartment("system", scope="org")
+except VaultError: pass
+v.add("estate-inference-key", key, compartment="system", kind="token", provider="estate", upsert=True)
+v.grant("system/estate-inference-key", "principal", f"user:{me}", level="use")
+PY
+peers() { python3 - "$W/estate-peers.json" "$INFHASH" "$@" <<'PY'
+import json, sys
+path, h = sys.argv[1:3]; cm = sys.argv[3] if len(sys.argv) > 3 and sys.argv[3] else None; cls = sys.argv[4] if len(sys.argv) > 4 and sys.argv[4] else "internal"
+json.dump({"ok": True, "fetched_at": "2026-10-29T18:00:00Z", "self": "server:57", "version": 7, "peers": [{"node": "desk:41", "id": 41, "kind": "desk", "name": "ed-s-desk", "display_name": "Ed's desk",
+           "address": "127.0.0.1", "key_hash": h, "class_max": cm, "classification_max": cls, "priority": 0}]}, open(path, "w"))
+PY
+}
+backends() { python3 - "$W/estate-backends.tmp" "$@" <<'PY'
+import json, sys
+path = sys.argv[1]; eds = [x for x in (sys.argv[2] if len(sys.argv) > 2 else "").split(",") if x]; place = sys.argv[3] if len(sys.argv) > 3 and sys.argv[3] else None
+port = int(sys.argv[4]) if len(sys.argv) > 4 else 11998
+json.dump({"ok": True, "fetched_at": "2026-10-29T18:00:00Z", "self": "server:57", "version": 7, "editions": eds, "place": place, "lease_s": 30, "refresh_s": 3600,
+           "backends": [{"node": "desk:41", "id": 41, "kind": "desk", "name": "ed-s-desk", "display_name": "Ed's desk", "address": "127.0.0.1", "port": port, "api_version": 1,
+                         "models": [{"name": "mock-7b", "loaded": True}, {"name": "mock-13b", "loaded": False}], "expected_wait_s": {"interactive": 1.5, "agent": 4, "batch": 9},
+                         "queue": {"queued": 0, "running": 0}, "share": True, "contribution": "always", "class_max": None, "classification_max": "internal", "priority": 0}]}, open(path, "w"))
+PY
+python3 - "$W/estate-backends.tmp" "$W/estate-inference.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1])); d.update({"secret": "system/estate-inference-key", "principal": "host:gwtest", "source": "node"}); json.dump(d, open(sys.argv[2], "w"))
+PY
+}
+peers; backends "" "" $TCP; Cr -X POST $U/v1/maluos/reload >/dev/null; sleep 4
+check "the directory's cache makes an estate rung: estate:ed-s-desk at this host's listener, paired with the inference key from the vault, healthy with the declared models" "mctl estate | grep -q 'backend:     estate:ed-s-desk  desk:41  http://127.0.0.1:$TCP  healthy  models mock-13b, mock-7b' && mctl estate | grep -q 'peers:       1 member(s) may call this host' && mctl status | grep -q 'estate:      server:57  1 backend(s) from the directory  1 peer(s)'"
+check "GET /v1/maluos/inference: this host's facts for its heartbeat (models, share, port, lanes), under 8 KB" "C $U/v1/maluos/inference | J 'd[\"share\"] is True and d[\"port\"] == $TCP and any(m[\"name\"]==\"mock-7b\" for m in d[\"models\"]) and \"mock\" in d[\"lanes\"] and \"interactive\" in d[\"expected_wait_s\"] and len(json.dumps(d)) < 8192' | grep -q True"
+check "chat --prefer estate: served through the estate rung by this host as node:desk:41 (the peer's key), both ledger rows joined by the origin request" "chat -D - -H 'X-MaluOS-Prefer: estate' -H 'X-MaluOS-Envelope: env_0123456789abcdef' $U/v1/chat/completions -d '{\"model\":\"mock-7b\",\"messages\":[{\"role\":\"user\",\"content\":\"via estate\"}]}' > $W/estate.txt; grep -q 'mock reply to: via estate' $W/estate.txt && grep -q 'X-MaluOS-Route: estate:ed-s-desk/mock-7b (direct)' $W/estate.txt"
+DESK=$(grep -i '^X-MaluOS-Request:' $W/estate.txt | awk '{print $2}' | tr -d '\r')
+check "the serving row: principal node:desk:41, the peer and its ceilings in the detail, the origin request, the envelope carried over" "HOST=\$(SQL \"select provider_request_id from maluos_ledger where event='model.call' and detail->>'request'='$DESK'\"); SQL \"select principal_ref || ' ' || (detail->>'origin_request') || ' ' || (detail->'peer'->>'node') || ' ' || (detail->>'envelope') || ' ' || (detail->>'token') from maluos_ledger where event='model.call' and detail->>'request'='\$HOST'\" | grep -q 'node:desk:41 $DESK desk:41 env_0123456789abcdef ed-s-desk'"
+check "the desk row names the estate rung and the local rung it preferred the estate over" "SQL \"select backend || ' ' || route::text from maluos_ledger where event='model.call' and detail->>'request'='$DESK'\" | grep -q 'estate:ed-s-desk' && SQL \"select route::text from maluos_ledger where event='model.call' and detail->>'request'='$DESK'\" | grep -q prefer_estate"
+check "a tier names the estate rung after the catalogue's own: --model fast goes local, --prefer estate takes the estate rung of the tier" "chat -D - $U/v1/chat/completions -d '{\"model\":\"fast\",\"messages\":[{\"role\":\"user\",\"content\":\"t\"}]}' | grep -q 'X-MaluOS-Route: mock/mock-7b (tier fast)' && chat -D - -H 'X-MaluOS-Prefer: estate' $U/v1/chat/completions -d '{\"model\":\"fast\",\"messages\":[{\"role\":\"user\",\"content\":\"t\"}]}' | grep -q 'X-MaluOS-Route: estate:ed-s-desk/mock-7b (tier fast via the estate)'"
+check "usage --envelope lists the serving row too (what another node's task cost here)" "rmctl usage --envelope env_0123456789abcdef | grep -q 'under envelope env_0123456789abcdef' && rmctl usage --envelope env_0123456789abcdef | grep -q 'node:desk:41'"
+check "restricted content never takes an estate rung: the caller's own egress policy skips it first (served locally), then with egress widened to restricted the kernel's ceiling does" "chat -D - -H 'X-MaluOS-Prefer: estate' -H 'X-MaluOS-Sensitivity: restricted' $U/v1/chat/completions -d '{\"model\":\"mock-7b\",\"messages\":[{\"role\":\"user\",\"content\":\"x\"}]}' | grep -q 'X-MaluOS-Route: mock/mock-7b (direct)' && SQL \"select route::text from maluos_ledger where event='model.call' order by ledger_id desc limit 1\" | grep -q 'sensitivity:restricted>internal' && rmctl policy set --principal user:$ME --egress restricted >/dev/null && sleep 0.3 && chat -D - -H 'X-MaluOS-Prefer: estate' -H 'X-MaluOS-Sensitivity: restricted' $U/v1/chat/completions -d '{\"model\":\"mock-7b\",\"messages\":[{\"role\":\"user\",\"content\":\"x\"}]}' | grep -q 'X-MaluOS-Route: mock/mock-7b (direct)' && SQL \"select route::text from maluos_ledger where event='model.call' order by ledger_id desc limit 1\" | grep -q 'classification:restricted>internal' && rmctl policy rm --principal user:$ME >/dev/null"
+I() { curl -sS --max-time 60 -H "Authorization: Bearer $INFKEY" "$@"; }
+check "the serving side: a peer's key over TCP is the principal node:desk:41; restricted above its ceiling is refused 403 classification" "I $EU/v1/maluos/whoami | grep -q '\"principal\": \"node:desk:41\"' && I $EU/v1/maluos/whoami | grep -q '\"token_kind\": \"estate\"' && I -H 'Content-Type: application/json' -H 'X-MaluOS-Sensitivity: restricted' $EU/v1/chat/completions -d '{\"model\":\"fast\",\"messages\":[{\"role\":\"user\",\"content\":\"x\"}]}' | J 'd[\"error\"][\"code\"]' | grep -q classification"
+check "a peer never spends this host's cloud credit: the cloud tier is cloud_not_allowed for it" "I -H 'Content-Type: application/json' $EU/v1/chat/completions -d '{\"model\":\"cloud\",\"messages\":[{\"role\":\"user\",\"content\":\"x\"}]}' | J 'd[\"error\"][\"route\"][0][\"skipped\"]' | grep -q cloud_not_allowed"
+peers batch; Cr -X POST $U/v1/maluos/reload >/dev/null; sleep 1
+check "the kernel's class ceiling: a peer capped at batch asking interactive is served as batch" "I -H 'Content-Type: application/json' -H 'X-MaluOS-Class: interactive' $EU/v1/chat/completions -d '{\"model\":\"fast\",\"messages\":[{\"role\":\"user\",\"content\":\"capped\"}]}' | grep -q 'mock reply to: capped' && SQL \"select class from maluos_ledger where event='model.call' and principal_ref='node:desk:41' order by ledger_id desc limit 1\" | grep -q batch"
+peers; Cr -X POST $U/v1/maluos/reload >/dev/null; sleep 1
+check "share off: a peer's call is refused not_shared; share on --when idle without the session's idle mark is off too, with a retry_after; the mark turns it on" "rmctl share off >/dev/null && sleep 0.3 && I -H 'Content-Type: application/json' $EU/v1/chat/completions -d '{\"model\":\"fast\",\"messages\":[{\"role\":\"user\",\"content\":\"x\"}]}' | J 'd[\"error\"][\"code\"]' | grep -q not_shared && rmctl share on --when idle >/dev/null && sleep 0.3 && I -H 'Content-Type: application/json' $EU/v1/chat/completions -d '{\"model\":\"fast\",\"messages\":[{\"role\":\"user\",\"content\":\"x\"}]}' | J 'd[\"error\"][\"code\"] + \" \" + str(d[\"error\"].get(\"retry_after_s\"))' | grep -q 'not_shared 300' && echo '{\"since\": \"2026-10-29T17:00:00Z\", \"user\": \"ed\"}' > $W/session-idle && I -H 'Content-Type: application/json' $EU/v1/chat/completions -d '{\"model\":\"fast\",\"messages\":[{\"role\":\"user\",\"content\":\"idle\"}]}' | grep -q 'mock reply to: idle' && C $U/v1/maluos/status | J 'd[\"share\"][\"idle\"][\"idle\"] and d[\"share\"][\"contribution\"]==\"idle\" and d[\"share\"][\"enabled\"]' | grep -q True"
+rm -f $W/session-idle; rmctl share on --when always >/dev/null; sleep 0.3
+# placement: a fake kernel answering the place endpoint (the scheduler entitlement); then one that never answers in time
+python3 - "$W/place.pid" "$W/place.log" <<'PY' &
+import json, sys, time
+from http.server import BaseHTTPRequestHandler, HTTPServer
+class H(BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def do_POST(self):
+        n = int(self.headers.get("Content-Length") or 0); body = json.loads(self.rfile.read(n) or b"{}")
+        auth = self.headers.get("Authorization") or ""
+        with open(sys.argv[2], "a") as f: f.write(json.dumps({"auth": auth[:11], "body": body}) + "\n")
+        if self.path.endswith("/slow"):
+            time.sleep(1.5)
+        ans = {"ok": True, "backend": {"node": "desk:41", "name": "ed-s-desk"}, "class": body.get("class"), "lease_s": 30, "reason": "placed"} if auth.startswith("Bearer inf_") else {"backend": None, "reason": "not_entitled"}
+        data = json.dumps(ans).encode(); self.send_response(200); self.send_header("Content-Type", "application/json"); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data)
+open(sys.argv[1], "w").write(str(__import__("os").getpid()))
+HTTPServer(("127.0.0.1", 11996), H).serve_forever()
+PY
+sleep 1
+backends scheduler http://127.0.0.1:11996/place $TCP; Cr -X POST $U/v1/maluos/reload >/dev/null; sleep 1
+check "the scheduler entitlement: the gateway asks the kernel to place the call (with its inference key), the route says placed" "chat -D - -H 'X-MaluOS-Prefer: estate' $U/v1/chat/completions -d '{\"model\":\"mock-7b\",\"messages\":[{\"role\":\"user\",\"content\":\"placed\"}]}' | grep -q 'X-MaluOS-Route: estate:ed-s-desk/mock-7b (direct placed)' && grep -q '\"auth\": \"Bearer inf_\"' $W/place.log && grep -q '\"model\": \"mock-7b\"' $W/place.log && SQL \"select detail->'placement'->>'reason' from maluos_ledger where event='model.call' order by ledger_id desc limit 1\" | grep -q placed"
+backends scheduler http://127.0.0.1:11996/slow $TCP; Cr -X POST $U/v1/maluos/reload >/dev/null; sleep 1
+check "the kernel too slow (300 ms): the gateway ranks itself, the route says ranked" "chat -D - -H 'X-MaluOS-Prefer: estate' $U/v1/chat/completions -d '{\"model\":\"mock-7b\",\"messages\":[{\"role\":\"user\",\"content\":\"ranked\"}]}' | grep -q 'X-MaluOS-Route: estate:ed-s-desk/mock-7b (direct ranked)'"
+kill $(cat $W/place.pid) 2>/dev/null
+backends "" "" $TCP; Cr -X POST $U/v1/maluos/reload >/dev/null; sleep 1
+check "Community again: the route neither placed nor ranked" "chat -D - -H 'X-MaluOS-Prefer: estate' $U/v1/chat/completions -d '{\"model\":\"mock-7b\",\"messages\":[{\"role\":\"user\",\"content\":\"c\"}]}' | grep -q 'X-MaluOS-Route: estate:ed-s-desk/mock-7b (direct)'"
+check "the queue's rows name a remote run's origin node (the Queue tab)" "C $U/node/v1/queue >/dev/null 2>&1; true"
+rm -f $W/estate-inference.json $W/estate-peers.json; Cr -X POST $U/v1/maluos/reload >/dev/null; sleep 1
+check "the caches gone (leave): the estate rung leaves, the peer's key is refused" "! mctl status | grep -q 'estate:ed-s-desk' && I -o /dev/null -w '%{http_code}' $EU/v1/models | grep -q 401"
 
 echo "== Phase 13 G5: the estate's operators on the socket (the session service reads the node API as the login user)"
 check "a plain user is not an operator (the provisioning state lists none)" "C $U/v1/maluos/whoami | grep -q '\"operator\": false'"

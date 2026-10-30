@@ -15,7 +15,7 @@ power_limit_w, compute (NVIDIA's compute capability), uuid; a value the driver d
 is None. Environment: MALUOS_GPU_SYSFS (the drm class directory, for tests),
 MALUOS_NVIDIA_SMI (the binary), MALUOS_CHASSIS (a forced chassis).
 """
-import os, shutil, subprocess
+import json, os, shutil, subprocess
 
 SYSFS = os.environ.get("MALUOS_GPU_SYSFS", "/sys/class/drm")
 DMI_CHASSIS = "/sys/class/dmi/id/chassis_type"
@@ -230,11 +230,29 @@ def contribution_rule(kind):
     return RULES.get(kind, "opt-in")
 
 
-def share_state(conf, tcp, run=subprocess.run):
+IDLE_FILE = os.environ.get("MALUOS_SESSION_IDLE_FILE", "/run/maluos/session/idle")
+
+
+def idle_state(path=None):
+    """The desktop session's idle mark (Phase 13 slice 3, the idle rule): maluos-desktop-session writes
+    /run/maluos/session/idle ({"since": ..., "user": ...}) once the person has given no input for the threshold with
+    the lid open or on mains and no media playing, and removes it at the first input. {"idle": bool, "since", "user"}."""
+    path = path or IDLE_FILE
+    try:
+        with open(path) as f:
+            d = json.load(f)
+        return {"idle": True, "since": d.get("since"), "user": d.get("user"), "idle_s": d.get("idle_s")}
+    except (OSError, ValueError, AttributeError):
+        return {"idle": False, "since": None, "user": None, "idle_s": None}
+
+
+def share_state(conf, tcp, run=subprocess.run, idle_file=None):
     """The gateway's GPU sharing switch resolved against the chassis rule (gateway.yaml `share:` and `tcp:`).
 
     enabled unset means the rule (a server shares, the others when the owner opts in); contribution unset
-    means always, or idle on a laptop; exposed says whether the TCP listener faces the network (slice G2)."""
+    means always, or idle on a laptop; exposed says whether the TCP listener faces the network (slice G2).
+    Slice 3: with contribution idle the switch is on only while the session's idle mark exists (`idle`
+    carries it); `configured_enabled` is the switch as set, before the idle rule."""
     conf = conf if isinstance(conf, dict) else {}
     tcp = tcp if isinstance(tcp, dict) else {}
     kind = chassis(run=run); rule = contribution_rule(kind)
@@ -243,8 +261,9 @@ def share_state(conf, tcp, run=subprocess.run):
         enabled = rule == "always"
     contribution = conf.get("contribution") or ("idle" if rule == "opt-in-idle" else "always")
     host = str(tcp.get("host") or "127.0.0.1")
-    return {"enabled": bool(enabled), "contribution": contribution, "chassis": kind, "rule": rule,
-            "configured": conf.get("enabled") is not None,
+    idle = idle_state(idle_file) if contribution == "idle" else None
+    return {"enabled": bool(enabled) and (idle is None or idle["idle"]), "configured_enabled": bool(enabled), "contribution": contribution, "chassis": kind, "rule": rule,
+            "configured": conf.get("enabled") is not None, "idle": idle,
             "exposed": bool(tcp.get("enabled")) and host not in ("127.0.0.1", "localhost", "::1")}
 
 

@@ -42,7 +42,7 @@ deterministic replies. Lives in maluos-estate; maluos_desk.mock_office is the sa
   POST /mock/task {"agent": NAME|ID, "originator": "user:x", "text": …, "sign": valid|tampered|expired|replay|stranger}   inject a task from the office
   POST /mock/inbox {"kind": "decision_needed", "subject": …}   inject an item into the person's inbox;  GET /mock/delegation  the state
 """
-import argparse, ipaddress, hashlib, json, re, secrets, sys, threading, time
+import argparse, ipaddress, hashlib, json, re, secrets, sys, threading, time, urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 SURFACE = 1
@@ -74,6 +74,7 @@ class Office:
         self.tokens = {}        # token -> desk id
         self.heartbeats, self.chats, self.mcp = [], [], []
         self.sessions = {}      # page session cookie -> desk id (slice 9: the office page with the desk's identity)
+        self.placements = []    # slice 3: what the scheduler placed
         self.next_id = 41
         self.lock = threading.Lock()
         self.tasks = {a["id"]: [] for a in self.AGENTS}      # agent id -> tasks (Phase 12 slice 8)
@@ -90,6 +91,185 @@ class Office:
         self.next_inbox_id = 501
         self.nonces = E.Nonces()
         self.coordinator_priv, self.coordinator_pub = E.genkey("coordinator")
+        # Phase 13 slice 3: shared inference: each member's facts, the policy rules, two versions, the entitlement, the inference keys
+        self.inf = {"facts": {}, "rules": [], "next_rule": 1, "version": 1, "peers_version": 1, "scheduler": False, "lease_s": 30}
+        self.inf_keys = {}          # sha256 hex -> member ref (desk:41, server:57); fake peers too
+        self.fake_peers = []        # members that exist only to call this estate's hosts in tests (/mock/peer)
+
+    # -- Phase 13 slice 3: inference facts, the policy, the backends and the peers the kernel will publish
+    INF_CLASSES = {"interactive": 0, "agent": 1, "batch": 2}
+    INF_SENS = {"public": 0, "internal": 1, "restricted": 2, "prohibited": 3}
+
+    def inf_members(self):
+        out = [n for n in self.nodes.values() if n["status"] == "active"] + [d for d in self.desks.values() if d["status"] == "active"]
+        return out + [p for p in self.fake_peers if p["status"] == "active"]
+
+    def inf_ref(self, m):
+        return self.dg_node_ref(m)
+
+    def inf_kind(self, m):
+        return "desk" if ("owner" in m and "kind" not in m) else m.get("kind")
+
+    def inf_mint_key(self, m):
+        key = "inf_" + secrets.token_hex(24)
+        for h, ref in list(self.inf_keys.items()):
+            if ref == self.inf_ref(m):
+                del self.inf_keys[h]
+        self.inf_keys[hashlib.sha256(key.encode()).hexdigest()] = self.inf_ref(m)
+        self.inf["peers_version"] += 1
+        return key
+
+    def inf_member_by_key(self, raw):
+        ref = self.inf_keys.get(hashlib.sha256((raw or "").encode()).hexdigest())
+        if not ref:
+            return None
+        return next((m for m in self.inf_members() if self.inf_ref(m) == ref), None)
+
+    def inf_store(self, m, facts):
+        if not isinstance(facts, dict):
+            return (400, "invalid", "inference is an object")
+        if len(json.dumps(facts)) > 8 * 1024:
+            return (400, "invalid", "inference is over 8 KB")
+        models = [{"name": x.get("name"), "family": x.get("family"), "size": x.get("size"), "loaded": bool(x.get("loaded")), "backend": x.get("backend")}
+                  for x in (facts.get("models") or []) if isinstance(x, dict) and x.get("name")][:200]
+        row = {"models": models, "lanes": facts.get("lanes") if isinstance(facts.get("lanes"), dict) else {},
+               "queue": {"queued": int((facts.get("queue") or {}).get("queued") or 0), "running": int((facts.get("queue") or {}).get("running") or 0)},
+               "expected_wait_s": {k: float(v) for k, v in (facts.get("expected_wait_s") or {}).items() if isinstance(v, (int, float))},
+               "share": bool(facts.get("share")), "contribution": facts.get("contribution") if facts.get("contribution") in ("always", "idle") else "always",
+               "port": int(facts.get("port") or 11435), "api_version": int(facts.get("api_version") or 1), "updated_at": now()}
+        sig = json.dumps([sorted(x["name"] for x in models), row["share"], row["contribution"], row["port"], row["api_version"]])
+        old = self.inf["facts"].get(self.inf_ref(m))
+        self.inf["facts"][self.inf_ref(m)] = dict(row, signature=sig)
+        if not old or old["signature"] != sig:
+            self.inf["version"] += 1
+        return None
+
+    def inf_forget(self, m):
+        if self.inf["facts"].pop(self.inf_ref(m), None) is not None:
+            self.inf["version"] += 1
+        for h, ref in list(self.inf_keys.items()):
+            if ref == self.inf_ref(m):
+                del self.inf_keys[h]
+        self.inf["version"] += 1; self.inf["peers_version"] += 1
+
+    def inf_subjects(self, m):
+        return {"node:%d" % m["id"]: 3, "kind:" + self.inf_kind(m): 1, "org": 0}
+
+    def inf_rule(self, caller, backend):
+        if self.inf_kind(backend) == "desk" and self.inf_kind(caller) == "desk":
+            return {"allow": False, "max_class": None, "max_classification": None, "priority": 0, "rule": "desk_to_desk"}
+        subjects = self.inf_subjects(caller)
+        best, best_key = None, None
+        for r in self.inf["rules"]:
+            if r["subject"] not in subjects or (r["backend"] is not None and r["backend"] != backend["id"]):
+                continue
+            key = (subjects[r["subject"]], 1 if r["backend"] is not None else 0, 0 if r["allow"] else 1)
+            if best is None or key > best_key:
+                best, best_key = r, key
+        if best is None:
+            return {"allow": True, "max_class": None, "max_classification": "internal", "priority": 0, "rule": None}
+        return {"allow": best["allow"], "max_class": best.get("max_class"), "max_classification": best.get("max_classification") or "internal", "priority": int(best.get("priority") or 0), "rule": best["id"]}
+
+    def inf_published(self, m):
+        f = self.inf["facts"].get(self.inf_ref(m))
+        return bool(f and f["share"] and m.get("overlay_address") and not m.get("overlay_freed_at") and m.get("presence") == "online")
+
+    def inf_backend_row(self, m, rule):
+        f = self.inf["facts"][self.inf_ref(m)]
+        return {"node": self.inf_ref(m), "id": m["id"], "kind": self.inf_kind(m), "name": self.ov_name(m) or self.ov_label(m["name"]), "display_name": m["name"],
+                "address": m.get("overlay_address"), "port": f["port"], "api_version": f["api_version"], "models": f["models"], "expected_wait_s": f["expected_wait_s"],
+                "queue": f["queue"], "share": f["share"], "contribution": f["contribution"], "class_max": rule["max_class"],
+                "classification_max": rule["max_classification"] or "internal", "priority": rule["priority"], "updated_at": f["updated_at"]}
+
+    def inf_editions(self):
+        return ["scheduler"] if self.inf["scheduler"] else []
+
+    def inf_backends_answer(self, m, base, everything=False):
+        out = []
+        for b in self.inf_members():
+            if b is m or not self.inf_published(b):
+                continue
+            rule = self.inf_rule(m, b)
+            if not rule["allow"] and not everything:
+                continue
+            row = self.inf_backend_row(b, rule)
+            if everything:
+                row["allowed"] = rule["allow"]
+            out.append(row)
+        m["inference_seen"] = self.inf["version"]
+        eds = self.inf_editions()
+        return {"ok": True, "surface": SURFACE, "fetched_at": now(), "self": self.inf_ref(m), "backends": out, "editions": eds,
+                "place": f"{base}/api/v1/estate/inference/place" if "scheduler" in eds else None, "lease_s": self.inf["lease_s"], "refresh_s": 3600, "version": self.inf["version"]}
+
+    def inf_peers_answer(self, host):
+        peers = []
+        for m in self.inf_members():
+            if m is host:
+                continue
+            h = next((h for h, ref in self.inf_keys.items() if ref == self.inf_ref(m)), None)
+            if not h:
+                continue
+            rule = self.inf_rule(m, host)
+            if not rule["allow"]:
+                continue
+            peers.append({"node": self.inf_ref(m), "id": m["id"], "kind": self.inf_kind(m), "name": self.ov_name(m) or self.ov_label(m["name"]), "display_name": m["name"],
+                          "address": m.get("overlay_address") if not m.get("overlay_freed_at") else None, "key_hash": h, "class_max": rule["max_class"],
+                          "classification_max": rule["max_classification"] or "internal", "priority": rule["priority"]})
+        host["peers_seen"] = self.inf["peers_version"]
+        return {"ok": True, "surface": SURFACE, "fetched_at": now(), "self": self.inf_ref(host), "peers": peers, "refresh_s": 300, "version": self.inf["peers_version"]}
+
+    def inf_changed(self, m):
+        v = self.inf["version"]
+        if m.get("inference_seen") == v:
+            return False
+        m["inference_seen"] = v
+        return True
+
+    def inf_peers_changed(self, m):
+        v = self.inf["peers_version"]
+        if m.get("peers_seen") == v:
+            return False
+        m["peers_seen"] = v
+        return True
+
+    def inf_place(self, caller, b):
+        if not self.inf["scheduler"]:
+            return {"ok": True, "surface": SURFACE, "backend": None, "reason": "not_entitled", "lease_s": 0}
+        cls = b.get("class") if b.get("class") in self.INF_CLASSES else "interactive"
+        model = b.get("model") if isinstance(b.get("model"), str) else None
+        sens = b.get("sensitivity") if b.get("sensitivity") in self.INF_SENS else "internal"
+        deadline = float(b["deadline_s"]) if isinstance(b.get("deadline_s"), (int, float)) else None
+        cands, considered, skipped = [], 0, {"classification": 0, "no_capacity": 0, "no_model": 0}
+        for m in self.inf_members():
+            if m is caller or not self.inf_published(m):
+                continue
+            rule = self.inf_rule(caller, m)
+            if not rule["allow"]:
+                continue
+            considered += 1
+            f = self.inf["facts"][self.inf_ref(m)]
+            if model and not any(x["name"] in (model, model + ":latest") or model == x["name"] + ":latest" for x in f["models"]):
+                skipped["no_model"] += 1; continue
+            if self.INF_SENS[sens] > self.INF_SENS[rule["max_classification"] or "internal"]:
+                skipped["classification"] += 1; continue
+            c = cls
+            if rule["max_class"] and self.INF_CLASSES[c] < self.INF_CLASSES[rule["max_class"]]:
+                c = rule["max_class"]
+            wait = float(f["expected_wait_s"].get(c) or 0)
+            if f["queue"]["queued"] >= 100 or (deadline is not None and wait > deadline):
+                skipped["no_capacity"] += 1; continue
+            cands.append((-rule["priority"], wait, m["name"], self.inf_backend_row(m, rule), c))
+        if not cands:
+            reason = "no_backend" if considered == 0 else ("classification" if skipped["classification"] else "no_capacity" if skipped["no_capacity"] else "no_model")
+            return {"ok": True, "surface": SURFACE, "backend": None, "reason": reason, "lease_s": 0, "considered": considered}
+        cands.sort(key=lambda c: (c[0], c[1], c[2]))
+        self.placements.append({"ts": now(), "caller": self.inf_ref(caller), "class": cands[0][4], "model": model, "backend": cands[0][3]["node"], "origin": b.get("origin")})
+        return {"ok": True, "surface": SURFACE, "backend": cands[0][3], "class": cands[0][4], "expected_wait_s": cands[0][1], "lease_s": self.inf["lease_s"], "reason": "placed", "considered": considered}
+
+    def inf_public(self):
+        return {**{k: v for k, v in self.inf.items() if k != "facts"}, "facts": self.inf["facts"], "keys": len(self.inf_keys),
+                "members": [{"ref": self.inf_ref(m), "name": m["name"], "published": self.inf_published(m), "address": m.get("overlay_address"), "presence": m.get("presence")} for m in self.inf_members()],
+                "fake_peers": [{"ref": self.inf_ref(p), "name": p["name"]} for p in self.fake_peers], "placements": self.placements[-50:]}
 
     # -- the overlay (slice 1b): addresses, the hub, the peers and the names the kernel will publish
     @staticmethod
@@ -225,20 +405,22 @@ class Office:
                 "records": f"{base}/mcp/records", "activity": f"{base}/mcp/activity", "memory": f"{base}/mcp/memory", "actions": None,
                 "models": {"url": f"{base}/desk-models", "models": list(self.models)}, "apps": f"{base}/api/v1/desks/apps",
                 "agents": f"{base}/api/v1/desks/agents", "estate": f"{base}/api/v1/desks/estate",
-                "inbox": f"{base}/api/v1/desks/inbox", "key": f"{base}/api/v1/desks/key", "keys": f"{base}/api/v1/estate/keys", "actions": f"{base}/api/v1/estate/actions"}
+                "inbox": f"{base}/api/v1/desks/inbox", "key": f"{base}/api/v1/desks/key", "keys": f"{base}/api/v1/estate/keys", "actions": f"{base}/api/v1/estate/actions",
+                "inference": f"{base}/api/v1/desks/inference", "inference_peers": f"{base}/api/v1/estate/inference/peers"}
 
     # -- the estate (Phase 13 slice 1): nodes, the report, the health rules the kernel will apply, the alerts
     CRITICAL_UNITS = ("postgresql@18-main.service", "maluos-vault.service")
 
     def node_endpoints(self, base):
-        return {k: f"{base}/api/v1/estate/{k}" for k in ("heartbeat", "me", "leave", "nodes", "agents", "keys", "inbox", "tasks")}
+        return {**{k: f"{base}/api/v1/estate/{k}" for k in ("heartbeat", "me", "leave", "nodes", "agents", "keys", "inbox", "tasks", "inference")},
+                "inference_peers": f"{base}/api/v1/estate/inference/peers"}
 
     def node_answer(self, node, base):
         ov = self.ov_block(node)
         return {"ok": True, "surface": SURFACE,
                 "node": {k: node.get(k) for k in ("id", "kind", "name", "status", "presence", "last_seen_at", "last_report_at")},
                 "office": {"name": self.name, "url": base}, "endpoints": {**self.node_endpoints(base), "overlay": f"{base}/api/v1/estate/overlay" if ov else None},
-                "heartbeat_s": self.node_heartbeat_s, "report_s": self.report_s, "overlay": ov}
+                "heartbeat_s": self.node_heartbeat_s, "report_s": self.report_s, "overlay": ov, "editions": self.inf_editions()}
 
     def raise_alert(self, node, kind, severity, title, report_ts=None, key=None):
         """One open row per (node, kind, key): the title and severity follow the latest report (a disk at 90 % then 97 %
@@ -746,7 +928,8 @@ class Office:
         return {"ok": True, "surface": SURFACE,
                 "desk": {k: desk[k] for k in ("id", "name", "status", "presence", "last_seen_at")},
                 "office": {"name": self.name, "url": base}, "owner": desk["owner"],
-                "endpoints": {**self.endpoints(base), "overlay": f"{base}/api/v1/desks/overlay" if ov else None}, "heartbeat_s": self.heartbeat_s, "overlay": ov}
+                "endpoints": {**self.endpoints(base), "overlay": f"{base}/api/v1/desks/overlay" if ov else None}, "heartbeat_s": self.heartbeat_s, "overlay": ov,
+                "editions": self.inf_editions()}
 
     def public(self):
         return {"office": self.name, "codes": {c: v for c, v in self.codes.items()},
@@ -1011,10 +1194,38 @@ class Handler(BaseHTTPRequestHandler):
             if e:
                 return self.err(*e)
             return self.send(200, {"object": "list", "data": [{"id": m, "object": "model", "owned_by": "office"} for m in o.models]})
+        if p in ("/api/v1/estate/inference", "/api/v1/desks/inference", "/api/v1/estate/inference/peers"):      # slice 3
+            m, e = self.member_from_bearer()
+            if e:
+                return self.err(*e)
+            qs = urllib.parse.parse_qs(self.path.split("?", 1)[1]) if "?" in self.path else {}
+            with o.lock:
+                if p.endswith("/peers"):
+                    return self.send(200, o.inf_peers_answer(m))
+                return self.send(200, o.inf_backends_answer(m, self.base(), everything=qs.get("all", ["0"])[0] == "1"))
+        if p == "/mock/inference":
+            with o.lock:
+                return self.send(200, o.inf_public())
         if p == "/mock/state":
             with o.lock:
                 return self.send(200, o.public())
         return self.err(404, "not_found", p)
+
+    def member_from_bearer(self):
+        """A node, a desk or a fake peer: whichever the bearer is (the member, None) or (None, error)."""
+        node, e = self.node_from_bearer()
+        if node:
+            return node, None
+        desk, e2 = self.desk_from_bearer()
+        if desk:
+            return desk, None
+        auth = self.headers.get("Authorization") or ""
+        tok = auth[7:].strip() if auth.lower().startswith("bearer ") else ""
+        with self.office.lock:
+            for p in self.office.fake_peers:
+                if p["token"] == tok:
+                    return p, None
+        return None, (e if e[0] != 401 else e2)
 
     def do_POST(self):
         p = self.path.split("?", 1)[0]
@@ -1050,7 +1261,12 @@ class Handler(BaseHTTPRequestHandler):
                 if isinstance(b.get("agents"), list):              # slice 2: the manifests, with the report's unit states
                     units = {a.get("name"): a.get("active") for a in ((b.get("report") or {}).get("agents") or []) if isinstance(a, dict)}
                     registered = o.dg_register(node, [dict(m, unit_state=units.get(m.get("name"), m.get("unit_state"))) for m in b["agents"] if isinstance(m, dict)])
-                return self.send(200, {**o.node_answer(node, self.base()), "overlay_changed": o.ov_changed(node), "agents_registered": registered})
+                if "inference" in b:                               # slice 3: the gateway's facts
+                    e = o.inf_store(node, b["inference"])
+                    if e:
+                        return self.err(*e)
+                return self.send(200, {**o.node_answer(node, self.base()), "overlay_changed": o.ov_changed(node), "agents_registered": registered,
+                                       "inference_changed": o.inf_changed(node), "peers_changed": o.inf_peers_changed(node)})
         if p == "/api/v1/estate/leave":
             node, e = self.node_from_bearer()
             if e:
@@ -1061,6 +1277,7 @@ class Handler(BaseHTTPRequestHandler):
                 o.clear_alerts(node, set())
                 o.ov_free(node)
                 o.dg_deregister(node)
+                o.inf_forget(node)
                 o.node_tokens = {t: n for t, n in o.node_tokens.items() if n != node["id"]}
             return self.send(200, {"ok": True, "surface": SURFACE, "node": {"id": node["id"], "status": "retired"}})
         if p == "/api/v1/estate/overlay/key":
@@ -1106,7 +1323,12 @@ class Handler(BaseHTTPRequestHandler):
                 if isinstance(b.get("facts"), dict):
                     desk["facts"].update(b["facts"])
                 o.heartbeats.append({"ts": desk["last_seen_at"], "desk_id": desk["id"], "presence": presence})
-                return self.send(200, {**o.answer(desk, self.base()), "overlay_changed": o.ov_changed(desk), "inbox_unread": sum(1 for i in o.inbox if i["status"] == "unread")})
+                if "inference" in b:                               # slice 3: a desk that shares reports its facts too
+                    e = o.inf_store(desk, b["inference"])
+                    if e:
+                        return self.err(*e)
+                return self.send(200, {**o.answer(desk, self.base()), "overlay_changed": o.ov_changed(desk), "inbox_unread": sum(1 for i in o.inbox if i["status"] == "unread"),
+                                       "inference_changed": o.inf_changed(desk), "peers_changed": o.inf_peers_changed(desk)})
         if p == "/api/v1/desks/leave":
             desk, e = self.desk_from_bearer()
             if e:
@@ -1114,6 +1336,7 @@ class Handler(BaseHTTPRequestHandler):
             with o.lock:
                 desk["status"], desk["retired_at"], desk["presence"] = "retired", now(), "offline"
                 o.ov_free(desk)
+                o.inf_forget(desk)
                 o.tokens = {t: d for t, d in o.tokens.items() if d != desk["id"]}
             return self.send(200, {"ok": True, "surface": SURFACE, "desk": {"id": desk["id"], "status": "retired"}})
         if p == "/desk-models/v1/chat/completions":
@@ -1234,6 +1457,49 @@ class Handler(BaseHTTPRequestHandler):
             with o.lock:
                 o.codes[str(b.get("code") or secrets.token_hex(4))] = {"used": False, "kind": "node" if b.get("kind") in ("node", "server", "inference") else "desk"}
             return self.send(200, {"ok": True, "codes": list(o.codes)})
+        # -- Phase 13 slice 3
+        if p == "/api/v1/estate/inference/place":
+            auth = self.headers.get("Authorization") or ""
+            tok = auth[7:].strip() if auth.lower().startswith("bearer ") else ""
+            with o.lock:
+                m = o.inf_member_by_key(tok)
+                if not m:
+                    return self.err(401, "unauthorized", "a valid inference key is required")
+                return self.send(200, o.inf_place(m, b))
+        if p in ("/api/v1/estate/inference/key", "/api/v1/desks/inference/key"):
+            m, e = self.member_from_bearer()
+            if e:
+                return self.err(*e)
+            with o.lock:
+                return self.send(200, {"ok": True, "surface": SURFACE, "node": o.inf_ref(m), "inference_key": o.inf_mint_key(m)})
+        if p == "/mock/inference/policy":
+            with o.lock:
+                if b.get("delete") is not None:
+                    o.inf["rules"] = [r for r in o.inf["rules"] if r["id"] != int(b["delete"])]
+                elif b.get("clear"):
+                    o.inf["rules"] = []
+                else:
+                    r = {"id": o.inf["next_rule"], "subject": b.get("subject") or "org", "backend": int(b["backend"]) if b.get("backend") is not None else None,
+                         "allow": bool(b.get("allow", True)), "max_class": b.get("max_class"), "max_classification": b.get("max_classification"), "priority": int(b.get("priority") or 0), "note": b.get("note")}
+                    o.inf["rules"].append(r); o.inf["next_rule"] += 1
+                o.inf["version"] += 1; o.inf["peers_version"] += 1
+                return self.send(200, {"ok": True, "rules": o.inf["rules"]})
+        if p == "/mock/editions":
+            with o.lock:
+                o.inf["scheduler"] = bool(b.get("scheduler"))
+                o.inf["version"] += 1
+                return self.send(200, {"ok": True, "editions": o.inf_editions()})
+        if p == "/mock/peer":
+            # a member that exists only to call this estate's hosts: a token for the directory, an inference key for the gateways
+            with o.lock:
+                pid = -100 - len(o.fake_peers)
+                peer = {"id": pid, "kind": b.get("kind") if b.get("kind") in ("server", "inference") else "server", "name": b.get("name") or f"peer-{-pid}", "status": "active",
+                        "presence": "online", "token": "node_" + secrets.token_hex(24), "overlay_address": b.get("address"), "overlay_freed_at": None, "facts": {}}
+                o.fake_peers.append(peer)
+                key = o.inf_mint_key(peer)
+                if isinstance(b.get("inference"), dict):        # a fake GPU host: with facts and an address it is published like a real one
+                    o.inf_store(peer, b["inference"])
+                return self.send(201, {"ok": True, "node": o.inf_ref(peer), "token": peer["token"], "inference_key": key})
         return self.err(404, "not_found", p)
 
     def enroll(self, b):
@@ -1263,6 +1529,7 @@ class Handler(BaseHTTPRequestHandler):
                 desk["public_key"] = b["public_key"].strip()           # slice 2: the desk's signing key
             o.desks[did] = desk; o.tokens[tok] = did
             ans = o.answer(desk, self.base()); ans["token"] = tok
+            ans["inference_key"] = o.inf_mint_key(desk); desk["inference_seen"], desk["peers_seen"] = o.inf["version"], o.inf["peers_version"]   # slice 3
         return self.send(201, ans)
 
     def join(self, b):
@@ -1294,6 +1561,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.err(*e)
             o.nodes[nid] = node; o.node_tokens[tok] = nid
             ans = o.node_answer(node, self.base()); ans["token"] = tok; ans["enrolled_by"] = node["enrolled_by"]
+            ans["inference_key"] = o.inf_mint_key(node); node["inference_seen"], node["peers_seen"] = o.inf["version"], o.inf["peers_version"]   # slice 3
         return self.send(201, ans)
 
     def chat(self, b, desk):
@@ -1359,9 +1627,11 @@ def main(argv=None):
     ap.add_argument("--node-heartbeat-s", type=int, default=None, help="nodes' heartbeat interval (default: --heartbeat-s)")
     ap.add_argument("--overlay-range", default="100.100.0.0/16", help="the estate's overlay range (slice 1b)"); ap.add_argument("--no-overlay", action="store_true")
     ap.add_argument("--overlay-spoke", action="append", default=[], help="NAME=PUBKEY: a fake spoke with an address, so a hub under test has a peer")
+    ap.add_argument("--editions", default="", help="the estate's entitlements, comma-separated (scheduler); /mock/editions flips them live")
     a = ap.parse_args(argv)
     Handler.office = Office(a.name, a.code or ["mock-code"], [m.strip() for m in a.models.split(",") if m.strip()], a.heartbeat_s, a.node_code, a.report_s, a.node_heartbeat_s,
                             None if a.no_overlay else a.overlay_range, a.overlay_spoke)
+    Handler.office.inf["scheduler"] = "scheduler" in [x.strip() for x in a.editions.split(",")]
     srv = ThreadingHTTPServer((a.host, a.port), Handler)
     srv.daemon_threads = True
 

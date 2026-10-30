@@ -29,6 +29,10 @@ shows the desk and whether it is online.
   maluctl office estate [--json] [--refresh]       the estate as this desk's owner may see it (endpoints.estate, published to
                                                    system managers; Phase 13 slice 1): nodes, their health, the open alerts
   maluctl office agent ID send TEXT [--json]       give it a task and wait for the answer (its task URL, the desk token)
+  maluctl office inference [--json] [--refresh] [--all]   Phase 13 slice 3: the backends the estate publishes to this desk (its gateway's
+                                                   rungs estate:NAME) and the peers allowed to call it; --refresh re-reads both now;
+                                                   --all (an operator) every backend in the estate with its queue and wait
+  sudo maluctl office inference --new-key          a new inference key (a desk enrolled before slice 3, or a rotation)
   sudo maluctl office leave [--keep-secret]
 
 Agents: /etc/maluos/office.env names the office's endpoints (MALUOS_OFFICE_*)
@@ -41,11 +45,15 @@ import json, os, pwd, socket, subprocess, sys, time, urllib.error, urllib.reques
 sys.path.insert(0, "/usr/lib/maluos")
 from maluos_estate.client import http as _estate_http, flat as _flat     # the shared client (maluos-estate, Phase 13 slice 1)
 
-VERSION = "0.5.1"
+VERSION = "0.7.0"
 SURFACE = 1
 CONF = os.environ.get("MALUOS_OFFICE_CONF", "/etc/maluos/office.yaml")
 ENVF = os.environ.get("MALUOS_OFFICE_ENV", "/etc/maluos/office.env")
 SECRET = "office-desk-token"
+INFERENCE_SECRET = "estate-inference-key"   # the estate's inference credential (Phase 13 slice 3), in the owner's compartment; the gateway holds a `use` grant
+GATEWAY_USER = os.environ.get("MALUOS_GATEWAY_USER", "maluos-gateway")
+INFERENCE_CACHE = os.environ.get("MALUOS_OFFICE_INFERENCE", "/run/maluos/office/inference.json")   # the gateway reads these (estate.py)
+PEERS_CACHE = os.environ.get("MALUOS_OFFICE_PEERS", "/run/maluos/office/peers.json")
 KEY_SECRET = "office-desk-key"              # the desk's ed25519 signing key (Phase 13 slice 2), in the owner's compartment beside the token
 PLUGIN_DIR = os.environ.get("MALUCTL_PLUGIN_DIR", "/usr/lib/maluos/maluctl.d")
 MALUCTL = os.environ.get("MALUCTL_BIN", "/usr/bin/maluctl")
@@ -796,10 +804,16 @@ def enroll(a):
         run_as(owner, ["secret", "add", OVERLAY_SECRET, "--kind", "generic", "--provider", "estate", "--stdin"], input=ov_priv + "\n")
     run_as(owner, ["secret", "delete", KEY_SECRET], check=False)
     run_as(owner, ["secret", "add", KEY_SECRET, "--kind", "generic", "--provider", "office", "--stdin"], input=key_priv)
+    # Phase 13 slice 3: the inference key, in the owner's compartment too; the gateway may use it (its estate rungs, the kernel's placement)
+    inf = None
+    if r.get("inference_key"):
+        store_inference_key(owner, r["inference_key"])
+        inf = {"secret": INFERENCE_SECRET}
     conf = {"surface": r.get("surface", SURFACE), "url": url, "office": r.get("office") or {"name": None, "url": url}, "desk": desk,
             "owner": {**(r.get("owner") or {}), "login": owner, "principal": principal}, "endpoints": eps,
             "heartbeat_s": int(r.get("heartbeat_s") or 300), "secret": SECRET, "key": {"secret": KEY_SECRET, "public_key": key_pub, "registered": True}, "gateway": None, "enrolled_at": utc(), "maluos_desk": VERSION,
-            "overlay": (r.get("overlay") or {"role": "spoke", "address": None, "hub": None}) if ov_priv else None, "overlay_secret": OVERLAY_SECRET if ov_priv else None}
+            "overlay": (r.get("overlay") or {"role": "spoke", "address": None, "hub": None}) if ov_priv else None, "overlay_secret": OVERLAY_SECRET if ov_priv else None,
+            "inference": inf, "editions": list(r.get("editions") or [])}
     # 2. the office's models as a rung of this desk's gateway, keyed by the token the gateway applies for the caller
     models = eps.get("models") if isinstance(eps.get("models"), dict) else None
     gw_note = "the office publishes no model endpoint to desks"
@@ -828,6 +842,104 @@ def enroll(a):
     print(f"  agents:   {ENVF} names the office's endpoints; maluctl secret delegate --to agent:NAME --secret {SECRET}")
     o = conf.get("overlay")
     print("  overlay:  " + ("off (--no-overlay)" if o is None else (f"{o['address']} as {o.get('name')} via the hub at {(o.get('hub') or {}).get('endpoint')} (maluos-overlay.service; maluctl estate overlay status)" if o.get("address") else "a key was sent; no hub has joined the estate yet")))
+    print("  inference: " + (f"key {principal}/{INFERENCE_SECRET} (the gateway may use it); the estate's shared GPUs become rungs of this gateway (maluctl gateway estate)"
+                             + (f"; editions {', '.join(conf['editions'])}" if conf.get("editions") else "") if inf else "the office issued no inference key (an office before slice 3)"))
+    return 0
+
+
+def store_inference_key(owner, key):
+    """The inference key into the owner's compartment (as them), with a `use` grant to the gateway's own user."""
+    run_as(owner, ["secret", "delete", INFERENCE_SECRET], check=False)
+    run_as(owner, ["secret", "add", INFERENCE_SECRET, "--kind", "token", "--provider", "estate", "--stdin"], input=key + "\n")
+    try:
+        run_as(owner, ["secret", "grant", INFERENCE_SECRET, "--to", f"user:{GATEWAY_USER}", "--level", "use"])
+    except RuntimeError as e:
+        print(f"  warn: the gateway's grant on {INFERENCE_SECRET}: {e}", file=sys.stderr)
+
+
+def inference_refresh(conf, tok, which=("backends", "peers")):
+    """Re-read the directory's backends and/or the peers with the desk token and write the gateway's caches (as the owner)."""
+    from maluos_estate import client as _C
+    out = {}
+    principal = (conf.get("owner") or {}).get("principal")
+    secret_ref = f"{principal}/{INFERENCE_SECRET}" if principal else INFERENCE_SECRET
+    eps = conf.get("endpoints") or {}
+    if "backends" in which:
+        st, r = _C.inference(eps.get("inference") or conf["url"].rstrip("/") + "/api/v1/desks/inference", tok)
+        if st == 200:
+            _C.write_cache(INFERENCE_CACHE, r, secret_ref, principal, "desk")
+        out["backends"] = (st, r)
+    if "peers" in which:
+        st, r = _C.inference_peers(eps.get("inference_peers") or conf["url"].rstrip("/") + "/api/v1/estate/inference/peers", tok)
+        if st == 200:
+            _C.write_cache(PEERS_CACHE, r, secret_ref, principal, "desk")
+        out["peers"] = (st, r)
+    return out
+
+
+def inference(a):
+    """maluctl office inference: the backends published to this desk, the peers, this desk's own facts; --refresh, --all, --new-key."""
+    from maluos_estate import client as _C
+    as_json = opt(a, "--json", flag=True); refresh = opt(a, "--refresh", flag=True); everything = opt(a, "--all", flag=True); new_key = opt(a, "--new-key", flag=True)
+    conf = read_conf() or sys.exit(f"not enrolled (no {CONF})")
+    eps = conf.get("endpoints") or {}
+    if new_key:
+        need_root()
+        owner = (conf.get("owner") or {}).get("login") or sys.exit("the enrolment names no owner login")
+        tok = run_as(owner, ["secret", "show", SECRET, "--value"], check=False).strip() if not os.environ.get("MALUOS_OFFICE_TOKEN") else os.environ["MALUOS_OFFICE_TOKEN"]
+        st, r = _C.inference_key_new(eps.get("inference") or conf["url"].rstrip("/") + "/api/v1/desks/inference", tok)
+        if st != 200 or not r.get("inference_key"):
+            sys.exit(f"the office answered {st} {r.get('error') or ''}: {r.get('message') or ''}")
+        store_inference_key(owner, r["inference_key"])
+        conf["inference"] = {"secret": INFERENCE_SECRET}; write_conf(conf)
+        print(f"a new inference key is in the vault as {(conf.get('owner') or {}).get('principal')}/{INFERENCE_SECRET}; the old one stops working at once")
+        out = run_as(owner, ["office", "inference", "--refresh"], check=False)
+        print(out.rstrip())
+        return 0
+    if everything:
+        st, r = _C.inference((eps.get("inference") or conf["url"].rstrip("/") + "/api/v1/desks/inference") + "?all=1", token_for_me())
+        if st != 200:
+            sys.exit(f"the office answered {st} {r.get('error') or ''}: {r.get('message') or ''}")
+        if as_json:
+            print(json.dumps(r, indent=1)); return 0
+        print(f"every backend of the estate ({len(r.get('backends') or [])}; version {r.get('version')})" + (f"; editions {', '.join(r['editions'])}" if r.get("editions") else ""))
+        for b in r.get("backends") or []:
+            w = b.get("expected_wait_s") or {}; q = b.get("queue") or {}
+            print(f"  {b.get('name'):<20} {b.get('node'):<14} {b.get('address')}:{b.get('port')}  queue {q.get('queued', 0)}/{q.get('running', 0)}  "
+                  + " ".join(f"{c} {v}s" for c, v in w.items()) + f"  {', '.join(m.get('name') for m in b.get('models') or []) or '-'}" + ("" if b.get("allowed", True) else "  (not for this desk)"))
+        return 0
+    if refresh:
+        out = inference_refresh(conf, token_for_me())
+        for name, (st, r) in out.items():
+            if st != 200:
+                sys.exit(f"{name}: the office answered {st} {r.get('error') or ''}: {r.get('message') or ''}")
+        try:
+            gateway(["reload"])
+        except Exception:
+            pass                # not an operator of the gateway: it re-reads the cache within its reload interval
+    facts = _C.gateway_inference()
+    backends = _C.read_cache(INFERENCE_CACHE) or {}
+    peers = _C.read_cache(PEERS_CACHE) or {}
+    if as_json:
+        print(json.dumps({"facts": facts, "backends": backends, "peers": peers}, indent=1, default=str)); return 0
+    if facts is None:
+        print("facts:     no gateway on this desk (nothing to share)")
+    else:
+        print(f"facts:     share {'on' if facts.get('share') else 'off'} ({facts.get('contribution')}" + (f", idle since {facts['idle'].get('since')}" if (facts.get('idle') or {}).get('idle') else "") + f"), port {facts.get('port')}, "
+              + f"{len(facts.get('models') or [])} model(s); queue {facts.get('queue')}")
+    if not backends:
+        print(f"backends:  no cache yet ({INFERENCE_CACHE}): the session writes it after a heartbeat; --refresh does it now")
+    else:
+        bs = backends.get("backends") or []
+        print(f"backends:  {len(bs)} published to this desk (version {backends.get('version')}, fetched {backends.get('fetched_at')})"
+              + (f"; editions {', '.join(backends['editions'])}" if backends.get("editions") else "") + ("; placement by the kernel" if backends.get("place") else ""))
+        for b in bs:
+            w = b.get("expected_wait_s") or {}
+            print(f"  {b.get('name'):<20} {b.get('node'):<14} {b.get('address')}:{b.get('port')}  {', '.join(m.get('name') for m in b.get('models') or []) or '-'}"
+                  + (f"  wait " + " ".join(f"{c} {v}s" for c, v in w.items()) if w else "") + f"  ceiling {b.get('classification_max')}"
+                  + (f" class<={b['class_max']}" if b.get("class_max") else "") + (f" priority {b['priority']}" if b.get("priority") else ""))
+    if peers:
+        print(f"peers:     {len(peers.get('peers') or [])} member(s) may call this desk's gateway (version {peers.get('version')})")
     return 0
 
 
@@ -893,13 +1005,33 @@ def heartbeat(a):
             tok = token_for_me()
             url = (conf.get("endpoints") or {}).get("heartbeat") or conf["url"] + "/api/v1/desks/heartbeat"
             f = facts()
-            st, r = http("POST", url, {"surface": SURFACE, "presence": presence, "app_version": f["app_version"], "mcp_surface_version": f["mcp_surface_version"],
-                                       "facts": {k: f[k] for k in ("hostname", "os_release", "variant", "cpu_cores", "memory_mb", "storage_gb") if k in f}}, token=tok)
+            from maluos_estate import client as _C
+            body = {"surface": SURFACE, "presence": presence, "app_version": f["app_version"], "mcp_surface_version": f["mcp_surface_version"],
+                    "facts": {k: f[k] for k in ("hostname", "os_release", "variant", "cpu_cores", "memory_mb", "storage_gb") if k in f}}
+            inf = _C.gateway_inference() if presence == "online" else None      # Phase 13 slice 3: this desk's gateway facts (a laptop that shares while idle)
+            if inf is not None:
+                body["inference"] = inf
+            st, r = http("POST", url, body, token=tok)
             if st == 200:
-                res.update(ok=True, desk=r.get("desk"), heartbeat_s=r.get("heartbeat_s"), office=r.get("office"), overlay_changed=bool(r.get("overlay_changed")))
+                res.update(ok=True, desk=r.get("desk"), heartbeat_s=r.get("heartbeat_s"), office=r.get("office"), overlay_changed=bool(r.get("overlay_changed")),
+                           inference_changed=bool(r.get("inference_changed")), peers_changed=bool(r.get("peers_changed")), editions=r.get("editions"))
                 if r.get("overlay_changed"):
                     from maluos_estate import overlay as _OV
                     _OV.hint()                   # slice 1b: the overlay service refreshes now
+                # slice 3: the gateway's caches: the backends hourly or on inference_changed, the peers every 5 min or on peers_changed
+                if (conf.get("endpoints") or {}).get("inference") and presence == "online":
+                    which = []
+                    bc = _C.read_cache(INFERENCE_CACHE); pc = _C.read_cache(PEERS_CACHE)
+                    if r.get("inference_changed") or not bc or bc.get("principal") != (conf.get("owner") or {}).get("principal") or time.time() - _cache_age(INFERENCE_CACHE) > _C.INFERENCE_REFRESH_S:
+                        which.append("backends")
+                    if r.get("peers_changed") or not pc or time.time() - _cache_age(PEERS_CACHE) > _C.PEERS_REFRESH_S:
+                        which.append("peers")
+                    if which:
+                        try:
+                            out = inference_refresh(conf, tok, which)
+                            res["inference"] = {k: v[0] for k, v in out.items()}
+                        except Exception as e:
+                            res["inference"] = {"error": f"{e.__class__.__name__}: {str(e)[:120]}"}
             elif st in (401, 410):
                 res.update(revoked=True, error=f"{st} {r.get('error') or ''}: {r.get('message') or 'the office no longer knows this desk'}")
             else:
@@ -915,6 +1047,13 @@ def heartbeat(a):
     else:
         print(f"heartbeat failed: {res['error']}" + ("  (retired: sudo maluctl office leave)" if res["revoked"] else ""), file=sys.stderr)
     return 0 if res["ok"] else 1
+
+
+def _cache_age(path):
+    try:
+        return os.stat(path).st_mtime
+    except OSError:
+        return 0.0
 
 
 def leave(a):
@@ -960,8 +1099,14 @@ def leave(a):
         try:
             run_as(owner, ["secret", "delete", SECRET])
             run_as(owner, ["secret", "delete", KEY_SECRET], check=False)       # slice 2: the desk key goes with the token
+            run_as(owner, ["secret", "delete", INFERENCE_SECRET], check=False)   # slice 3: and the inference key
         except Exception as e:
             print(f"  warn: {e}", file=sys.stderr)
+    for p in (INFERENCE_CACHE, PEERS_CACHE):      # slice 3: the gateway's estate rungs and peers go with the enrolment
+        try:
+            os.remove(p)
+        except OSError:
+            pass
     for p in (CONF, ENVF):
         try:
             os.remove(p)
@@ -995,6 +1140,8 @@ def main(a):
             return estate(a)
         if cmd == "inbox":
             return inbox(a)
+        if cmd == "inference":
+            return inference(a)
         if cmd == "key":
             return key(a)
     except RuntimeError as e:

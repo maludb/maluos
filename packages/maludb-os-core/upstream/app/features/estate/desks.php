@@ -11,6 +11,8 @@ declare(strict_types=1);
  */
 require_once dirname(__DIR__, 2) . '/features/estate/queries.php';
 
+require_once __DIR__ . '/inference.php';      // db/191: the inference key at enrol, the editions in the answer, retirement
+
 const DESK_SURFACE = 1;
 const DESK_HEARTBEAT_S = 300;
 const DESK_CODE_TTL_S = 900;
@@ -177,6 +179,7 @@ function desk_retire(PDO $pdo, int $id): void
         ->execute(['id' => $id]);
     desk_revoke_tokens($pdo, $id);
     overlay_free($pdo, $id);      // db/189: its overlay address into quarantine
+    inference_member_retire($pdo, $id);      // db/191
 }
 
 function desk_heartbeat(PDO $pdo, int $id, string $presence, array $body): void
@@ -270,6 +273,8 @@ function desk_endpoints(?array $member = null): array
         // db/190: the directory as this desk sees it, the person's estate inbox, the desk's key registration, the keys
         'agents' => app_url('/api/v1/desks/agents'), 'inbox' => app_url('/api/v1/desks/inbox'), 'key' => app_url('/api/v1/desks/key'), 'keys' => app_url('/api/v1/estate/keys'),
         'actions' => estate_operator($member) ? app_url('/api/v1/estate/actions') : null,
+        // db/191: the backends this desk may use; a desk that shares its GPU reads its peers at the estate endpoint
+        'inference' => app_url('/api/v1/desks/inference'), 'inference_peers' => app_url('/api/v1/estate/inference/peers'),
     ];
 }
 
@@ -286,6 +291,7 @@ function desk_answer(PDO $pdo, array $desk, array $member): array
         'office' => ['name' => business_name($pdo), 'url' => app_url('/')],
         'owner' => ['member_id' => (int) $member['id'], 'email' => (string) $member['email'], 'display_name' => (string) $member['display_name']],
         'endpoints' => $endpoints, 'heartbeat_s' => DESK_HEARTBEAT_S, 'overlay' => $overlay,
+        'editions' => inference_editions($pdo),      // db/191
     ];
 }
 

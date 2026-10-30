@@ -353,7 +353,8 @@ class OllamaCloudBackend(OllamaBackend):
 
 def make_backend(row, session):
     from .remote import RemoteBackend
+    from .estate import EstateBackend
     kind = row["kind"]
     cls = {"anthropic": AnthropicBackend, "openai": OpenAIBackend, "openai_compat": OpenAIBackend, "ollama_cloud": OllamaCloudBackend,
-           "remote": RemoteBackend}.get(kind, OllamaBackend)
+           "remote": RemoteBackend, "estate": EstateBackend}.get(kind, OllamaBackend)
     return cls(row, session)

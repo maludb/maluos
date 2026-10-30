@@ -6,7 +6,7 @@ MaluOS Network and Queue tabs can be exercised without the desktop session.
 Usage: fake_session.py [--no-gpu] [--not-operator] [--estate] [--ready FILE]
   --no-gpu        a VM: no GPU, chassis vm, an empty queue
   --not-operator  the user is not an operator of the gateway: no node section, NodeQueue is forbidden
-  --estate        an enrolled desk whose office publishes the estate (Phase 13 slice 1): two nodes, one alert
+  --estate        an enrolled desk whose office publishes the estate (Phase 13 slice 1): two nodes, one alert; two estate backends from the directory (slice 3)
 """
 import json, os, sys
 import gi
@@ -85,7 +85,16 @@ def state(no_gpu, operator, estate=False):
                                      {"name": "anthropic", "kind": "anthropic", "healthy": True, "cloud": True, "enabled": True, "error": None, "loaded": []}],
                         "queue": {"queued": 0 if no_gpu else 2, "running": 0 if no_gpu else 1}, "expected_wait_s": {}, "tiers": {},
                         "share": {"enabled": not no_gpu, "contribution": "always", "chassis": "vm" if no_gpu else "desktop",
-                                  "rule": "always" if no_gpu else "opt-in", "configured": not no_gpu, "exposed": False}},
+                                  "rule": "always" if no_gpu else "opt-in", "configured": not no_gpu, "exposed": False},
+                        # Phase 13 slice 3: the rungs the estate's directory gave this gateway (with --estate)
+                        "estate": {"self": "desk:41", "editions": ["scheduler"], "place": True, "source": "desk", "version": 7, "fetched_at": "2026-10-29T20:00:00Z",
+                                   "backends": [{"name": "estate:gpu-1", "kind": "estate", "node": "inference:57", "label": "gpu-1", "display_name": "GPU 1", "endpoint": "http://100.100.0.2:11435",
+                                                 "healthy": True, "enabled": True, "error": None, "remote": True, "estate": True, "models": ["qwen3:8b", "qwen3:32b"], "loaded": [], "class_max": "agent",
+                                                 "classification_max": "internal", "priority": 10, "contribution": "always", "shared": True, "directory_wait_s": {"interactive": 1.2}, "directory_queue": {"queued": 0, "running": 1}},
+                                                {"name": "estate:ed-s-laptop", "kind": "estate", "node": "desk:12", "label": "ed-s-laptop", "display_name": "Ed's laptop", "endpoint": "http://100.100.0.5:11435",
+                                                 "healthy": False, "enabled": True, "error": "not_shared: its owner is at the keyboard", "remote": True, "estate": True, "models": ["qwen3:8b"], "loaded": [], "class_max": "interactive",
+                                                 "classification_max": "internal", "priority": 0, "contribution": "idle", "shared": False, "directory_wait_s": {}, "directory_queue": {}}] if estate else [],
+                                   "peers": 2 if estate else 0, "peers_version": 3}},
             "me": {"operator": operator}, "node": node(no_gpu, operator), "vault": {}, "agents": [], "alerts": [], "updates": {"available": False}, "office": office(estate)}
 
 

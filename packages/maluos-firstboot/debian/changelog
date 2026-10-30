@@ -1,3 +1,12 @@
+maluos-firstboot (0.1.12) resolute; urgency=medium
+
+  * maluos_gpu.share_state applies the idle rule (Phase 13 slice 3):
+    with contribution idle the switch is on only while the desktop
+    session's idle mark /run/maluos/session/idle exists; `idle` carries
+    what the mark says, configured_enabled the switch as set.
+
+ -- Edward Honour <ed@maludb.org>  Thu, 29 Oct 2026 18:30:00 +0000
+
 maluos-firstboot (0.1.11) resolute; urgency=medium
 
   * `maluctl principal list` named the principal kind by a column that

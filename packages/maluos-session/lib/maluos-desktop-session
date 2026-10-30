@@ -74,10 +74,20 @@ sees {"available": …, "operator": false}. NodeQueue() reads the queue and
 the lanes live for the Queue tab, which polls it every two seconds while
 it is the current page; the tab's actions (cancel, priority, pause,
 resume) run `maluctl gateway node …` themselves.
+Phase 13 slice 3 (shared inference, the idle rule): a laptop that shares
+its GPU `--when idle` contributes only while its person is away. The
+service measures the session every 30 s — no input for the threshold
+(MALUOS_SESSION_IDLE_S, 600 s) by Mutter's idle monitor, the lid open or
+the machine on mains (UPower), no media player playing (MPRIS) — and
+keeps /run/maluos/session/idle while all three hold ({"since", "user",
+"idle_s"}), removing it at the first input; the gateway's share_state
+reads it. `host.idle` in the state says what was measured. The state's
+gateway section carries `estate`: the backends the estate's directory
+gave this gateway, for the Network tab.
 """
 import http.client, json, os, pwd, re, socket, subprocess, sys, threading, time, urllib.parse
 
-VERSION = "0.9.0"
+VERSION = "0.11.0"
 BUS_NAME, OBJ, IFACE = "com.maluos.Session", "/com/maluos/Session", "com.maluos.Session1"
 GW = os.environ.get("MALUOS_GATEWAY_SOCKET", "/run/maluos/gateway.sock")
 VAULT = os.environ.get("MALUOS_VAULT_SOCKET", "/run/maluos/vault.sock")
@@ -88,6 +98,9 @@ UPDATES_EVERY = int(os.environ.get("MALUOS_SESSION_UPDATES_POLL", "900"))
 UPDATES_RETRY = 120              # after a failed reading
 UPDATES_TIMEOUT = int(os.environ.get("MALUOS_SESSION_UPDATES_TIMEOUT", "600"))
 OFFICE_CONF = os.environ.get("MALUOS_OFFICE_CONF", "/etc/maluos/office.yaml")
+IDLE_FILE = os.environ.get("MALUOS_SESSION_IDLE_FILE", "/run/maluos/session/idle")     # Phase 13 slice 3: the idle mark the gateway reads
+IDLE_S = int(os.environ.get("MALUOS_SESSION_IDLE_S", "600"))
+IDLE_POLL = int(os.environ.get("MALUOS_SESSION_IDLE_POLL", "30"))
 OFFICE_SECRET = "office-desk-token"
 OFFICE_RETRY = 60                # after a failed heartbeat
 UPDATE_MARKS = ("/var/lib/dpkg/status", "/var/lib/apt/lists", "/var/lib/apt/periodic/update-success-stamp",
@@ -219,10 +232,17 @@ def gateway_state():
                          "error": b.get("error"), "loaded": [m.get("name") for m in b.get("loaded") or []]})
     if not backends:
         backends = [{"name": n, "healthy": bool(h), "kind": None, "cloud": False, "enabled": True} for n, h in (health.get("backends") or {}).items()]
+    est = status.get("estate") or {}
     g.update({"ok": bool(health.get("ok")), "version": status.get("version") or health.get("version"), "uptime_s": status.get("uptime_s"),
               "backends": backends, "queue": status.get("queue") or {"queued": 0, "running": 0},
               "expected_wait_s": status.get("expected_wait_s") or {}, "tiers": (status.get("catalog") or {}).get("tiers") or {},
-              "share": status.get("share")})
+              "share": status.get("share"),
+              # Phase 13 slice 3: the estate's backends as this gateway's rungs, the peers allowed to call here, the entitlements
+              "estate": {"self": est.get("self"), "editions": est.get("editions") or [], "place": bool(est.get("place")), "peers": est.get("peers") or 0,
+                         "backends": [{"name": b.get("name"), "node": b.get("node"), "label": b.get("label"), "display_name": b.get("display_name"), "endpoint": b.get("endpoint"),
+                                       "healthy": bool(b.get("healthy")), "error": b.get("error"), "shared": b.get("shared", True), "models": b.get("models") or [],
+                                       "wait": b.get("directory_wait_s") or {}, "classification_max": b.get("classification_max"), "class_max": b.get("class_max"),
+                                       "priority": b.get("priority") or 0, "contribution": b.get("contribution")} for b in est.get("backends") or []]}})
     me = ok(GW, "/v1/maluos/whoami")
     return g, me
 
@@ -243,7 +263,7 @@ def node_state(gw_available, me):
     paired = [{"name": b.get("name"), "endpoint": b.get("endpoint"), "healthy": bool(b.get("healthy")), "enabled": b.get("enabled", True),
                "error": b.get("error"), "paired": bool(b.get("paired")), "version": b.get("version"), "checked_at": b.get("checked_at"),
                "models": b.get("models") or [], "loaded": [l.get("name") for l in b.get("loaded") or []]}
-              for b in st.get("backends") or [] if b.get("remote")]
+              for b in st.get("backends") or [] if b.get("remote") and not b.get("estate")]     # the estate's rungs are gateway.estate.backends (slice 3), not pairings
     n.update({"available": True, "name": st.get("node_name"), "id": st.get("node_id"), "version": st.get("version"), "api_version": st.get("api_version"),
               "uptime_s": st.get("uptime_s"), "started_at": st.get("started_at"), "last_manager_seen_at": st.get("last_manager_seen_at"),
               "exposed": {"enabled": bool(ex.get("enabled")), "host": ex.get("host"), "port": ex.get("port")}, "share": st.get("share"),
@@ -507,6 +527,94 @@ class Service:
         self.conn = None
         self.reg_id = None
         self.pending_refresh = None
+        self.idle = {"idle": False, "idle_s": None, "lid_closed": None, "on_battery": None, "media_playing": None, "since": None, "threshold_s": IDLE_S, "error": None}   # slice 3
+
+    # -- Phase 13 slice 3: the idle rule's inputs, measured every IDLE_POLL seconds on their own thread
+    def measure_idle(self):
+        Gio, GLib = self.Gio, self.GLib
+        out = {"idle_s": None, "lid_closed": None, "on_battery": None, "media_playing": None, "error": None}
+        errs = []
+        try:
+            px = Gio.DBusProxy.new_for_bus_sync(Gio.BusType.SESSION, Gio.DBusProxyFlags.DO_NOT_LOAD_PROPERTIES, None, "org.gnome.Mutter.IdleMonitor",
+                                                "/org/gnome/Mutter/IdleMonitor/Core", "org.gnome.Mutter.IdleMonitor", None)
+            out["idle_s"] = int(px.call_sync("GetIdletime", None, Gio.DBusCallFlags.NONE, 10000, None).unpack()[0] // 1000)
+        except Exception as e:
+            errs.append(f"idle: {str(e)[:80]}")
+        try:
+            up = Gio.DBusProxy.new_for_bus_sync(Gio.BusType.SYSTEM, Gio.DBusProxyFlags.DO_NOT_LOAD_PROPERTIES, None, "org.freedesktop.UPower",
+                                                "/org/freedesktop/UPower", "org.freedesktop.DBus.Properties", None)
+            for prop, key in (("LidIsClosed", "lid_closed"), ("OnBattery", "on_battery")):
+                out[key] = bool(up.call_sync("Get", GLib.Variant("(ss)", ("org.freedesktop.UPower", prop)), Gio.DBusCallFlags.NONE, 3000, None).unpack()[0])
+        except Exception as e:
+            out["lid_closed"], out["on_battery"] = False, False       # no UPower (a VM, a server session): no lid, on mains
+            errs.append(f"upower: {str(e)[:60]}")
+        try:
+            bus = Gio.DBusProxy.new_for_bus_sync(Gio.BusType.SESSION, Gio.DBusProxyFlags.DO_NOT_LOAD_PROPERTIES, None, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", None)
+            names = [n for n in bus.call_sync("ListNames", None, Gio.DBusCallFlags.NONE, 3000, None).unpack()[0] if n.startswith("org.mpris.MediaPlayer2.")]
+            playing = False
+            for n in names:
+                try:
+                    pl = Gio.DBusProxy.new_for_bus_sync(Gio.BusType.SESSION, Gio.DBusProxyFlags.DO_NOT_LOAD_PROPERTIES, None, n, "/org/mpris/MediaPlayer2", "org.freedesktop.DBus.Properties", None)
+                    if pl.call_sync("Get", GLib.Variant("(ss)", ("org.mpris.MediaPlayer2.Player", "PlaybackStatus")), Gio.DBusCallFlags.NONE, 2000, None).unpack()[0] == "Playing":
+                        playing = True; break
+                except Exception:
+                    continue
+            out["media_playing"] = playing
+        except Exception as e:
+            out["media_playing"] = False
+            errs.append(f"mpris: {str(e)[:60]}")
+        out["error"] = "; ".join(errs) or None
+        return out
+
+    def idle_loop(self):
+        """Its own thread: keep the idle mark while the person is away (no input for IDLE_S, the lid open or on mains, no media)."""
+        since = None
+        while True:
+            try:
+                m = self.measure_idle()
+                if m["idle_s"] is None:
+                    # the idle time could not be read (gnome-shell busy, the call timed out): hold the last decision rather than
+                    # flap the mark; the lid, the battery and the media still count
+                    held = bool(self.idle.get("idle")) and not m["lid_closed"] and not m["on_battery"] and not m["media_playing"]
+                    if held:
+                        m["idle_s"] = self.idle.get("idle_s")
+                    if (m.get("error") or "") != (self.idle.get("error") or ""):
+                        log(f"idle: cannot measure ({m.get('error')}); {'holding the mark' if held else 'the mark stays down'}")
+                    idle = held
+                else:
+                    idle = m["idle_s"] >= IDLE_S and not m["lid_closed"] and not m["on_battery"] and not m["media_playing"]
+                if idle:
+                    if since is None:
+                        since = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - m["idle_s"]))
+                        log(f"idle: no input for {m['idle_s']} s; the idle mark is up ({IDLE_FILE})")
+                    try:
+                        os.makedirs(os.path.dirname(IDLE_FILE), exist_ok=True)
+                        tmp = f"{IDLE_FILE}.tmp.{os.getpid()}"
+                        with open(tmp, "w") as f:
+                            json.dump({"since": since, "user": pwd.getpwuid(os.getuid()).pw_name, "idle_s": m["idle_s"], "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}, f)
+                        os.chmod(tmp, 0o644); os.replace(tmp, IDLE_FILE)
+                    except OSError as e:
+                        m["error"] = f"{m.get('error') or ''}; mark: {e}".strip("; ")
+                else:
+                    if since is not None:
+                        log("idle: input seen; the idle mark is down")
+                    since = None
+                    try:
+                        if os.path.exists(IDLE_FILE):
+                            with open(IDLE_FILE) as f:
+                                mine = (json.load(f) or {}).get("user") == pwd.getpwuid(os.getuid()).pw_name
+                            if mine:
+                                os.remove(IDLE_FILE)
+                    except (OSError, ValueError):
+                        pass
+                new = {**m, "idle": idle, "since": since, "threshold_s": IDLE_S}
+                changed = new["idle"] != self.idle.get("idle")
+                self.idle = new
+                if changed:
+                    self.refresh_soon(0.5)
+            except Exception as e:
+                log(f"idle: {e.__class__.__name__}: {str(e)[:120]}")
+            time.sleep(IDLE_POLL)
 
     # -- systemd (system bus): agent units, read-only for anyone, start/stop through polkit
     def systemd(self):
@@ -579,7 +687,8 @@ class Service:
             u["last_action"] = self.updates_last_action
         with self.office_lock:
             hb = self.office_hb; oa = self.office_agents; op = self.office_apps; oe = self.office_estate
-        st = {"version": VERSION, "ts": int(time.time()), "host": host_state(), "gateway": gw, "me": me_state(me), "node": node_state(gw.get("available"), me),
+        host = host_state(); host["idle"] = dict(self.idle)          # slice 3: the idle rule's measurements
+        st = {"version": VERSION, "ts": int(time.time()), "host": host, "gateway": gw, "me": me_state(me), "node": node_state(gw.get("available"), me),
               "vault": vault, "agents": agents_state(units, mine), "alerts": alerts_state(), "updates": u, "office": office_state(office_conf(), hb, oa, op, oe, self.office_inbox)}
         return st
 
@@ -1204,6 +1313,7 @@ class Service:
         threading.Thread(target=self.updates_loop, daemon=True).start()
         threading.Thread(target=self.office_loop, daemon=True).start()
         threading.Thread(target=self.inbox_loop, daemon=True).start()        # Phase 13 slice 2: the person's estate inbox
+        threading.Thread(target=self.idle_loop, daemon=True).start()         # Phase 13 slice 3: the idle rule
 
         def on_term():
             self.office_goodbye(); loop.quit(); return False

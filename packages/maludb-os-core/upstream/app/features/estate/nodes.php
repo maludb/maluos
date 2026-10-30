@@ -11,6 +11,7 @@ declare(strict_types=1);
  * answers the estate to a node, and to a desk whose owner is an operator (GET /api/v1/desks/estate).
  */
 require_once dirname(__DIR__, 2) . '/features/estate/desks.php';
+require_once dirname(__DIR__, 2) . '/features/estate/inference.php';      // db/191
 
 const NODE_HEARTBEAT_S = 60;
 const NODE_REPORT_S = 300;
@@ -105,6 +106,7 @@ function node_revoke_tokens(PDO $pdo, int $id): void
 function node_retire(PDO $pdo, int $id): void
 {
     agents_deregister($pdo, $id);      // db/190: its agents leave the directory
+    inference_member_retire($pdo, $id);      // db/191: its facts and its key leave; the peers everyone sees change
     $pdo->prepare("UPDATE locations SET status = 'retired', retired_at = COALESCE(retired_at, now()), presence = 'offline', updated_at = now() WHERE id = :id")
         ->execute(['id' => $id]);
     node_revoke_tokens($pdo, $id);
@@ -297,7 +299,9 @@ function node_endpoints(bool $overlay = false): array
             'leave' => app_url('/api/v1/estate/leave'), 'nodes' => app_url('/api/v1/estate/nodes'),
             'overlay' => $overlay ? app_url('/api/v1/estate/overlay') : null,
             // db/190: the directory, the keys, this node's inbox and where it registers its agents
-            'agents' => app_url('/api/v1/estate/agents'), 'keys' => app_url('/api/v1/estate/keys'), 'inbox' => app_url('/api/v1/estate/inbox'), 'tasks' => app_url('/api/v1/estate/tasks')];
+            'agents' => app_url('/api/v1/estate/agents'), 'keys' => app_url('/api/v1/estate/keys'), 'inbox' => app_url('/api/v1/estate/inbox'), 'tasks' => app_url('/api/v1/estate/tasks'),
+            // db/191: the backends this node may use, and (a serving host) the peers allowed to call it
+            'inference' => app_url('/api/v1/estate/inference'), 'inference_peers' => app_url('/api/v1/estate/inference/peers')];
 }
 
 /** The contract's answer for join (with the token and enrolled_by added by the caller), heartbeat and me. */
@@ -310,6 +314,7 @@ function node_answer(PDO $pdo, array $node): array
                    'presence' => (string) $node['presence'], 'last_seen_at' => json_ts($node['last_seen_at'] ?? null), 'last_report_at' => json_ts($node['last_report_at'] ?? null)],
         'office' => ['name' => business_name($pdo), 'url' => app_url('/')],
         'endpoints' => node_endpoints($overlay !== null), 'heartbeat_s' => NODE_HEARTBEAT_S, 'report_s' => NODE_REPORT_S, 'overlay' => $overlay,
+        'editions' => inference_editions($pdo),      // db/191: the entitlements the estate holds (scheduler)
     ];
 }
 
@@ -435,5 +440,6 @@ function present_estate_for_settings(PDO $pdo): array
     return ['nodes' => array_values(array_filter($ans['nodes'], static fn ($n) => $n['kind'] !== 'desk')),
             'alerts' => array_values(array_filter($ans['alerts'], static fn ($a) => $a['cleared_at'] === null)),
             'overlay' => present_overlay_for_settings($pdo),
-            'delegation' => present_delegation_for_settings($pdo)];      // db/190
+            'delegation' => present_delegation_for_settings($pdo),      // db/190
+            'inference' => present_inference_for_settings($pdo)];       // db/191
 }

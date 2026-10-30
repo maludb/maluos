@@ -14,6 +14,7 @@ from .db import Database
 from .ollama import OllamaBackend, BackendError, usage_from
 from .scheduler import Scheduler, Job, AdmissionError
 from .alerts import Alerts
+from . import estate as ESTATE
 from .jobs import Jobs
 from . import node_api, anthropic_face
 
@@ -34,12 +35,13 @@ class Caller:
     def __init__(self, ref, linux_user=None, uid=None, process_ref=None, via="socket"):
         self.ref, self.linux_user, self.uid, self.process_ref, self.via = ref, linux_user, uid, process_ref, via
         self.enrolled, self.kind, self.scopes, self.operator, self.token_name = False, None, set(), False, None
-        self.token_kind, self.token_limits = None, {}     # G2: token (a principal's own), inference, node
+        self.token_kind, self.token_limits = None, {}     # G2: token (a principal's own), inference, node; slice 3: estate (a peer's inference key)
+        self.peer = None                                  # slice 3: the peers-cache row of an estate caller (its ceilings)
 
     def as_dict(self):
         return {"principal": self.ref, "enrolled": self.enrolled, "kind": self.kind, "user": self.linux_user, "uid": self.uid,
                 "process": self.process_ref, "via": self.via, "operator": self.operator, "scopes": sorted(self.scopes),
-                "token": self.token_name, "token_kind": self.token_kind}
+                "token": self.token_name, "token_kind": self.token_kind, "peer": self.peer.get("node") if self.peer else None}
 
 
 class Call:
@@ -47,7 +49,7 @@ class Call:
     __slots__ = ("id", "caller", "kind", "requested", "tier", "backend", "model", "reason", "cls", "route", "task", "hints",
                  "job", "t0", "queued_ms", "endpoint", "stream", "engine_request_id", "rungs", "rung", "keys", "attempts",
                  "cost_est", "currency", "warnings",
-                 "face", "mode", "async_job", "accepted_at", "started_at", "origin_request", "origin_node", "aio_task", "cancel_reason")
+                 "face", "mode", "async_job", "accepted_at", "started_at", "origin_request", "origin_node", "aio_task", "cancel_reason", "placement")
 
     FACES = {"/v1/chat/completions": "openai", "/v1/embeddings": "openai", "/v1/messages": "anthropic", "/api/chat": "ollama", "/api/generate": "ollama",
              "/api/embed": "ollama", "/api/embeddings": "ollama", "/api/show": "ollama", "engine:model_request": "engine"}
@@ -64,6 +66,8 @@ class Call:
         self.accepted_at, self.started_at = time.time(), None
         self.origin_request, self.origin_node = hints.get("origin_request"), hints.get("origin_node")
         self.aio_task, self.cancel_reason = None, None
+        self.placement = None                     # slice 3: the kernel's placement, when the scheduler entitlement answered
+
 
 
 def process_ref(pid):
@@ -208,6 +212,11 @@ class Gateway:
         self._models_sig, self._catalog_seq = None, 0
         self.runner, self.tcp_site, self.tcp_bound = None, None, None
         self._operators, self._operators_at = set(), 0
+        # Phase 13 slice 3: the estate's backends (from the enrolment side's cache), the peers allowed to call this host, the entitlements
+        self.estate = {"self": None, "secret": None, "principal": None, "editions": [], "place": None, "lease_s": None, "version": None, "source": None, "mtime": None, "fetched_at": None}
+        self.peers = ESTATE.Peers()
+        self._estate_key, self._estate_key_at = None, 0
+        self.place_session = None       # the kernel's placement calls (estate.place), made lazily
 
     def operators(self):
         """The estate's operators besides root: the provisioning state's `operators` (the human accounts firstboot made
@@ -371,6 +380,8 @@ class Gateway:
             t.cancel()
         if self.session:
             await self.session.close()
+        if self.place_session:
+            await self.place_session.close()
 
     async def reload_catalog(self, initial=False):
         try:
@@ -382,6 +393,7 @@ class Gateway:
                 self.catalog = Catalog([], [], [], [], [], [])
             return
         from .cloud import make_backend
+        self.load_estate(cat)
         aff, plimit = self.cfg.get("affinity"), self.cfg.get("principal_queue_limit")
         for name, row in cat.backends.items():
             if name in self.backends and self.backends[name].kind == row["kind"]:
@@ -407,6 +419,49 @@ class Gateway:
     async def remote_paired(self, b):
         await self.remote_key(b)
         await b.refresh()
+
+    # -- Phase 13 slice 3: the estate's backends and peers, from the cache the enrolment side keeps
+    def load_estate(self, cat):
+        found = ESTATE.read_caches("inference")
+        self.peers.load()
+        if not found:
+            if self.estate.get("source"):
+                log("estate: the backends cache is gone; the estate rungs leave")
+                self.estate.update({"self": None, "secret": None, "editions": [], "place": None, "source": None, "mtime": None})
+            return
+        rows, editions, place, lease = {}, [], None, None
+        for data, source, _ in found:                      # the node's view first; a host that is also a desk adds what its desk membership allows
+            ESTATE.backend_rows(data, rows)
+            editions += [e for e in (data.get("editions") or []) if e not in editions]
+            place, lease = place or data.get("place"), lease or data.get("lease_s")
+        first, source, mtime = found[0]
+        stamp = tuple((src, mt) for _, src, mt in found)
+        if stamp != self.estate.get("mtime"):
+            self.estate.update({"self": first.get("self"), "secret": first.get("secret"), "principal": first.get("principal"), "editions": editions,
+                                "place": place, "lease_s": lease, "version": first.get("version"), "source": "+".join(src for _, src, _ in found), "mtime": stamp, "fetched_at": first.get("fetched_at")})
+            log(f"estate: {len(rows)} backend(s) from the {self.estate['source']}'s cache (version {first.get('version')}; editions {', '.join(editions) or 'none'})")
+        for name, row in rows.items():
+            cat.backends[name] = row
+
+    async def estate_key(self):
+        """This host's own inference key (the vault ref the cache names), for the kernel's place endpoint; cached a minute."""
+        if self._estate_key and time.time() - self._estate_key_at < 60:
+            return self._estate_key
+        for b in self.backends.values():
+            if getattr(b, "is_estate", False) and b.key:
+                self._estate_key, self._estate_key_at = b.key, time.time()
+                return b.key
+        ref = self.estate.get("secret")
+        if not ref or time.time() - self._estate_key_at < 30:
+            return self._estate_key
+        self._estate_key_at = time.time()
+        try:
+            from maluos_vault_client import Vault
+            r = await asyncio.to_thread(Vault(self.cfg.get("vault_socket")).use, ref, "the estate's placement")
+            self._estate_key = r["value"]
+        except Exception as e:
+            log(f"estate: inference key {ref}: {e.__class__.__name__}: {str(e)[:80]}")
+        return self._estate_key
 
     async def catalog_loop(self):
         while True:
@@ -477,7 +532,15 @@ class Gateway:
             if not row or row[1] < time.time() - 30:
                 r = await self.db.token_lookup(token)
                 if not r:
-                    raise ApiError(401, "unauthorized", "unknown, expired or revoked token")
+                    # slice 3: an estate member's inference key, verified against the peers the kernel published for this host
+                    self.peers.load()
+                    pr = self.peers.lookup(token)
+                    if not pr:
+                        raise ApiError(401, "unauthorized", "unknown, expired or revoked token")
+                    peer = request.transport.get_extra_info("peername") if request.transport else None
+                    c = Caller(f"node:{pr['node']}", None, None, f"tcp:{peer[0]}" if peer else "tcp", "token")
+                    c.token_name, c.token_kind, c.token_limits, c.peer = pr.get("name") or pr["node"], "estate", {"max_concurrent": 4}, pr
+                    return c
                 row = self.token_cache[token] = (r, time.time())
             r = row[0]
             peer = request.transport.get_extra_info("peername") if request.transport else None
@@ -539,6 +602,7 @@ class Gateway:
         h["tags"] = node.get("tags")
         h["origin_request"] = request.headers.get("X-MaluOS-Origin-Request") or None
         h["origin_node"] = request.headers.get("X-MaluOS-Origin-Node") or None
+        h["origin_node_name"] = request.headers.get("X-MaluOS-Origin-Node-Name") or None
         return h
 
     def known_models(self):
@@ -574,13 +638,22 @@ class Gateway:
         if caller.token_kind == "node":
             await self.ledger_denied(call, "node_key", "a node key serves no inference")
             raise ApiError(403, "node_key", "a node key opens /node/v1 only; inference needs an inference key")
-        if caller.via == "token" and caller.token_kind == "inference" and not self.share_state().get("enabled"):
+        if caller.via == "token" and caller.token_kind in ("inference", "estate") and not self.share_state().get("enabled"):
+            sh = self.share_state()
             await self.ledger_denied(call, "not_shared", "this host is not sharing its GPU")
-            raise ApiError(503, "not_shared", "this host is not sharing its GPU (sudo maluctl gateway share on)")
+            raise ApiError(503, "not_shared", "this host is not sharing its GPU" + (" now: its owner is at the keyboard (share --when idle)" if sh.get("contribution") == "idle" and sh.get("configured", True) else " (sudo maluctl gateway share on)"),
+                           retry_after_s=300 if sh.get("contribution") == "idle" else None)
         cls = hints.get("class") or policy.get("default_class") or ("agent" if caller.kind == "agent" and "agent" in cat.classes else None) or cat.default_class()
         if cls not in cat.classes and cat.classes:
             await self.ledger_denied(call, "bad_class", f"unknown class {cls}")
             raise ApiError(400, "bad_class", f"unknown class {cls!r}; classes: {', '.join(cat.classes)}")
+        if caller.token_kind == "estate" and caller.peer:
+            # slice 3: the kernel's ceilings for this peer: a classification above it is refused, a class above it is served as the ceiling's
+            peer_max = caller.peer.get("classification_max") or "internal"
+            if SENS.get(hints.get("sensitivity") or "internal", 1) > SENS.get(peer_max, 1):
+                await self.ledger_denied(call, "classification", f"{hints.get('sensitivity')} is above this peer's ceiling {peer_max}")
+                raise ApiError(403, "classification", f"this host serves {caller.ref} up to {peer_max}; the call is {hints.get('sensitivity')}")
+            cls = ESTATE.cap_class(cls, caller.peer.get("class_max"), cat.classes)
         call.cls = cls
         if not requested:
             raise ApiError(400, "model_required", "model is required (a tier, an alias or a model name)")
@@ -610,6 +683,22 @@ class Gateway:
                 skip = "policy"
             elif b.healthy is False:
                 skip = "unhealthy"
+            elif b.is_estate:
+                # slice 3: a node the directory published, dialled over the overlay with this host's inference key
+                if hints.get("local_only"):
+                    skip = "local_only"
+                elif call.origin_request:
+                    skip = "no_chain"
+                elif not policy.get("remote_allowed", True):
+                    skip = "remote_not_allowed"
+                elif not b.shared:
+                    skip = "not_shared"
+                elif SENS[req_sens] > SENS.get(egress, 1):
+                    skip = f"sensitivity:{req_sens}>{egress}"
+                elif SENS[req_sens] > SENS.get(b.classification_max, 1):
+                    skip = f"classification:{req_sens}>{b.classification_max}"
+                elif not b.key and not await self.remote_key(b):
+                    skip = "no_credential"
             elif b.is_remote:
                 # a paired node: not the cloud, but the data leaves the host (docs/inference-node-api.md §6)
                 if hints.get("local_only"):
@@ -625,6 +714,8 @@ class Gateway:
             elif b.is_cloud:
                 if hints.get("local_only"):
                     skip = "local_only"
+                elif caller.token_kind == "estate":
+                    skip = "cloud_not_allowed"       # slice 3: a host never spends its cloud credit for another host's call
                 elif not policy.get("cloud_allowed", True):
                     skip = "cloud_not_allowed"
                 elif SENS[req_sens] > SENS.get(egress, 1):
@@ -668,10 +759,28 @@ class Gateway:
                     if self.backends[r["backend"]].is_cloud:
                         r["skipped"] = "prefer_local"
                 eligible = local
+        # slice 3: the estate's rungs rank among themselves by the kernel's priority, then the serving host's own expected wait
+        est = [r for r in eligible if self.backends[r["backend"]].is_estate]
+        if est:
+            est.sort(key=lambda r: (self.backends[r["backend"]].healthy is False, -self.backends[r["backend"]].priority, self.backends[r["backend"]].rank_wait(cls), r["backend"]))
+            first = next(i for i, r in enumerate(eligible) if self.backends[r["backend"]].is_estate)
+            eligible = [r for r in eligible if not self.backends[r["backend"]].is_estate]
+            eligible[first:first] = est
+            if hints.get("prefer") == "estate":
+                for r in eligible:
+                    if not self.backends[r["backend"]].is_estate:
+                        r["skipped"] = "prefer_estate"
+                eligible = est
+            if "scheduler" in (self.estate.get("editions") or []):
+                chosen = await ESTATE.place(self, call, est)
+                for r in est:
+                    r["reason"] = r["reason"] + (" placed" if chosen is r else " ranked")
+                if chosen is not None:
+                    eligible = [chosen] + [r for r in eligible if r is not chosen]
         call.route, call.keys = rungs, keys
         if not eligible:
             reasons = {r.get("skipped", "").split(":")[0] for r in rungs}
-            policy_only = reasons <= {"policy", "cloud_not_allowed", "remote_not_allowed", "no_chain", "sensitivity", "no_credential", "local_only", "not_enrolled", "credential_locked", "credential_expired", "disabled", "prefer_local"}
+            policy_only = reasons <= {"policy", "cloud_not_allowed", "remote_not_allowed", "no_chain", "sensitivity", "classification", "not_shared", "no_credential", "local_only", "not_enrolled", "credential_locked", "credential_expired", "disabled", "prefer_local", "prefer_estate"}
             code = "policy" if policy_only else "backend_unavailable"
             if "vault_unavailable" in reasons:
                 code = "vault_unavailable"
@@ -818,6 +927,13 @@ class Gateway:
             d["job"] = call.async_job
         if call.origin_request:
             d["origin_request"], d["origin_node"] = call.origin_request, call.origin_node
+            if call.hints.get("origin_node_name"):
+                d["origin_node_name"] = call.hints["origin_node_name"]
+        if call.caller.peer:
+            d["peer"] = {"node": call.caller.peer.get("node"), "name": call.caller.peer.get("name"), "class_max": call.caller.peer.get("class_max"),
+                         "classification_max": call.caller.peer.get("classification_max")}      # slice 3: an estate member served here
+        if call.placement:
+            d["placement"] = call.placement
         if call.hints.get("tags"):
             d["tags"] = call.hints["tags"]
         self.calls.pop(call.id, None)
@@ -1021,7 +1137,7 @@ class Gateway:
             import maluos_gpu
             return maluos_gpu.share_state(self.cfg["share"], self.cfg["tcp"])
         except Exception as e:
-            return {"enabled": False, "contribution": "always", "chassis": "unknown", "rule": "opt-in", "configured": False, "exposed": False,
+            return {"enabled": False, "contribution": "always", "chassis": "unknown", "rule": "opt-in", "configured": False, "exposed": False, "idle": None,
                     "error": f"{e.__class__.__name__}: {str(e)[:80]}"}
 
     def status(self):
@@ -1036,6 +1152,11 @@ class Gateway:
                 "expected_wait_s": ew, "schedulers": snaps,
                 "engine_queue": {"enabled": bool(self.cfg["engine_queue"].get("enabled", True)), "inflight": self.engine_inflight},
                 "share": self.share_state(),
+                # slice 3: the estate's backends as this host's rungs, the entitlements, the peers allowed to call here
+                "estate": {"self": self.estate.get("self"), "editions": self.estate.get("editions") or [], "place": bool(self.estate.get("place")),
+                           "source": self.estate.get("source"), "version": self.estate.get("version"), "fetched_at": self.estate.get("fetched_at"),
+                           "backends": [b.status() for b in self.backends.values() if getattr(b, "is_estate", False)],
+                           "peers": len(self.peers.by_hash), "peers_version": self.peers.version},
                 "catalog": {"tiers": {t: [f"{a['backend']}/{a['model']}" for a in sorted(self.catalog.aliases, key=lambda a: a["position"]) if a["tier"] == t]
                                       for t in self.catalog.tiers},
                             "aliases": {a["name"]: f"{a['backend']}/{a['model']}" for a in self.catalog.aliases if a["tier"] is None},
@@ -1182,6 +1303,7 @@ def build_app(gw):
     r.add_get("/", h_root)
     r.add_get("/v1/maluos/health", h_health)
     r.add_get("/v1/maluos/status", h_status)
+    r.add_get("/v1/maluos/inference", h_inference)             # slice 3: this host's inference facts for its heartbeat
     r.add_get("/v1/maluos/whoami", h_whoami)
     r.add_get("/v1/maluos/routes", h_routes)
     r.add_post("/v1/maluos/reload", h_reload)
@@ -1569,6 +1691,12 @@ async def h_status(request):
         for s in st["schedulers"].values():
             s["jobs"] = [j for j in s["jobs"] if j["principal"] == caller.ref]
     return web.json_response(st)
+
+
+async def h_inference(request):
+    gw = request.app["gw"]
+    await gw.caller(request)
+    return web.json_response(ESTATE.facts(gw))
 
 
 def overlay_address():

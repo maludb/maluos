@@ -34,6 +34,8 @@ class RemoteBackend(OllamaBackend):
                 h["X-MaluOS-Max-Wait"] = str(call.hints["max_wait"])
             if call.hints.get("sensitivity"):
                 h["X-MaluOS-Sensitivity"] = call.hints["sensitivity"]
+            if call.hints.get("envelope"):
+                h["X-MaluOS-Envelope"] = call.hints["envelope"]        # slice 3: a delegated task's envelope id, ledgered on the serving host too
         if self.node_id:
             h["X-MaluOS-Origin-Node"] = self.node_id
             h["X-MaluOS-Origin-Node-Name"] = self.node_name or ""

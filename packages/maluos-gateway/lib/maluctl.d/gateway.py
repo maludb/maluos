@@ -1,7 +1,7 @@
 """maluctl gateway: the MaluOS inference gateway.
 
   maluctl gateway status | queue | routes [--limit N] | backends | whoami
-  maluctl gateway chat "PROMPT" [--model NAME] [--class C] [--stream]   quick test call
+  maluctl gateway chat "PROMPT" [--model NAME] [--class C] [--stream] [--prefer local|cloud|estate] [--sensitivity S]   quick test call
   maluctl gateway catalog                                tiers, aliases, classes, policies
   maluctl gateway backend add NAME --kind ollama_local|ollama_cloud|anthropic|openai|openai_compat|mock|remote --endpoint URL
                     [--secret REF] [--models a,b] [--max-concurrent N] [--keep-alive 30m]
@@ -32,6 +32,9 @@
   maluctl gateway node status | queue | runs [--since-seq N] [--limit N] | models | cancel ID | priority ID CLASS | pause [LANE] | resume [LANE]
                                                      the node API (/node/v1) as an operator; a manager uses it with a node key
   maluctl gateway jobs [--status S] | job ID | job cancel ID    async jobs (yours; every job as root)
+  maluctl gateway estate [--json]                   the backends the estate publishes to this host (its rungs estate:NAME), the peers
+                                                     allowed to call it, the entitlements (Phase 13 slice 3; the directory replaces pairing by hand)
+  maluctl gateway estate refresh                     re-read endpoints.inference and the peers now (maluctl estate|office inference --refresh)
   maluctl gateway reload
 
 Callers use the gateway at the Unix socket /run/maluos/gateway.sock with any
@@ -140,6 +143,10 @@ def run(a):
             print(f"backend:     {b['name']}  {b['kind']}  {b['endpoint']}  {h}" + (f"  v{b['version']}" if b.get("version") else "")
                   + (f"  key: vault {b['secret_ref']}" if b.get("secret_ref") else "")
                   + (f"  loaded: {', '.join(m['name'] for m in b['loaded'])}" if b.get("loaded") else "") + ("" if b["enabled"] else "  (disabled)"))
+        est = st.get("estate") or {}
+        if est.get("backends") or est.get("self"):
+            print(f"estate:      {est.get('self') or '-'}  {len(est.get('backends') or [])} backend(s) from the directory  {est.get('peers', 0)} peer(s) may call here"
+                  + (f"  editions {', '.join(est['editions'])}" if est.get("editions") else "") + ("  placement by the kernel" if est.get("place") else ""))
         for name, s in st["schedulers"].items():
             print(f"scheduler:   {name}  capacity {s['capacity']}  resident {s['resident'] or '-'}  " +
                   "  ".join(f"{c}: {v['queued']} queued, wait {v['expected_wait_s']}s" for c, v in s["classes"].items()))
@@ -149,6 +156,8 @@ def run(a):
         return 0
     if cmd == "share":
         return share(a)
+    if cmd == "estate":
+        return estate_cmd(a)
     if cmd == "queue":
         st = api("GET", "/v1/maluos/status")
         rows = [dict(j, backend=n) for n, s in st["schedulers"].items() for j in s["jobs"]]
@@ -173,10 +182,11 @@ def run(a):
     if cmd == "chat":
         prompt = a.pop(0) if a and not a[0].startswith("--") else "Say hello in one sentence."
         model = opt(a, "--model", "standard"); cls = opt(a, "--class"); stream = opt(a, "--stream", flag=True)
+        prefer = opt(a, "--prefer"); sens = opt(a, "--sensitivity"); env = opt(a, "--envelope")
         body = {"model": model, "messages": [{"role": "user", "content": prompt}], "stream": stream}
         if stream:
             body["stream_options"] = {"include_usage": True}
-        headers = {"X-MaluOS-Class": cls} if cls else {}
+        headers = {k: v for k, v in (("X-MaluOS-Class", cls), ("X-MaluOS-Prefer", prefer), ("X-MaluOS-Sensitivity", sens), ("X-MaluOS-Envelope", env)) if v}
         if not stream:
             r = api("POST", "/v1/chat/completions", body, headers=headers)
             print(r["choices"][0]["message"]["content"])
@@ -417,8 +427,10 @@ def share(a):
         st = api("GET", "/v1/maluos/status"); sh = st.get("share") or {}; ex = st.get("exposed") or {}
         rule = {"always": "a server: shares always", "opt-in": "a dedicated desktop: shares when its owner opts in",
                 "opt-in-idle": "a laptop: shares when its owner opts in, and only while idle"}.get(sh.get("rule"), sh.get("rule"))
-        print(f"share:       {'on' if sh.get('enabled') else 'off'}" + ("" if sh.get("configured") else " (by the chassis rule)")
+        idle = sh.get("idle") or {}
+        print(f"share:       {'on' if sh.get('configured_enabled', sh.get('enabled')) else 'off'}" + ("" if sh.get("configured") else " (by the chassis rule)")
               + f"  contribution {sh.get('contribution')}  chassis {sh.get('chassis')} ({rule})"
+              + ((f"  idle rule: contributing since {idle.get('since')}" if idle.get("idle") else "  idle rule: not contributing now (the person is at the keyboard, or no session)") if sh.get("contribution") == "idle" and sh.get("configured_enabled", sh.get("enabled")) else "")
               + (f"  exposed on {ex.get('host')}:{ex.get('port')}" if ex.get("network") else f"  tcp on {ex.get('host')}:{ex.get('port')} only (not the network)" if ex.get("enabled")
                  else "  not exposed (sudo maluctl gateway expose)"))
         return 0
@@ -460,6 +472,52 @@ def share(a):
 
 
 GATEWAY_USER = os.environ.get("MALUOS_GATEWAY_USER", "maluos-gateway")
+
+
+def estate_cmd(a):
+    """Phase 13 slice 3: the estate's backends as this host's rungs, the peers, the entitlements; refresh re-reads the directory."""
+    sub = a.pop(0) if a and not a[0].startswith("--") else "status"
+    if sub == "refresh":
+        import subprocess
+        estate_conf = os.environ.get("MALUOS_ESTATE_CONF", "/etc/maluos/estate.yaml"); office_conf = os.environ.get("MALUOS_OFFICE_CONF", "/etc/maluos/office.yaml")
+        if os.path.exists(estate_conf):
+            r = subprocess.run([sys.executable, os.environ.get("MALUCTL_BIN", "/usr/bin/maluctl"), "estate", "inference", "--refresh"], capture_output=True, text=True)
+        elif os.path.exists(office_conf):
+            r = subprocess.run([sys.executable, os.environ.get("MALUCTL_BIN", "/usr/bin/maluctl"), "office", "inference", "--refresh"], capture_output=True, text=True)
+        else:
+            raise GwError("this host is neither a node of an estate (maluctl estate join) nor an enrolled desk (maluctl office enroll)")
+        if r.returncode != 0:
+            raise GwError((r.stderr or r.stdout).strip()[-300:])
+        try:
+            api("POST", "/v1/maluos/reload")
+        except GwError:
+            pass            # not an operator: the gateway re-reads the cache within its catalogue reload interval anyway
+        print((r.stdout or "").strip() or "refreshed")
+        return 0
+    if sub not in ("status",):
+        raise GwError("estate: status (default) or refresh")
+    as_json = opt(a, "--json", flag=True)
+    st = api("GET", "/v1/maluos/status"); est = st.get("estate") or {}
+    if as_json:
+        print(json.dumps(est, indent=1, default=str)); return 0
+    if not est.get("self") and not est.get("backends"):
+        print("no estate: this host is not a node of an estate or an enrolled desk, or its directory cache is empty (maluctl gateway estate refresh)"); return 1
+    print(f"estate:      this host is {est.get('self') or '?'}  (the {est.get('source')}'s cache, version {est.get('version')}, fetched {est.get('fetched_at') or '?'})"
+          + (f"  editions {', '.join(est['editions'])}" if est.get("editions") else "  Community (each gateway ranks the estate's rungs itself)")
+          + ("  placement by the kernel" if est.get("place") else ""))
+    for b in est.get("backends") or []:
+        h = "healthy" if b["healthy"] else ("down: " + (b.get("error") or "?")) if b["healthy"] is False else "unchecked"
+        if not b.get("shared"):
+            h = "not_shared"
+        w = b.get("directory_wait_s") or {}
+        print(f"backend:     {b['name']}  {b.get('node') or '?'}  {b['endpoint']}  {h}  models {', '.join(b.get('models') or []) or '-'}"
+              + (f"  wait " + " ".join(f"{c} {v}s" for c, v in w.items()) if w else "") + f"  ceiling {b.get('classification_max')}"
+              + (f"  class<={b['class_max']}" if b.get("class_max") else "") + (f"  priority {b['priority']}" if b.get("priority") else "")
+              + (f"  contribution {b['contribution']}" if b.get("contribution") == "idle" else "") + ("" if b.get("paired") else "  (no key yet)"))
+    if not est.get("backends"):
+        print("backend:     none published to this host (no shared GPU host with an overlay address, or the policy excludes this host)")
+    print(f"peers:       {est.get('peers', 0)} member(s) may call this host with their inference key (version {est.get('peers_version')})")
+    return 0
 
 
 def _vault():

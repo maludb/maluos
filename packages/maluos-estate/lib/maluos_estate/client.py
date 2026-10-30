@@ -23,6 +23,7 @@ PROVISIONED = os.environ.get("MALUOS_PROVISIONED", "/var/lib/maluos/firstboot/do
 USER = os.environ.get("MALUOS_ESTATE_USER", "maluos-estate")
 SECRET_TOKEN, SECRET_KEY = "estate-node-token", "estate-node-key"
 SECRET_OVERLAY = "estate-overlay-key"      # the WireGuard private key (slice 1b), beside the token
+SECRET_INFERENCE = "estate-inference-key"  # the estate's inference credential (slice 3), beside the token; the gateway holds a `use` grant
 OFFICE_SECRET = "office-desk-token"        # the desk's token (maluos-desk), in the owner's compartment
 KINDS = ("server", "inference")
 
@@ -173,9 +174,9 @@ def endpoint(conf, name):
     return (conf.get("endpoints") or {}).get(name) or conf["url"].rstrip("/") + f"/api/v1/estate/{name}"
 
 
-def heartbeat(conf, tok, presence="online", report=None, timeout=20, agents=None):
-    """One heartbeat: presence, facts, (when given) the report and (slice 2) the agents this node registers.
-    The outcome in the shape state.json keeps."""
+def heartbeat(conf, tok, presence="online", report=None, timeout=20, agents=None, inference=None):
+    """One heartbeat: presence, facts, (when given) the report, (slice 2) the agents this node registers and (slice 3) the
+    gateway's inference facts. The outcome in the shape state.json keeps."""
     res = {"ts": utc(), "ok": False, "presence": presence, "revoked": False, "error": None, "node": None, "report_sent": report is not None}
     try:
         f = facts()
@@ -185,10 +186,13 @@ def heartbeat(conf, tok, presence="online", report=None, timeout=20, agents=None
             body["report"] = report
         if agents is not None:
             body["agents"] = agents
+        if inference is not None:
+            body["inference"] = inference
         st, r = http("POST", endpoint(conf, "heartbeat"), body, token=tok, timeout=timeout)
         if st == 200:
             res.update(ok=True, node=r.get("node"), office=r.get("office"), heartbeat_s=r.get("heartbeat_s"), report_s=r.get("report_s"),
-                       overlay_changed=bool(r.get("overlay_changed")), agents_registered=r.get("agents_registered"))
+                       overlay_changed=bool(r.get("overlay_changed")), agents_registered=r.get("agents_registered"),
+                       inference_changed=bool(r.get("inference_changed")), peers_changed=bool(r.get("peers_changed")), editions=r.get("editions"))
         elif st in (401, 410):
             res.update(revoked=True, error=f"{st} {r.get('error') or ''}: {r.get('message') or 'the office no longer knows this node'}")
         else:
@@ -307,3 +311,98 @@ def actions(conf_or_url, tok, action_id=None, timeout=15):
 def allowed_actions(conf):
     a = (conf.get("actions") or {}).get("allow")
     return list(a) if isinstance(a, list) else list(DEFAULT_ACTIONS)
+
+
+# -- Phase 13 slice 3: shared inference (docs/phase13-slice3-inference.md): the backends this member may use, the peers
+# allowed to call it, its own facts, the caches the gateway reads
+INFERENCE_CACHE = os.environ.get("MALUOS_ESTATE_INFERENCE", "/run/maluos/estate/inference.json")
+PEERS_CACHE = os.environ.get("MALUOS_ESTATE_PEERS", "/run/maluos/estate/peers.json")
+GATEWAY_SOCKET = os.environ.get("MALUOS_GATEWAY_SOCKET", "/run/maluos/gateway.sock")
+INFERENCE_REFRESH_S = 3600
+PEERS_REFRESH_S = 300
+
+
+def inference(conf_or_url, tok, timeout=15):
+    """GET endpoints.inference: the backends the caller may use (a node or a desk token)."""
+    url = conf_or_url if isinstance(conf_or_url, str) else endpoint(conf_or_url, "inference")
+    return http("GET", url, token=tok, timeout=timeout)
+
+
+def inference_peers(conf_or_url, tok, timeout=15):
+    """GET endpoints.inference_peers: the members allowed to call this host, with their keys' hashes."""
+    url = conf_or_url if isinstance(conf_or_url, str) else ((conf_or_url.get("endpoints") or {}).get("inference_peers") or conf_or_url["url"].rstrip("/") + "/api/v1/estate/inference/peers")
+    return http("GET", url, token=tok, timeout=timeout)
+
+
+def inference_key_new(conf_or_url, tok, timeout=15):
+    """POST endpoints.inference/key: a new inference key for the caller, shown once (a member enrolled before slice 3, or a rotation)."""
+    url = conf_or_url if isinstance(conf_or_url, str) else endpoint(conf_or_url, "inference")
+    return http("POST", url.rstrip("/") + "/key", {"surface": SURFACE}, token=tok, timeout=timeout)
+
+
+def gateway_inference(timeout=5):
+    """This host's inference facts from its gateway (GET /v1/maluos/inference over the socket), or None without a gateway."""
+    if not os.path.exists(GATEWAY_SOCKET):
+        return None
+    import http.client, socket as _socket
+
+    class _Conn(http.client.HTTPConnection):
+        def __init__(self, path):
+            super().__init__("maluos-gateway", timeout=timeout); self._path = path
+
+        def connect(self):
+            s = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM); s.settimeout(timeout); s.connect(self._path); self.sock = s
+    try:
+        c = _Conn(GATEWAY_SOCKET); c.request("GET", "/v1/maluos/inference"); r = c.getresponse(); raw = r.read(); c.close()
+        if r.status != 200:
+            return None
+        d = json.loads(raw)
+        return d if isinstance(d, dict) else None
+    except Exception:
+        return None
+
+
+def write_cache(path, answer, secret_ref, principal, source):
+    """The gateway reads these: the directory's answer plus the vault ref of this host's inference key. Atomic, world-readable."""
+    d = {k: answer.get(k) for k in ("ok", "fetched_at", "self", "backends", "peers", "editions", "place", "lease_s", "refresh_s", "version") if k in answer}
+    d.update({"secret": secret_ref, "principal": principal, "source": source, "written_at": utc()})
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = f"{path}.tmp.{os.getpid()}"
+    with open(tmp, "w") as fh:
+        json.dump(d, fh)
+    os.chmod(tmp, 0o644); os.replace(tmp, path)
+    return d
+
+
+def read_cache(path):
+    try:
+        with open(path) as fh:
+            d = json.load(fh)
+        return d if isinstance(d, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+def drop_caches(*paths):
+    for p in paths or (INFERENCE_CACHE, PEERS_CACHE):
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+
+
+def refresh_inference(conf, tok, which=("backends", "peers"), timeout=15):
+    """Re-read the directory's backends and/or the peers for a node and write the caches. Returns {name: (status, answer)}."""
+    out = {}
+    secret_ref = f"{conf.get('principal')}/{SECRET_INFERENCE}" if conf.get("principal") else SECRET_INFERENCE
+    if "backends" in which:
+        st, r = inference(conf, tok, timeout=timeout)
+        if st == 200:
+            write_cache(INFERENCE_CACHE, r, secret_ref, conf.get("principal"), "node")
+        out["backends"] = (st, r)
+    if "peers" in which:
+        st, r = inference_peers(conf, tok, timeout=timeout)
+        if st == 200:
+            write_cache(PEERS_CACHE, r, secret_ref, conf.get("principal"), "node")
+        out["peers"] = (st, r)
+    return out

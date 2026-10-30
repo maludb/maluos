@@ -44,6 +44,7 @@ struct _GsmMaluosNetworkView
 
   GPtrArray *paired_rows;
   GPtrArray *estate_rows;    /* one row per node of the estate, rebuilt when the set of ids changes */
+  GPtrArray *backend_rows;   /* one row per backend the estate's directory gave this gateway (Phase 13 slice 3), in the paired group */
 
   GsmMaluosSession *session;
   gulong            state_id;
@@ -185,7 +186,123 @@ apply_paired (GsmMaluosNetworkView *self, JsonArray *paired)
       set_subtitle (((NamedRow *) g_ptr_array_index (self->paired_rows, i))->row, sub);
       g_free (sub);
     }
-  gtk_widget_set_visible (self->paired_empty_row, n == 0);
+  gtk_widget_set_visible (self->paired_empty_row, n == 0 && self->backend_rows->len == 0);
+}
+
+/* ---- the estate's backends (Phase 13 slice 3): one row per rung the directory gave this gateway, from gateway.estate in the state */
+
+static char *
+estate_backend_subtitle (JsonObject *b)
+{
+  GString *s = g_string_new (NULL);
+  const char *endpoint = js (b, "endpoint");
+  const char *error = js (b, "error");
+  const char *node = js (b, "node");
+  const char *ceiling = js (b, "classification_max");
+  const char *class_max = js (b, "class_max");
+  const char *contribution = js (b, "contribution");
+  JsonArray *models = ja (b, "models");
+  JsonObject *wait = jo (b, "wait");
+  double priority = 0;
+
+  if (node)
+    join (s, " · ", node);
+  if (endpoint)
+    join (s, " · ", endpoint);
+  if (!jb (b, "shared"))
+    join (s, " · ", _("not shared now"));
+  else if (jb (b, "healthy"))
+    join (s, " · ", _("reachable"));
+  else
+    {
+      join (s, " · ", _("unreachable"));
+      if (error)
+        {
+          g_string_append (s, ": ");
+          g_string_append (s, error);
+        }
+    }
+  guint nm = models ? json_array_get_length (models) : 0;
+  if (nm)
+    {
+      char *t = g_strdup_printf (ngettext ("%u model", "%u models", nm), nm);
+      join (s, " · ", t);
+      g_free (t);
+      g_string_append (s, ": ");
+      for (guint i = 0; i < nm && i < 6; i++)
+        {
+          const char *m = json_array_get_string_element (models, i);
+          if (i)
+            g_string_append (s, ", ");
+          g_string_append (s, m ? m : "?");
+        }
+      if (nm > 6)
+        g_string_append (s, ", …");
+    }
+  if (wait)
+    {
+      double w = 0;
+      if (jd (wait, "interactive", &w))
+        {
+          char *t = g_strdup_printf (_("wait %.1f s"), w);
+          join (s, " · ", t);
+          g_free (t);
+        }
+    }
+  if (ceiling)
+    {
+      char *t = g_strdup_printf (_("ceiling %s"), ceiling);
+      join (s, " · ", t);
+      g_free (t);
+    }
+  if (class_max)
+    {
+      char *t = g_strdup_printf (_("class ≤ %s"), class_max);
+      join (s, " · ", t);
+      g_free (t);
+    }
+  jd (b, "priority", &priority);
+  if (priority != 0)
+    {
+      char *t = g_strdup_printf (_("priority %.0f"), priority);
+      join (s, " · ", t);
+      g_free (t);
+    }
+  if (contribution && g_strcmp0 (contribution, "idle") == 0)
+    join (s, " · ", _("shares while idle"));
+  return g_string_free (s, FALSE);
+}
+
+static void
+apply_estate_backends (GsmMaluosNetworkView *self, JsonArray *backends)
+{
+  guint n = backends ? json_array_get_length (backends) : 0;
+  gboolean same = (n == self->backend_rows->len);
+  for (guint i = 0; same && i < n; i++)
+    same = g_strcmp0 (js (json_array_get_object_element (backends, i), "name"), ((NamedRow *) g_ptr_array_index (self->backend_rows, i))->name) == 0;
+  if (!same)
+    {
+      for (guint i = 0; i < self->backend_rows->len; i++)
+        adw_preferences_group_remove (ADW_PREFERENCES_GROUP (self->paired_group), ((NamedRow *) g_ptr_array_index (self->backend_rows, i))->row);
+      g_ptr_array_set_size (self->backend_rows, 0);
+      for (guint i = 0; i < n; i++)
+        {
+          JsonObject *b = json_array_get_object_element (backends, i);
+          NamedRow *r = g_new0 (NamedRow, 1);
+          r->name = g_strdup (js (b, "name") ? js (b, "name") : "?");
+          r->row = action_row (r->name, NULL);
+          gtk_widget_add_css_class (r->row, "property");
+          adw_preferences_group_add (ADW_PREFERENCES_GROUP (self->paired_group), r->row);
+          g_ptr_array_add (self->backend_rows, r);
+        }
+    }
+  for (guint i = 0; i < n; i++)
+    {
+      char *sub = estate_backend_subtitle (json_array_get_object_element (backends, i));
+      set_subtitle (((NamedRow *) g_ptr_array_index (self->backend_rows, i))->row, sub);
+      g_free (sub);
+    }
+  gtk_widget_set_visible (self->paired_empty_row, n == 0 && self->paired_rows->len == 0);
 }
 
 /* ---- the estate (Phase 13 slice 1): one row per node, from office.estate in the session's state */
@@ -498,6 +615,21 @@ apply_state (GsmMaluosNetworkView *self, JsonObject *root)
       }
   }
 
+  /* the estate's backends (Phase 13 slice 3): the rungs the directory gave this gateway, for everyone who sees the gateway */
+  {
+    JsonObject *est = gateway ? jo (gateway, "estate") : NULL;
+    JsonArray *backends = est ? ja (est, "backends") : NULL;
+    guint nb = backends ? json_array_get_length (backends) : 0;
+    apply_estate_backends (self, backends);
+    if (nb)
+      {
+        JsonArray *eds = ja (est, "editions");
+        g_string_append_printf (summary, ", %u estate backend%s", nb, nb == 1 ? "" : "s");
+        if (eds && json_array_get_length (eds))
+          g_string_append (summary, " (scheduler)");
+      }
+  }
+
   gsm_maluos_session_set_summary (self->session, "network", summary->str);
   g_string_free (summary, TRUE);
 }
@@ -549,6 +681,11 @@ gsm_maluos_network_view_dispose (GObject *object)
       g_ptr_array_free (self->estate_rows, TRUE);
       self->estate_rows = NULL;
     }
+  if (self->backend_rows)
+    {
+      g_ptr_array_free (self->backend_rows, TRUE);
+      self->backend_rows = NULL;
+    }
   g_clear_pointer (&self->box, gtk_widget_unparent);
 
   G_OBJECT_CLASS (gsm_maluos_network_view_parent_class)->dispose (object);
@@ -569,6 +706,7 @@ gsm_maluos_network_view_init (GsmMaluosNetworkView *self)
 {
   self->paired_rows = g_ptr_array_new_with_free_func (named_row_free);
   self->estate_rows = g_ptr_array_new_with_free_func (named_row_free);
+  self->backend_rows = g_ptr_array_new_with_free_func (named_row_free);
   self->session = gsm_maluos_session_get ();
 
   self->box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
@@ -606,7 +744,7 @@ gsm_maluos_network_view_init (GsmMaluosNetworkView *self)
   self->paired_group = adw_preferences_group_new ();
   adw_preferences_group_set_title (ADW_PREFERENCES_GROUP (self->paired_group), _("Paired Nodes"));
   adw_preferences_group_set_description (ADW_PREFERENCES_GROUP (self->paired_group),
-                                         _("Shared MaluOS GPU hosts this computer reaches by hand: remote backends of its gateway."));
+                                         _("Shared MaluOS GPU hosts this computer reaches: the estate's directory gives it one rung per host it may use (estate:NAME, over the overlay with its own inference key), and a host paired by hand is a remote backend."));
   adw_preferences_page_add (ADW_PREFERENCES_PAGE (self->page), ADW_PREFERENCES_GROUP (self->paired_group));
   self->paired_empty_row = action_row (_("No node paired"),
                                        _("sudo maluctl gateway backend add NAME URL --key KEY pairs a shared GPU host; its models are then --model NAME/…"));

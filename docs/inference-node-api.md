@@ -28,7 +28,14 @@ the same table.
   On the MaluOS gateway both are rows of `maluos_token` with a `kind`,
   issued by `maluctl gateway key issue` or by `POST /keys`; a key is shown
   once and only its SHA-256 is kept. Keys are the only wall: there is no
-  user, no session on the node API.
+  user, no session on the node API. Inside an estate (Phase 13 slice 3,
+  docs/phase13-slice3-inference.md) a third credential opens the faces: a
+  member's **estate inference key**, minted by the kernel at join or enrol
+  and verified by the serving gateway against the peers the kernel
+  publishes for it (their keys' SHA-256 and ceilings), never issued by
+  hand; the caller is the principal `node:<ref>` here, served under the
+  kernel's class and classification ceilings and never with this host's
+  cloud credit.
 - **Envelope.** Every answer carries `node_id` (a UUID made at first start,
   also in the `X-Node-Id` header), `node_name`, `api_version` (`1`) and
   `clock` (the node's UTC time, so the manager sees skew). Times are UTC
@@ -161,7 +168,11 @@ call id), `X-Node-Lane` (the backend), `X-Node-Served-Model`,
 
 ## 6. Pairing by hand: a node as another gateway's backend
 
-A desk's gateway adds a shared GPU host as a backend of kind `remote`:
+A desk's gateway adds a shared GPU host as a backend of kind `remote`.
+Inside an estate this is no longer done by hand: the directory publishes
+the backends each member may use and the gateway makes a rung of kind
+`estate` for each (slice 3); pairing by hand remains for a host outside
+the estate or off its overlay.
 
 ```
 # on the GPU host (a server shares by its chassis rule; a desktop opts in)

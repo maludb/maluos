@@ -56,10 +56,12 @@ if ($oerr === 'hub_exists') {
     $pdo->rollBack();
     api_error('invalid', 'overlay_hub.endpoint is host:port.', 400);
 }
+$infKey = inference_key_mint($pdo, (int) $made['node']['id']);      // db/191: the estate's inference credential, shown once
+inference_mark_seen($pdo, (int) $made['node']['id']);
 $node = node_row($pdo, (int) $made['node']['id']);
 log_activity($pdo, 'node.join', 'location', (int) $node['id'], ['source' => 'node',
     'after' => ['name' => $node['name'], 'kind' => $node['kind'], 'hostname' => $node['hostname'], 'app_version' => $node['app_version'], 'principal' => $principal]]);
 $pdo->commit();
 
-api_json(node_answer($pdo, $node) + ['token' => $made['token'],
+api_json(node_answer($pdo, $node) + ['token' => $made['token'], 'inference_key' => $infKey,
     'enrolled_by' => ['member_id' => (int) $member['id'], 'email' => (string) $member['email'], 'display_name' => (string) $member['display_name']]], 201);

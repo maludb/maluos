@@ -118,7 +118,8 @@ maluctl office estate inference                          # (operator) every back
    applies priorities (interactive before batch, an operator's rule before
    the default). A Community gateway never calls `place`; a `scheduler`
    gateway asks `place` first and falls back to its own ranking when the
-   kernel does not answer within 300 ms. The entitlement is a row the
+   kernel does not answer within the placement timeout (1.5 s by default,
+   `MALUOS_PLACE_TIMEOUT_S`). The entitlement is a row the
    kernel publishes in the enrolment answer (`editions`), read by the
    gateway; nothing else differs in the packages.
 8. **One request id across the estate.** The forwarding gateway's call id
@@ -180,7 +181,7 @@ maluctl office estate inference                          # (operator) every back
   side accepts estate peers' keys (`node:<ref>` principals, the peers
   cache `/run/maluos/estate/peers.json`), applies the kernel's ceiling,
   refuses `classification`; the idle file in `share_state()`; the
-  `scheduler` client (`place` with the 300 ms fallback, the lease); the
+  `scheduler` client (`place` with the timed fallback, the lease); the
   Queue tab's remote runs with their origin.
 - **maluos-estate** (0.4.0): the inference facts in the heartbeat (from
   the gateway's status), `inference_changed` → `maluctl gateway estate
@@ -223,6 +224,155 @@ maluctl office estate inference                          # (operator) every back
    the node's peers cache no longer lists the desk.
 
 The three-machine proof then runs step 3 on real hosts.
+
+## Status
+
+**Both halves built 2026-10-29** on the spec's recommendations (the owner's
+word: "using the spec's recommendations" for the four decisions of the
+Effort section: desks get an inference key at enrol; a desk's contribution
+is never used by other desks; the idle rule's thresholds as decision 5
+writes them; the `scheduler` boundary exactly as decision 7 draws it). The
+image chain and the boot tests of both profiles follow; the result is
+appended under "What the image chain found" at the end of this section.
+
+- The kernel half (maludb-os-core d7ebcfa, vendored as maludb-os-core
+  2026.10.29maluos1; `docs/build-specs/estate-inference.md` there): db/191
+  (`estate_inference` per member, `estate_inference_policy`,
+  `estate_inference_settings` with the two versions and the `scheduler`
+  flag, `locations.inference_key_hash`); the inference key minted at join
+  and enrol, shown once; the facts on both heartbeats with
+  `inference_changed` and `peers_changed`; `GET …/inference`,
+  `GET …/inference/peers`, `POST …/inference/key`, `POST
+  …/inference/place`; the policy's precedence; Settings → Desks gains the
+  Shared inference section (the backends, the rules editor, the
+  entitlement switch); proof `bin/test_estate_inference.php` (58 checks).
+- The host half: maluos-gateway 0.6.0 (`maluos_gateway.estate`: the
+  `estate` backend kind from the directory's cache, the peers cache on the
+  serving side, the ceilings, the idle rule's refusal with `retry_after`,
+  the scheduler client with the timed fallback, the envelope on
+  forwarded calls, `GET /v1/maluos/inference`, `maluctl gateway estate
+  [refresh]`, `chat --prefer estate`), maluos-estate 0.4.0 (the facts on
+  the heartbeat, the caches under `/run/maluos/estate`, the key at join
+  with a `use` grant to the gateway, `maluctl estate inference`, the mock's
+  whole contract), maluos-desk 0.7.0 (the key at enrol, the facts on the
+  desk heartbeat, the caches under `/run/maluos/office`, `maluctl office
+  inference [--all] [--new-key]`), maluos-session 0.11.0 (the idle rule
+  measured every 30 s from Mutter's idle monitor, UPower and MPRIS; the
+  mark `/run/maluos/session/idle`; `host.idle`; `gateway.estate` for the
+  Network tab), maluos-firstboot 0.1.12 (`maluos_gpu.share_state` applies
+  the idle rule), maluos-system-monitor 49.1+maluos.5 (the estate's
+  backends in the Network tab's Paired Nodes group).
+- Tests: tests/gpu-test.py (the idle rule in `share_state`),
+  tests/gateway-local-test.sh (an estate rung to the host's own listener
+  from a hand-written directory cache: the forwarding loop, both ledger
+  rows, the envelope, the tier, the ceilings, cloud never, the class cap,
+  `not_shared` with the idle mark, placement against a fake kernel:
+  placed, ranked on a slow answer, plain in Community; 188 checks in all),
+  tests/desk-local-test.sh (the mock's contract end to end with a fake
+  gateway socket: the facts on both heartbeats, a fake GPU host published,
+  the caches, the policy flags, the entitlement, placement, key
+  rotation; 133 checks in all), tests/qcow2-boot-test.sh (the seven steps
+  of the test plan above: the node side on both profiles with a fake peer
+  calling over the overlay; the loop on one machine on the desktop, where
+  the host is both the desk and the node).
+- docs/phase13-three-machine-proof.md: the runbook of D7 for the owner's
+  three machines (office, gpu, desk), slices 1 to 3 on real hosts.
+
+Where the build departs from the text above, and why:
+
+1. **The inference key is a bearer secret and the peers answer carries its
+   SHA-256**, not a public key: the host half's own choice above (a
+   dedicated key beside the node token, so the token never leaves the
+   vault for a network call) keeps G2's transport as it is; the hash is
+   enough for the serving side and leaks nothing. `place` authenticates
+   with that key too, since the gateway holds it already.
+2. **The entitlement is a flag on the kernel's settings row**, flipped
+   under Settings → Desks by a super-admin, until Phase 9's contracts
+   service exists; the join and enrol answers and `endpoints.inference`
+   publish it as `editions`, and the member's enrolment file keeps it.
+   maluos-firstboot's provisioning state is not touched.
+3. **The caches, not a socket**: the enrolment side (the daemon for a
+   node, `maluctl office` for a desk) writes the directory's answer to
+   `/run/maluos/estate/inference.json` and `peers.json` (a desk under
+   `/run/maluos/office`, trusted only when root or the owner wrote it);
+   the gateway reads them at every catalogue reload. A host that is both
+   a node and a desk holds both views and the gateway merges them, each
+   rung with its own membership's key; the boot test's one-VM loop rests
+   on that.
+4. **The estate rung dials the overlay address**, not `NAME.internal`:
+   the same thing without a hosts-block race; the name stays on the rung
+   for the eye.
+5. **Settings → Desks, not an Estate page** in the kernel: the Inference
+   section joins the overlay and delegation sections there.
+6. **`maluctl gateway estate refresh`** runs `maluctl estate inference
+   --refresh` or `maluctl office inference --refresh` (whichever
+   membership the host has), then a reload: the gateway itself holds no
+   office token.
+7. **The idle rule's measurement lives in the session service** (Mutter's
+   idle time, UPower's lid and battery, MPRIS), not in the shell
+   extension; a server session has none, so a server's `--when idle`
+   stays off until a session says idle. The boot test proves the mark on
+   the desktop, where the session has had no input since login.
+8. **`X-MaluOS-Prefer: estate` is a preference**, like `cloud` and
+   `local`: with no eligible estate rung the call takes the local or cloud
+   rung; `maluctl gateway chat --prefer estate` says so in the route.
+9. **The kernel's placement call has its own client session** in the
+   gateway: the shared session stalled its first request to a new host
+   for the whole placement timeout (found by tests/gateway-local-test.sh), and the
+   kernel's traffic should never queue behind a backend's pool.
+
+### What the image chain found (2026-10-29, the desktop UEFI boot test, first run)
+
+The first run of the chain failed nine slice 3 checks on the desktop, none
+of them in the kernel. Fixed before the second run:
+
+- **The placement timeout was 300 ms.** On the TCG test VM the mock
+  office answered too late and every placed call fell back to the
+  gateway's own ranking. The default is now 1.5 s
+  (`MALUOS_PLACE_TIMEOUT_S`): the kernel is a PHP request over the
+  overlay, and a model call takes seconds anyway; a late or missing answer
+  still falls back to ranking.
+- **The session counted the estate's rungs as paired nodes.** The session's
+  `node.paired` is the gateway's remote backends; the estate rungs are
+  remote too, so the Network tab's summary said "2 paired". They are
+  `gateway.estate.backends` now and only there.
+- **The idle mark flapped under load.** The session's idle thread read the
+  idle time from Mutter with a 3 s D-Bus timeout; while gnome-shell was
+  busy with the GUI self-tests the read timed out, the thread took that
+  for input and removed the mark, so the serving side refused
+  `not_shared` in the middle of the loop. A failed measurement now holds
+  the last decision (the lid, the battery and the media still count), the
+  timeout is 10 s, and the test prints the idle journal for evidence.
+- **Placement on a host with two memberships asked with the wrong key**
+  (second run). A host that is both a desk and a node holds two inference
+  keys and two views: the desk may use the servers, the node may use the
+  desk's contribution. The gateway asked the kernel to place with the
+  first key it found (the node's), the kernel answered the desk's own
+  contribution, and the call went to that rung instead of the server's.
+  The gateway now asks as the membership whose rung ranks first and lets
+  the kernel choose among that membership's rungs only; unhealthy rungs
+  rank last, so a placement is never made for a rung the gateway would
+  skip.
+- **The test itself**: the node's facts are read after the listener is up
+  (the facts carry the listener's port, which slice 2 had left at 11436);
+  the session's view of the share switch is polled (it reads the gateway
+  every 20 s); the desktop loop starts with the switch on `--when always`
+  and tests the idle rule explicitly in its step 3; both caches (the
+  node's and the desk's, one host) are refreshed when the entitlement
+  flips; the restricted check reads the ledger's route as the gateway
+  suite does (`--prefer estate` is a preference: the person's own egress
+  policy skips the rung first and the call is served locally; with egress
+  widened the kernel's ceiling skips it as `classification`).
+
+The third run left one failure, a race in the test (the idle mark removed
+by hand stands for input, but the session has seen none and puts it back
+within its 30 s poll; the check now tries three times). The fourth run,
+both UEFI boot tests on the images built at 23:20 (the final packages),
+passed on 2026-10-30: desktop 389 checks, server 191 checks, the slice 3
+steps of both profiles among them. The System Monitor's local suite gained
+a case with two estate backends (one not shared, the scheduler on), and
+lintian is clean on the seven packages apart from a pre-existing override
+in the vendored kernel package.
 
 ## Deferred
 

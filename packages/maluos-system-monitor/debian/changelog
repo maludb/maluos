@@ -1,3 +1,13 @@
+maluos-system-monitor (49.1+maluos.5) resolute; urgency=medium
+
+  * Phase 13 slice 3 (docs/phase13-slice3-inference.md): the MaluOS
+    Network tab's Paired Nodes group also lists the backends the estate's
+    directory gave this gateway (estate:NAME, reachable or not, the models,
+    the wait, the ceilings, shares-while-idle), from gateway.estate in the
+    session's state; the self-test summary counts them.
+
+ -- Edward Honour <ed@maludb.org>  Thu, 29 Oct 2026 18:30:00 +0000
+
 maluos-system-monitor (49.1+maluos.4) resolute; urgency=medium
 
   * Phase 13 slice 1 (docs/phase13-slice1-nodes.md): the MaluOS Network

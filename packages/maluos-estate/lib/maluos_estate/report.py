@@ -246,7 +246,8 @@ def summary(rep):
     ag = rep.get("agents") or []
     lines.append(f"agents:   {len(ag)}" + (": " + ", ".join(f"{a['name']} {a['active']}" for a in ag) if ag else ""))
     g = rep.get("gateway")
-    lines.append("gateway:  none" if g is None else f"gateway:  {'ok' if g.get('ok') else 'DOWN'}  {g.get('version') or ''}  backends {sum(1 for b in g.get('backends') or [] if b.get('healthy'))}/{len(g.get('backends') or [])} healthy  queue {g.get('queue')}")
+    lines.append("gateway:  none" if g is None else f"gateway:  {'ok' if g.get('ok') else 'DOWN'}  {g.get('version') or ''}  backends {sum(1 for b in g.get('backends') or [] if b.get('healthy'))}/{len(g.get('backends') or [])} healthy  queue {g.get('queue')}"
+                 + (f"  share {'on' if g.get('share') else 'off'}" if g.get("share") is not None else ""))
     v = rep.get("vault")
     lines.append("vault:    none" if v is None else f"vault:    {'ok' if v.get('ok') else 'DOWN'}  {len(v.get('alerts') or [])} alert rows")
     u = rep.get("updates") or {}

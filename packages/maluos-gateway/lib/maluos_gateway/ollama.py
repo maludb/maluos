@@ -37,9 +37,10 @@ class OllamaBackend:
 
     @property
     def is_cloud(self):
-        return self.kind not in ("ollama_local", "mock", "remote")
+        return self.kind not in ("ollama_local", "mock", "remote", "estate")
 
     is_remote = False     # G2: a paired MaluOS node (remote.py); not the cloud, but data leaves the host
+    is_estate = False     # slice 3: a node the estate's directory published (estate.py), reached with this host's inference key
 
     cooldown_s = 60   # set from the gateway's health.cooldown_s
 

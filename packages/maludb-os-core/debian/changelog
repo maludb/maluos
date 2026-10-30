@@ -1,3 +1,16 @@
+maludb-os-core (2026.10.29maluos1) resolute; urgency=medium
+
+  * Kernel re-vendored at d7ebcfa (2026-10-29): shared inference across
+    the estate, the kernel half of Phase 13 slice 3 (db/191:
+    estate_inference facts per member, estate_inference_policy,
+    estate_inference_settings with the versions and the scheduler flag,
+    locations.inference_key_hash; the inference key minted at join and
+    enrol; GET /api/v1/estate/inference and /api/v1/desks/inference, the
+    peers, a new key, placement; Settings → Desks gains the Shared
+    inference section and the rules editor).
+
+ -- Edward Honour <ed@maludb.org>  Thu, 29 Oct 2026 18:40:00 +0000
+
 maludb-os-core (2026.10.28maluos2) resolute; urgency=medium
 
   * Kernel re-vendored at fa6e588 (2026-10-28): the agent directory and

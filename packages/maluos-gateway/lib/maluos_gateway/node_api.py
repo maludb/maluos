@@ -118,7 +118,8 @@ def queue_rows(gw):
                    "expected_wait_ms": int(sch.expected_wait(j["class"], j["model"]) * 1000) if j["state"] == "queued" else 0}
             if c:
                 row.update({"requested_model": c.requested, "key": c.caller.token_name, "face": c.face, "mode": c.mode, "job": c.async_job,
-                            "queued_at": c.accepted_at, "started_at": c.started_at, "origin_request": c.origin_request})
+                            "queued_at": c.accepted_at, "started_at": c.started_at, "origin_request": c.origin_request, "origin_node": c.origin_node,
+                            "origin_node_name": (c.hints or {}).get("origin_node_name")})
             rows.append(row)
     return rows
 

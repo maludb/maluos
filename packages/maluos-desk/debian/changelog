@@ -1,3 +1,14 @@
+maluos-desk (0.7.0) resolute; urgency=medium
+
+  * Phase 13 slice 3: the enrolment stores the desk's inference key in
+    the owner's compartment with a `use` grant to the gateway; the
+    heartbeat carries the desk's gateway facts (a laptop that shares while
+    idle) and keeps the gateway's caches under /run/maluos/office on
+    inference_changed and peers_changed; maluctl office inference
+    [--refresh] [--all] [--new-key]; leave removes the key and the caches.
+
+ -- Edward Honour <ed@maludb.org>  Thu, 29 Oct 2026 18:30:00 +0000
+
 maluos-desk (0.6.0) resolute; urgency=medium
 
   * Phase 13 slice 2, delegation (docs/phase13-slice2-delegation.md): the

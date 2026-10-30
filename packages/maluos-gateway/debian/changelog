@@ -1,3 +1,24 @@
+maluos-gateway (0.6.0) resolute; urgency=medium
+
+  * Phase 13 slice 3, shared inference across the estate
+    (docs/phase13-slice3-inference.md): the `estate` backend kind, a rung
+    per backend the directory publishes to this host (the cache the
+    enrolment side keeps under /run/maluos/estate or /run/maluos/office),
+    dialled over the overlay with this host's own inference key; the estate
+    rungs join the tiers that name their models and rank by the kernel's
+    priority then the serving host's expected wait; X-MaluOS-Prefer: estate.
+    The serving side accepts an estate member's inference key against the
+    peers the kernel published (the principal node:<ref>), applies its class
+    and classification ceilings, never spends its cloud credit for it, and
+    refuses not_shared with a retry_after while the idle rule holds the
+    switch off. With the scheduler entitlement the gateway asks the kernel
+    to place a call first (300 ms) and falls back to its own ranking; the
+    route says placed or ranked. The envelope travels on forwarded calls;
+    GET /v1/maluos/inference answers this host's facts for its heartbeat;
+    maluctl gateway estate [refresh]; chat --prefer --sensitivity --envelope.
+
+ -- Edward Honour <ed@maludb.org>  Thu, 29 Oct 2026 18:30:00 +0000
+
 maluos-gateway (0.5.2) resolute; urgency=medium
 
   * Phase 13 slice 2: a call's X-MaluOS-Envelope (the delegation envelope's

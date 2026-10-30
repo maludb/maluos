@@ -22,6 +22,9 @@ A desk does not enrol twice: its desk row is its node record.
   maluctl estate inbox [--json]             the daemon's inbox loop: polls, items, the last error
   sudo maluctl estate actions [allow a,b,…] what an operator may do to this node remotely (restart_agent, start_agent,
                                             stop_agent, apply_updates; reboot is off unless allowed here)
+  maluctl estate inference [--json] [--refresh] [--peers]   Phase 13 slice 3: the inference facts this node reports, the backends the
+                                            estate publishes to it and the peers allowed to call it; --refresh re-reads both now
+  sudo maluctl estate inference --new-key   a new inference key (a node joined before slice 3, or a rotation); the old one stops
 
 Files: /etc/maluos/estate.yaml (no secret), /var/lib/maluos/estate/state.json (the daemon's last outcome),
 /var/lib/maluos/overlay/state.json (the overlay service's), /run/maluos/estate/keys.json (the directory's keys).
@@ -195,12 +198,16 @@ def join(a):
         run_as(C.USER, ["secret", "delete", C.SECRET_OVERLAY], check=False)
         run_as(C.USER, ["secret", "add", C.SECRET_OVERLAY, "--kind", "generic", "--provider", "estate", "--stdin"], input=ov_priv + "\n")
         secrets["overlay"] = C.SECRET_OVERLAY
+    # slice 3: the inference key, beside the token; the gateway holds a `use` grant on it (its estate rungs and the kernel's placement)
+    if r.get("inference_key"):
+        store_inference_key(principal, r["inference_key"])
+        secrets["inference"] = C.SECRET_INFERENCE
     conf = {"surface": r.get("surface", C.SURFACE), "url": url, "office": r.get("office") or {"name": None, "url": url},
             "node": {"id": node.get("id"), "kind": node.get("kind") or kind, "name": node.get("name") or name, "status": node.get("status")},
             "enrolled_by": r.get("enrolled_by") or {}, "endpoints": eps, "heartbeat_s": int(r.get("heartbeat_s") or 60), "report_s": int(r.get("report_s") or 300),
             "principal": principal, "user": C.USER, "secrets": secrets, "public_key": pub,
             "overlay": (r.get("overlay") if ov_priv else None) if r.get("overlay") or not ov_priv else {"pending": True, "role": "hub" if hub else "spoke"},
-            "actions": {"allow": allow_actions}, "joined_at": C.utc(), "maluos_estate": VERSION}
+            "actions": {"allow": allow_actions}, "joined_at": C.utc(), "maluos_estate": VERSION, "editions": list(r.get("editions") or [])}
     if ov_priv and not r.get("overlay"):
         conf["overlay"] = {"role": "hub" if hub else "spoke", "address": None, "hub": None}      # a key sent, no hub yet: the service waits
     C.write_conf(conf)
@@ -218,6 +225,80 @@ def join(a):
     print(f"  estate:   maluctl estate nodes")
     print("  overlay:  " + overlay_line(conf))
     print(f"  actions:  an operator may {', '.join(allow_actions) or 'do nothing'} here remotely (maluctl estate actions allow …)")
+    print("  inference: " + (f"key {principal}/{C.SECRET_INFERENCE} (the gateway may use it); the estate's backends become rungs of this gateway (maluctl gateway estate)"
+                             + (f"; editions {', '.join(conf['editions'])}" if conf.get("editions") else "") if r.get("inference_key") else "the office issued no inference key (an office before slice 3)"))
+    return 0
+
+
+GATEWAY_USER = os.environ.get("MALUOS_GATEWAY_USER", "maluos-gateway")
+
+
+def store_inference_key(principal, key):
+    """The inference key into the host principal's compartment (as the node), with a `use` grant to the gateway's own user."""
+    run_as(C.USER, ["secret", "delete", C.SECRET_INFERENCE], check=False)
+    run_as(C.USER, ["secret", "add", C.SECRET_INFERENCE, "--kind", "token", "--provider", "estate", "--stdin"], input=key + "\n")
+    try:
+        run_as(C.USER, ["secret", "grant", C.SECRET_INFERENCE, "--to", f"user:{GATEWAY_USER}", "--level", "use"])
+    except RuntimeError as e:
+        print(f"  warn: the gateway's grant on {C.SECRET_INFERENCE}: {e}", file=sys.stderr)
+
+
+def inference_cmd(a):
+    """Phase 13 slice 3: this node's facts, the backends published to it, the peers allowed to call it; --refresh re-reads the caches."""
+    as_json = opt(a, "--json", flag=True); refresh = opt(a, "--refresh", flag=True); show_peers = opt(a, "--peers", flag=True); new_key = opt(a, "--new-key", flag=True)
+    conf = C.read_conf() or sys.exit(f"not joined (no {C.CONF})")
+    if new_key:
+        need_root()
+        tok = C.token(conf)
+        st, r = C.inference_key_new(conf, tok)
+        if st != 200 or not r.get("inference_key"):
+            sys.exit(f"the office answered {st} {r.get('error') or ''}: {r.get('message') or ''}")
+        store_inference_key(conf["principal"], r["inference_key"])
+        conf.setdefault("secrets", {})["inference"] = C.SECRET_INFERENCE; C.write_conf(conf)
+        print(f"a new inference key is in the vault as {conf['principal']}/{C.SECRET_INFERENCE}; the old one stops working at once")
+        gateway_reload()
+        refresh = True
+    if refresh:
+        tok = C.token(conf)
+        out = C.refresh_inference(conf, tok)
+        for name, (st, r) in out.items():
+            if st != 200:
+                sys.exit(f"{name}: the office answered {st} {r.get('error') or ''}: {r.get('message') or ''}")
+        try:
+            os.makedirs(os.path.dirname(C.INFERENCE_CACHE), exist_ok=True)
+            with open(os.path.join(os.path.dirname(C.INFERENCE_CACHE), "inference-refresh"), "w") as fh:
+                fh.write(C.utc() + "\n")       # the daemon re-reads at its next heartbeat too, and owns the files thereafter
+        except OSError:
+            pass
+        gateway_reload()
+    facts = C.gateway_inference()
+    backends = C.read_cache(C.INFERENCE_CACHE) or {}
+    peers = C.read_cache(C.PEERS_CACHE) or {}
+    if as_json:
+        print(json.dumps({"facts": facts, "backends": backends, "peers": peers}, indent=1, default=str)); return 0
+    if facts is None:
+        print("facts:     no gateway on this host (nothing to share)")
+    else:
+        print(f"facts:     share {'on' if facts.get('share') else 'off'} ({facts.get('contribution')}), port {facts.get('port')}, {len(facts.get('models') or [])} model(s): "
+              + (", ".join(m['name'] + ('*' if m.get('loaded') else '') for m in facts.get('models') or []) or '-')
+              + f"; queue {facts.get('queue')}; wait " + " ".join(f"{c} {v}s" for c, v in (facts.get('expected_wait_s') or {}).items()))
+    if not backends:
+        print(f"backends:  no cache yet ({C.INFERENCE_CACHE}): the daemon writes it after its first heartbeat; --refresh does it now")
+    else:
+        bs = backends.get("backends") or []
+        print(f"backends:  {len(bs)} published to this node (version {backends.get('version')}, fetched {backends.get('fetched_at')})"
+              + (f"; editions {', '.join(backends['editions'])}" if backends.get("editions") else "") + ("; placement by the kernel" if backends.get("place") else ""))
+        for b in bs:
+            w = b.get("expected_wait_s") or {}
+            print(f"  {b.get('name'):<20} {b.get('node'):<14} {b.get('address')}:{b.get('port')}  {', '.join(m.get('name') for m in b.get('models') or []) or '-'}"
+                  + (f"  wait " + " ".join(f"{c} {v}s" for c, v in w.items()) if w else "") + f"  ceiling {b.get('classification_max')}"
+                  + (f" class<={b['class_max']}" if b.get("class_max") else "") + (f" priority {b['priority']}" if b.get("priority") else ""))
+    if peers:
+        ps = peers.get("peers") or []
+        print(f"peers:     {len(ps)} member(s) may call this host (version {peers.get('version')})")
+        if show_peers:
+            for p in ps:
+                print(f"  {p.get('name'):<20} {p.get('node'):<14} {p.get('address') or '-':<14} ceiling {p.get('classification_max')}" + (f" class<={p['class_max']}" if p.get("class_max") else ""))
     return 0
 
 
@@ -264,7 +345,7 @@ def status(a):
     n, o = conf.get("node") or {}, conf.get("office") or {}
     print(f"office:     {o.get('name') or '?'}  {conf.get('url')}  (surface {conf.get('surface')})")
     print(f"node:       {n.get('kind')} '{n.get('name')}'  (#{n.get('id')})  joined {conf.get('joined_at')}")
-    print(f"principal:  {conf.get('principal')}  (secrets stored as {conf.get('user')}: {C.SECRET_TOKEN}, {C.SECRET_KEY})")
+    print(f"principal:  {conf.get('principal')}  (secrets stored as {conf.get('user')}: {', '.join((conf.get('secrets') or {}).values()) or C.SECRET_TOKEN + ', ' + C.SECRET_KEY})")
     print(f"heartbeat:  every {conf.get('heartbeat_s')} s, the report every {conf.get('report_s')} s" + (f"  ({UNIT} {out['unit']})" if out.get("unit") else ""))
     hb = out.get("last_heartbeat")
     if hb:
@@ -298,7 +379,8 @@ def heartbeat(a):
         tok = C.token(conf)
     except Exception as e:
         sys.exit(f"the node token is not readable from the vault as {pwd.getpwuid(os.getuid()).pw_name}: {str(e)[:160]}")
-    res = C.heartbeat(conf, tok, presence, rep, agents=C.manifests() if (with_report or opt(a, "--agents", flag=True)) else None)
+    res = C.heartbeat(conf, tok, presence, rep, agents=C.manifests() if (with_report or opt(a, "--agents", flag=True)) else None,
+                      inference=C.gateway_inference() if presence == "online" else None)      # slice 3: the gateway's facts ride every heartbeat
     if res.get("overlay_changed"):
         C.overlay_hint()                      # slice 1b: the overlay service refreshes now
     if as_json:
@@ -387,7 +469,8 @@ def leave(a):
             told = "told; node retired" if st == 200 else f"answered {st} {r.get('error') or ''}: {r.get('message') or ''}".strip()
         except Exception as e:
             told = f"unreachable ({str(e)[:100]}); retire the node from the office's Estate"
-    for s in (C.SECRET_TOKEN, C.SECRET_KEY) + ((C.SECRET_OVERLAY,) if (conf.get("secrets") or {}).get("overlay") else ()):
+    C.drop_caches()                                     # slice 3: the gateway's estate rungs and peers go with the membership
+    for s in (C.SECRET_TOKEN, C.SECRET_KEY) + ((C.SECRET_OVERLAY,) if (conf.get("secrets") or {}).get("overlay") else ()) + ((C.SECRET_INFERENCE,) if (conf.get("secrets") or {}).get("inference") else ()):
         try:
             run_as(C.USER, ["secret", "delete", s])
         except Exception as e:
@@ -600,6 +683,8 @@ def main(a):
             return inbox_cmd(a)
         if cmd == "actions":
             return actions_cmd(a)
+        if cmd == "inference":
+            return inference_cmd(a)
     except RuntimeError as e:
         sys.exit(f"maluctl estate {cmd}: {e}")
     print(__doc__); return 2

@@ -21,4 +21,11 @@ $pdo = db();
 desk_heartbeat($pdo, (int) $ctx['desk']['id'], $presence, $body);
 $row = desk_row($pdo, (int) $ctx['desk']['id']);
 $changed = overlay_changed($pdo, $row);      // db/189: the overlay changed since this desk last heard
-api_json(desk_answer($pdo, $row, $ctx['member']) + ['overlay_changed' => $changed, 'inbox_unread' => inbox_unread($pdo, (int) $ctx['member']['id'])]);      // db/190
+if (isset($body['inference'])) {      // db/191: a desk's gateway facts (a laptop that shares while idle, a workstation that opted in)
+    $err = inference_facts_store($pdo, $row, $body['inference']);
+    if ($err !== null) { api_error('invalid', $err, 400); }
+}
+$inf = inference_changed($pdo, $row);
+$peers = peers_changed($pdo, $row);
+api_json(desk_answer($pdo, $row, $ctx['member']) + ['overlay_changed' => $changed, 'inbox_unread' => inbox_unread($pdo, (int) $ctx['member']['id']),      // db/190
+                                                   'inference_changed' => $inf, 'peers_changed' => $peers]);      // db/191

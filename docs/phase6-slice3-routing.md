@@ -38,7 +38,9 @@ alerts, delegation and export are slice 4.
   failure is retried once locally, then the next rung is tried; a failed
   cloud rung moves to the next. Attempts are counted
   (`X-MaluOS-Attempts`, `attempts` on the ledger row). Callers may say
-  `X-MaluOS-Prefer: cloud|local` within policy, and `X-MaluOS-Local-Only`.
+  `X-MaluOS-Prefer: cloud|local` within policy, and `X-MaluOS-Local-Only`
+  (Phase 13 slice 3 adds `X-MaluOS-Prefer: estate`: the estate's rungs before the
+  local and cloud ones, a preference like the other two).
 - **The sensitivity gate.** A request carries a sensitivity (header
   `X-MaluOS-Sensitivity`, default `internal`); a cloud rung is eligible only
   if it is at or below the caller's egress ceiling: the policy's

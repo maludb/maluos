@@ -1,3 +1,15 @@
+maluos-session (0.11.0) resolute; urgency=medium
+
+  * Phase 13 slice 3, the idle rule: the service measures the session
+    every 30 s (Mutter's idle time, UPower's lid and battery, MPRIS players)
+    and keeps /run/maluos/session/idle while the person has given no input
+    for ten minutes with the lid open or on mains and no media playing; the
+    gateway's share_state reads it for `share on --when idle`. host.idle in
+    the state; gateway.estate carries the estate's backends for the
+    Network tab.
+
+ -- Edward Honour <ed@maludb.org>  Thu, 29 Oct 2026 18:30:00 +0000
+
 maluos-session (0.10.0) resolute; urgency=medium
 
   * Phase 13 slice 2, delegation (docs/phase13-slice2-delegation.md): the

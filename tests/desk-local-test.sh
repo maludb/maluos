@@ -55,7 +55,7 @@ echo "== daemon and mock office"
 printf '{"database":"%s","tenant":"%s","provisioned_at":"test","admin_principal":"human:admin","operators":[],"components":{"vault":{}}}\n' $DB $T > "$W/fb/done"
 trap 'kill $(cat $W/daemon.pid) $(cat $W/office.pid) 2>/dev/null' EXIT
 for i in $(seq 1 20); do [ -S "$W/vault.sock" ] && curl -fsS --max-time 1 http://127.0.0.1:$PORT/api/v1/health >/dev/null 2>&1 && break; sleep 0.25; done
-ENV="PYTHONPATH=$W/lib MALUCTL_PLUGIN_DIR=$W/lib/maluctl.d MALUCTL_BIN=$W/lib/maluctl MALUOS_VAULT_SOCKET=$W/vault.sock MALUOS_OFFICE_CONF=$W/etc/office.yaml MALUOS_OFFICE_ENV=$W/etc/office.env XDG_STATE_HOME=$W/state-$ME XDG_CACHE_HOME=$W/cache-$ME MALUOS_STATE_DIR=$W/fb MALUOS_PROVISIONED=$W/fb/done MALUOS_ESTATE_CONF=$W/etc/estate.yaml MALUOS_ESTATE_STATE_DIR=$W/estate MALUOS_ESTATE_USER=$ME MALUOS_ESTATE_NO_UNIT=1 MALUOS_VAULT_CONFIG=$W/vault.yaml MALUOS_GATEWAY_CONFIG=$W/etc/gateway.yaml MALUOS_GATEWAY_SOCKET=$W/no-gateway.sock MALUOS_OVERLAY_DRY_RUN=1 MALUOS_OVERLAY_DRY_LOG=$W/overlay-dry.log MALUOS_OVERLAY_HOSTS=$W/hosts MALUOS_OVERLAY_STATE=$W/estate/overlay.json MALUOS_OVERLAY_RUN=$W/ovrun MALUOS_AGENTS_DIR=$W/agents MALUOS_AGENTS_HINT=$W/estate-run/agents-changed MALUOS_ESTATE_KEYS=$W/estate-run/keys.json MALUOS_AGENT_SOCKET_DIR=$W/agents-run"
+ENV="PYTHONPATH=$W/lib MALUCTL_PLUGIN_DIR=$W/lib/maluctl.d MALUCTL_BIN=$W/lib/maluctl MALUOS_VAULT_SOCKET=$W/vault.sock MALUOS_OFFICE_CONF=$W/etc/office.yaml MALUOS_OFFICE_ENV=$W/etc/office.env XDG_STATE_HOME=$W/state-$ME XDG_CACHE_HOME=$W/cache-$ME MALUOS_STATE_DIR=$W/fb MALUOS_PROVISIONED=$W/fb/done MALUOS_ESTATE_CONF=$W/etc/estate.yaml MALUOS_ESTATE_STATE_DIR=$W/estate MALUOS_ESTATE_USER=$ME MALUOS_ESTATE_NO_UNIT=1 MALUOS_VAULT_CONFIG=$W/vault.yaml MALUOS_GATEWAY_CONFIG=$W/etc/gateway.yaml MALUOS_GATEWAY_SOCKET=$W/no-gateway.sock MALUOS_OVERLAY_DRY_RUN=1 MALUOS_OVERLAY_DRY_LOG=$W/overlay-dry.log MALUOS_OVERLAY_HOSTS=$W/hosts MALUOS_OVERLAY_STATE=$W/estate/overlay.json MALUOS_OVERLAY_RUN=$W/ovrun MALUOS_AGENTS_DIR=$W/agents MALUOS_AGENTS_HINT=$W/estate-run/agents-changed MALUOS_ESTATE_KEYS=$W/estate-run/keys.json MALUOS_AGENT_SOCKET_DIR=$W/agents-run MALUOS_ESTATE_INFERENCE=$W/estate-run/inference.json MALUOS_ESTATE_PEERS=$W/estate-run/peers.json MALUOS_ESTATE_INFERENCE_HINT=$W/estate-run/inference-refresh MALUOS_OFFICE_INFERENCE=$W/office-run/inference.json MALUOS_OFFICE_PEERS=$W/office-run/peers.json MALUOS_GATEWAY_USER=$ME"
 me()   { env $ENV python3 "$W/lib/maluctl" "$@"; }
 root() { sudo -n env $ENV python3 "$W/lib/maluctl" "$@"; }
 mock() { curl -fsS --max-time 5 "http://127.0.0.1:$PORT$1" "${@:2}"; }
@@ -261,9 +261,63 @@ check "estate action: reboot refused not_allowed (not in actions.allow); restart
 printf 'name: late\ncapabilities: [late]\nowner: user:%s\naccept_from: [org]\ntasks: true\n' "$ME" > "$W/agents/late.manifest.yaml"; chmod 644 "$W/agents/late.manifest.yaml"; date +%s > "$W/estate-run/agents-changed"
 for i in $(seq 1 60); do me estate agents 2>/dev/null | grep -q '^  late' && break; sleep 0.5; done
 check "a manifest written after the daemon started registers at once through the hint" "me estate agents | grep -q '^  late .*node-two'"
+echo "== Phase 13 slice 3: shared inference (the mock serves the contract; a fake gateway socket answers this host's facts; the daemon and the desk keep the caches)"
+mkdir -p "$W/office-run"; chmod 1777 "$W/office-run"
+# a fake gateway on a Unix socket: /v1/maluos/inference answers facts, /v1/maluos/reload says ok
+cat > "$W/fakegw.py" <<'EOG'
+import json, os, socket, sys
+from http.server import BaseHTTPRequestHandler, HTTPServer
+FACTS = {"models": [{"name": "mock-7b", "family": "mock", "size": 4000000000, "loaded": True, "backend": "mock"}], "lanes": {"mock": {"kind": "local", "capacity": 1, "running": 0, "queued": 0}},
+         "queue": {"queued": 0, "running": 0}, "expected_wait_s": {"interactive": 0.5, "agent": 2, "batch": 8}, "share": True, "contribution": "always", "port": 11435, "api_version": 1}
+class S(HTTPServer):
+    address_family = socket.AF_UNIX
+    def server_bind(self):
+        try: os.remove(self.server_address)
+        except OSError: pass
+        self.socket.bind(self.server_address); os.chmod(self.server_address, 0o666)
+class H(BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def _send(self, obj):
+        d = json.dumps(obj).encode(); self.send_response(200); self.send_header("Content-Type", "application/json"); self.send_header("Content-Length", str(len(d))); self.end_headers(); self.wfile.write(d)
+    def do_GET(self):
+        self._send(FACTS if self.path.startswith("/v1/maluos/inference") else {"ok": True})
+    def do_POST(self):
+        self._send({"reloaded": True})
+S(sys.argv[1], H).serve_forever()
+EOG
+( exec python3 "$W/fakegw.py" "$W/fakegw.sock" >"$W/fakegw.log" 2>&1 ) & echo $! > "$W/fakegw.pid"
+for i in $(seq 1 20); do [ -S "$W/fakegw.sock" ] && break; sleep 0.25; done
+GWENV="MALUOS_GATEWAY_SOCKET=$W/fakegw.sock"
+rootgw() { sudo -n env $ENV $GWENV python3 "$W/lib/maluctl" "$@"; }
+# the daemon again, with the fake gateway: its heartbeats carry the facts from now on
+kill -TERM $(cat "$W/estated2.pid") 2>/dev/null; for i in $(seq 1 40); do kill -0 $(cat "$W/estated2.pid") 2>/dev/null || break; sleep 0.25; done
+( cd "$W"; exec env $ENV $GWENV MALUOS_ESTATE_TOKEN="$(me secret show estate-node-token)" python3 -m maluos_estate >"$W/estated2.log" 2>&1 ) & echo $! > "$W/estated2.pid"
+for i in $(seq 1 40); do [ -f "$W/estate/state.json" ] && grep -q '"sent": true' "$W/estate/state.json" && break; sleep 0.25; done
+check "the join stored the inference key the office issued beside the node token" "me secret list | grep -q 'host:$HOST/estate-inference-key' && grep -q 'inference: estate-inference-key' $W/etc/estate.yaml"
+check "the desk's enrolment stored one in $ME's compartment too (an operator's listing: $ME reads as the host now)" "sudo -n env $ENV python3 $W/lib/maluctl secret list --all | grep -q 'user:$ME/estate-inference-key' && grep -q 'secret: estate-inference-key' $W/etc/office.yaml"
+check "a heartbeat with the fake gateway's facts: the mock holds them for server:$NODEID (one model, share on)" "env $ENV $GWENV python3 $W/lib/maluctl estate heartbeat --json | grep -q '\"ok\": true' && mock /mock/inference | python3 -c 'import json,sys; f=json.load(sys.stdin)[\"facts\"][\"server:$NODEID\"]; assert f[\"share\"] and f[\"models\"][0][\"name\"]==\"mock-7b\" and f[\"port\"]==11435, f'"
+check "a desk heartbeat carries the desk's facts too (the same fake gateway: a workstation that shares)" "env $ENV $GWENV MALUOS_OFFICE_TOKEN=$DESKTOK python3 $W/lib/maluctl office heartbeat --json | grep -q '\"ok\": true' && mock /mock/inference | python3 -c 'import json,sys; f=json.load(sys.stdin)[\"facts\"]; assert \"desk:$DESKID\" in f, list(f)'"
+# a fake GPU host in the estate: a published backend (facts and an overlay address) every member may use
+GPU=$(mock /mock/peer -d '{"name": "gpu-fake", "kind": "inference", "address": "100.100.0.9", "inference": {"models": [{"name": "qwen3:8b", "loaded": true}], "queue": {"queued": 0, "running": 0}, "expected_wait_s": {"interactive": 1.2, "agent": 3, "batch": 10}, "share": true, "contribution": "always", "port": 11435}}')
+GPUKEY=$(echo "$GPU" | python3 -c 'import json,sys; print(json.load(sys.stdin)["inference_key"])')
+check "/mock/peer: a fake GPU host with facts and an address is published" "mock /mock/inference | python3 -c 'import json,sys; m=[x for x in json.load(sys.stdin)[\"members\"] if x[\"name\"]==\"gpu-fake\"][0]; assert m[\"published\"], m'"
+check "maluctl estate inference --refresh (root): the backends cache lists gpu-fake at 100.100.0.9:11435 with its wait; the peers cache lists the desk and gpu-fake" "rootgw estate inference --refresh | grep -q 'gpu-fake' && python3 -c 'import json; d=json.load(open(\"$W/estate-run/inference.json\")); b=[x for x in d[\"backends\"] if x[\"name\"]==\"gpu-fake\"][0]; assert b[\"address\"]==\"100.100.0.9\" and b[\"port\"]==11435 and b[\"expected_wait_s\"][\"agent\"]==3 and d[\"secret\"]==\"host:$HOST/estate-inference-key\" and d[\"source\"]==\"node\", (b, d[\"secret\"])' && python3 -c 'import json; p=json.load(open(\"$W/estate-run/peers.json\"))[\"peers\"]; ns={x[\"node\"] for x in p}; assert \"desk:$DESKID\" in ns and \"inference:-100\" in ns and all(len(x[\"key_hash\"])==64 for x in p), ns'"
+check "the node's own facts are never a backend of itself; this node is not in its own peers" "! grep -q '\"node\": \"server:$NODEID\"' $W/estate-run/inference.json && ! grep -q '\"node\": \"server:$NODEID\"' $W/estate-run/peers.json"
+check "maluctl estate inference prints the facts, the backends and the peers" "env $ENV $GWENV python3 $W/lib/maluctl estate inference | grep -q 'facts:     share on (always), port 11435, 1 model(s)' && env $ENV $GWENV python3 $W/lib/maluctl estate inference --peers | grep -q 'gpu-fake'"
+check "the desk's side: maluctl office inference --refresh writes the office caches as $ME, gpu-fake published to the desk" "env $ENV $GWENV MALUOS_OFFICE_TOKEN=$DESKTOK python3 $W/lib/maluctl office inference --refresh | grep -q 'gpu-fake' && python3 -c 'import json; d=json.load(open(\"$W/office-run/inference.json\")); assert d[\"source\"]==\"desk\" and d[\"secret\"]==\"user:$ME/estate-inference-key\" and any(b[\"name\"]==\"gpu-fake\" for b in d[\"backends\"]), d'"
+check "--all (an operator): every backend of the estate with its queue and wait" "env $ENV $GWENV MALUOS_OFFICE_TOKEN=$DESKTOK python3 $W/lib/maluctl office inference --all | grep -q 'gpu-fake .*queue 0/0  interactive 1.2s'"
+check "a policy rule (deny kind:desk on gpu-fake): the desk's next heartbeat says inference_changed and peers_changed and refreshes its cache, which loses gpu-fake; the node keeps it" "mock /mock/inference/policy -d '{\"subject\": \"kind:desk\", \"backend\": -100, \"allow\": false}' >/dev/null && env $ENV $GWENV MALUOS_OFFICE_TOKEN=$DESKTOK python3 $W/lib/maluctl office heartbeat --json | grep -q '\"inference_changed\": true' && ! grep -q gpu-fake $W/office-run/inference.json && rootgw estate inference --refresh | grep -q gpu-fake"
+check "the entitlement (/mock/editions scheduler): the heartbeat answer and the cache carry editions and the place URL" "mock /mock/editions -d '{\"scheduler\": true}' >/dev/null && env $ENV $GWENV MALUOS_OFFICE_TOKEN=$DESKTOK python3 $W/lib/maluctl office heartbeat --json | grep -q '\"editions\": \\[\"scheduler\"\\]' && grep -q '/api/v1/estate/inference/place' $W/office-run/inference.json"
+check "placement through the mock: the node's key places on gpu-fake; gpu-fake itself sees no backend (nobody else is published)" "curl -sS -X POST -H \"Authorization: Bearer $(me secret show estate-inference-key)\" http://127.0.0.1:$PORT/api/v1/estate/inference/place -d '{\"class\": \"interactive\", \"model\": \"qwen3:8b\"}' | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d[\"backend\"][\"name\"]==\"gpu-fake\" and d[\"reason\"]==\"placed\" and d[\"lease_s\"]==30, d' && curl -sS -X POST -H \"Authorization: Bearer $GPUKEY\" http://127.0.0.1:$PORT/api/v1/estate/inference/place -d '{\"class\": \"interactive\", \"model\": \"qwen3:8b\"}' | grep -q '\"reason\": \"no_backend\"'"
+mock /mock/inference/policy -d '{"clear": true}' >/dev/null; mock /mock/editions -d '{"scheduler": false}' >/dev/null
+OLDINF=$(me secret show estate-inference-key)
+check "maluctl estate inference --new-key (root): a new key in the vault, the office counts the same keys, the old one is dead at the place endpoint" "rootgw estate inference --new-key | grep -q 'a new inference key is in the vault' && [ \"\$(me secret show estate-inference-key)\" != \"$OLDINF\" ] && curl -sS -o /dev/null -w '%{http_code}' -X POST -H \"Authorization: Bearer $OLDINF\" http://127.0.0.1:$PORT/api/v1/estate/inference/place -d '{}' | grep -q 401"
+check "the daemon's heartbeat carries the facts and keeps the caches (state.json says so)" "for i in \$(seq 1 40); do python3 -c 'import json; s=json.load(open(\"$W/estate/state.json\")); assert s.get(\"inference\", {}).get(\"sent\") and s[\"inference\"][\"backends_at\"]' 2>/dev/null && break; sleep 0.5; done; python3 -c 'import json; s=json.load(open(\"$W/estate/state.json\")); assert s[\"inference\"][\"sent\"] and s[\"inference\"][\"backends_at\"] and s[\"inference\"][\"peers_at\"], s[\"inference\"]'"
+check "no inference key in the logs or the caches" "! grep -q 'inf_' $W/estated2.log $W/office.log $W/daemon.log $W/estate-run/inference.json $W/estate-run/peers.json $W/office-run/inference.json"
+kill $(cat "$W/fakegw.pid") 2>/dev/null
 kill -TERM $(cat "$W/estated2.pid") $(cat "$W/agent-helper.pid") $(cat "$W/agent-demo.pid") 2>/dev/null; sleep 1
 check "estate leave: the node's agents are gone from the directory and its key from the keys" "root estate leave | grep -q 'left Local Office' && ! desk office agents --refresh | grep -q 'node-two' && ! me estate keys | grep -q \"server:$NODEID\""
-check "office leave: the desk key goes with the token" "root office leave >/dev/null && ! me secret list | grep -q 'user:$ME/office-desk-key'"
+check "office leave: the desk key and the inference key go with the token; the office caches too" "root office leave >/dev/null && ! me secret list | grep -q 'user:$ME/office-desk-key' && ! me secret list | grep -q 'user:$ME/estate-inference-key' && [ ! -f $W/office-run/inference.json ]"
 check "no private key in the logs" "! grep -q 'BEGIN OPENSSH PRIVATE KEY' $W/estated2.log $W/office.log $W/agent-helper.log $W/daemon.log"
 
 echo; echo "$n checks, $fail failed"

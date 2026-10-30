@@ -140,13 +140,25 @@ class GatewayShare(unittest.TestCase):
         try:
             st = maluos_gpu.share_state({"enabled": None, "contribution": None}, {"enabled": True, "host": "0.0.0.0"})
             self.assertEqual((st["enabled"], st["contribution"], st["rule"], st["configured"], st["exposed"]), (False, "idle", "opt-in-idle", False, True))
-            st = maluos_gpu.share_state({"enabled": True}, {"enabled": True, "host": "127.0.0.1"})
-            self.assertEqual((st["enabled"], st["contribution"], st["configured"], st["exposed"]), (True, "idle", True, False))
+            st = maluos_gpu.share_state({"enabled": True}, {"enabled": True, "host": "127.0.0.1"}, idle_file="/nonexistent/idle")
+            # a laptop's switch on, contribution idle by the rule: on as configured, off until the session's idle mark (slice 3)
+            self.assertEqual((st["enabled"], st["configured_enabled"], st["contribution"], st["configured"], st["exposed"]), (False, True, "idle", True, False))
             st = maluos_gpu.share_state({"enabled": True, "contribution": "always"}, None)
             self.assertEqual(st["contribution"], "always")
             os.environ["MALUOS_CHASSIS"] = "server"
             st = maluos_gpu.share_state(None, {"enabled": False})
             self.assertEqual((st["enabled"], st["contribution"], st["rule"], st["exposed"]), (True, "always", "always", False))
+            # Phase 13 slice 3, the idle rule: contribution idle follows the session's idle mark
+            with tempfile.TemporaryDirectory() as d:
+                mark = os.path.join(d, "idle")
+                st = maluos_gpu.share_state({"enabled": True, "contribution": "idle"}, None, idle_file=mark)
+                self.assertEqual((st["enabled"], st["configured_enabled"], st["idle"]["idle"]), (False, True, False))
+                with open(mark, "w") as f:
+                    json.dump({"since": "2026-10-29T17:00:00Z", "user": "ed", "idle_s": 900}, f)
+                st = maluos_gpu.share_state({"enabled": True, "contribution": "idle"}, None, idle_file=mark)
+                self.assertEqual((st["enabled"], st["idle"]["idle"], st["idle"]["since"], st["idle"]["user"]), (True, True, "2026-10-29T17:00:00Z", "ed"))
+                st = maluos_gpu.share_state({"enabled": True, "contribution": "always"}, None, idle_file=mark)
+                self.assertEqual((st["enabled"], st["idle"]), (True, None))
             os.environ["MALUOS_CHASSIS"] = "desktop"
             st = maluos_gpu.share_state({}, {})
             self.assertEqual((st["enabled"], st["contribution"], st["rule"]), (False, "always", "opt-in"))

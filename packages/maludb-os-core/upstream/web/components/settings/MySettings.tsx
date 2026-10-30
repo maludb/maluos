@@ -394,6 +394,7 @@ function Estate({ estate, timeZone }: { estate: NonNullable<Data["estate"]>; tim
         </table>
       </div>
       {estate.delegation && <Delegation d={estate.delegation} timeZone={timeZone} />}
+      {estate.inference && <Inference inf={estate.inference} nodes={estate.nodes} timeZone={timeZone} />}
       {estate.alerts.length > 0 && (
         <>
           <h6 className="fw-bold">Open alerts</h6>
@@ -481,6 +482,85 @@ function Delegation({ d, timeZone }: { d: NonNullable<NonNullable<Data["estate"]
           </ul>
         </>
       )}
+    </div>
+  );
+}
+
+/**
+ * db/191, Phase 13 slice 3 (maluos docs/phase13-slice3-inference.md): shared inference across the estate. Every
+ * member's gateway reports what it serves with its heartbeat; the shared ones with an overlay address are published
+ * to the members the policy allows, who dial them over the overlay with their own inference key. The rules say who
+ * may use what (the most specific subject wins, a deny beats an allow; a desk's GPU is never used by other desks);
+ * the scheduler entitlement turns on estate-wide placement.
+ */
+function Inference({ inf, nodes, timeZone }: { inf: NonNullable<NonNullable<Data["estate"]>["inference"]>; nodes: NonNullable<Data["estate"]>["nodes"]; timeZone: string }) {
+  const wait = (w: Record<string, number>) => Object.entries(w).map(([c, s]) => `${c} ${s}s`).join(", ") || "—";
+  return (
+    <div className="mb-3" id="settings-estate-inference">
+      <h6 className="fw-bold">Shared inference</h6>
+      <p className="text-muted small">
+        A GPU host that joins the estate is a backend of every member the policy allows, reached over the overlay with the member&apos;s own inference key; nothing is paired by hand.
+        {" "}{inf.members_with_keys} member{inf.members_with_keys === 1 ? "" : "s"} hold{inf.members_with_keys === 1 ? "s" : ""} a key; {inf.queue.backends} backend{inf.queue.backends === 1 ? "" : "s"} published, {inf.queue.queued} queued and {inf.queue.running} running across the estate.
+      </p>
+      <ActionForm path="/settings/desks/inference.php" className="mb-3" id="settings-estate-scheduler">
+        <input type="hidden" name="op" value="scheduler" />
+        <input type="hidden" name="on" value={inf.scheduler ? "0" : "1"} />
+        <span className={`badge ${inf.scheduler ? "bg-success" : "bg-secondary"} me-2`}>scheduler {inf.scheduler ? "on" : "off"}</span>
+        <small className="text-muted me-2">{inf.scheduler ? `Estate-wide placement answers every gateway's place request with a ${inf.lease_s} s lease.` : "Each gateway ranks the estate's backends by its own expected wait; placement, priorities and backpressure need the scheduler entitlement."}</small>
+        <SubmitButton className="btn btn-sm btn-outline-secondary">{inf.scheduler ? "Turn off" : "Turn on"}</SubmitButton>
+      </ActionForm>
+      <div className="table-responsive">
+        <table className="table table-sm table-hover mb-3" id="settings-estate-backends">
+          <thead className="thead-light"><tr><th>Host</th><th>Kind</th><th>Published</th><th>Models</th><th>Queue</th><th>Expected wait</th><th>Sharing</th><th>Updated</th></tr></thead>
+          <tbody>
+            {inf.backends.length === 0 ? (
+              <tr><td colSpan={8} className="text-muted text-center py-3">No gateway has reported yet. A member&apos;s heartbeat carries what its gateway serves once it runs maluos-gateway 0.6.0 or later.</td></tr>
+            ) : inf.backends.map((b) => (
+              <tr id={`estate-backend-${b.id}`} key={b.id}>
+                <td><Link href={`/locations/${b.id}`}>{b.display_name}</Link><small className="text-muted"> · {b.name}.internal{b.address ? ` (${b.address}:${b.port})` : ""}</small></td>
+                <td>{b.kind}</td>
+                <td>{b.published ? <span className="badge bg-success">yes</span> : <span className="badge bg-secondary">{b.why ?? "no"}</span>}</td>
+                <td><small>{b.models.map((m) => m.loaded ? <strong key={m.name}>{m.name} </strong> : <span key={m.name}>{m.name} </span>)}{b.models.length === 0 && "—"}</small></td>
+                <td><small>{b.queue.queued} queued, {b.queue.running} running</small></td>
+                <td><small>{wait(b.expected_wait_s)}</small></td>
+                <td><small>{b.share ? `on, ${b.contribution}` : "off"}</small></td>
+                <td>{b.updated_at ? formatDate(b.updated_at, timeZone) : <small className="text-muted">never</small>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <h6 className="fw-bold">Who may use what</h6>
+      <p className="text-muted small">Without a rule every active member may use every shared backend at an internal ceiling. The most specific subject wins (a node over a department over a kind over the organisation), a rule naming one backend beats one for any, and a deny beats an allow. A desk&apos;s contribution is never used by other desks.</p>
+      {inf.rules.length > 0 && (
+        <ul className="list-unstyled mb-3" id="settings-estate-inference-rules">
+          {inf.rules.map((r) => (
+            <li key={r.id} className="mb-1 d-flex align-items-center">
+              <span className={`badge ${r.allow ? "bg-success" : "bg-danger"} me-2`}>{r.allow ? "allow" : "deny"}</span>
+              <span><strong>{r.subject}</strong> → {r.backend_name ?? "any backend"}
+                <small className="text-muted">{r.max_class ? ` · class ≤ ${r.max_class}` : ""}{r.max_classification ? ` · classification ≤ ${r.max_classification}` : ""}{r.priority !== 0 ? ` · priority ${r.priority}` : ""}{r.note ? ` · ${r.note}` : ""}</small>
+              </span>
+              <ActionForm path="/settings/desks/inference.php" className="ms-2" confirm="Remove this rule?">
+                <input type="hidden" name="op" value="rule_delete" />
+                <input type="hidden" name="id" value={r.id} />
+                <SubmitButton className="btn btn-sm btn-link text-danger p-0">remove</SubmitButton>
+              </ActionForm>
+            </li>
+          ))}
+        </ul>
+      )}
+      <ActionForm path="/settings/desks/inference.php" className="row g-2 align-items-end mb-3" id="settings-estate-inference-rule-add" resetOnSuccess>
+        <input type="hidden" name="op" value="rule_add" />
+        <div className="col-6 col-md-2"><label className="form-label small mb-0">Subject</label><input className="form-control form-control-sm" name="subject" defaultValue="org" placeholder="org, dept:3, kind:desk, node:57" /></div>
+        <div className="col-6 col-md-2"><label className="form-label small mb-0">Backend</label>
+          <select className="form-select form-select-sm" name="backend_location_id" defaultValue=""><option value="">any</option>{nodes.map((n) => <option key={n.id} value={n.id}>{n.name}</option>)}</select></div>
+        <div className="col-4 col-md-1"><label className="form-label small mb-0">Allow</label><select className="form-select form-select-sm" name="allow" defaultValue="1"><option value="1">allow</option><option value="0">deny</option></select></div>
+        <div className="col-4 col-md-2"><label className="form-label small mb-0">Class ≤</label><select className="form-select form-select-sm" name="max_class" defaultValue=""><option value="">host default</option><option value="interactive">interactive</option><option value="agent">agent</option><option value="batch">batch</option></select></div>
+        <div className="col-4 col-md-2"><label className="form-label small mb-0">Classification ≤</label><select className="form-select form-select-sm" name="max_classification" defaultValue=""><option value="">internal</option><option value="public">public</option><option value="internal">internal</option><option value="restricted">restricted</option><option value="prohibited">prohibited</option></select></div>
+        <div className="col-4 col-md-1"><label className="form-label small mb-0">Priority</label><input className="form-control form-control-sm" name="priority" type="number" defaultValue="0" /></div>
+        <div className="col-8 col-md-2"><label className="form-label small mb-0">Note</label><input className="form-control form-control-sm" name="note" /></div>
+        <div className="col-12 col-md-12"><SubmitButton className="btn btn-sm btn-outline-primary">Add rule</SubmitButton></div>
+      </ActionForm>
     </div>
   );
 }
