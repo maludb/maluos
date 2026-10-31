@@ -15,7 +15,7 @@ tooling as it is: S under half a day, M a day, L several days.
 
 | | |
 |---|---|
-| Latest release | 26.04.20261029, shipped 2026-10-29 16:25 UTC (Phase 13 slices 1, 1b, 2: the estate, the overlay, delegation; fresh ISOs, guard-clean, apt.maluos.com republished 16:39 with agent 0.5.2 / estate 0.3.1 / gateway 0.5.2 / desk 0.6.0 / session 0.10.0) |
+| Latest release | 26.04.20261031, shipped 2026-10-31 15:03 UTC (Phase 13 slice 3: shared inference across the estate; fresh ISOs from dbf07d3, guard-clean; apt.maluos.com republished 17:05 with gateway 0.6.0 / estate 0.4.0 / desk 0.7.0 / session 0.11.0 / firstboot 0.1.12) |
 | Phase 12 (desktop) | slices 1 to 8 released (26.04.20261024); slice 9 built and boot-tested 2026-10-24 (desktop UEFI 252 ok, server UEFI 140 ok), on the share for the 26.04.20261025 release |
 | Phase 13 (estate) | shared GPUs G1, G2 and G5's local half built and boot-tested by 2026-10-27; slice 1 (D1) host half built and boot-tested 2026-10-27 against the mock estate, its kernel half waiting for approval |
 | Phase 11 (installer) | proposed only |
