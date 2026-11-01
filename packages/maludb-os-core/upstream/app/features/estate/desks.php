@@ -12,6 +12,7 @@ declare(strict_types=1);
 require_once dirname(__DIR__, 2) . '/features/estate/queries.php';
 
 require_once __DIR__ . '/inference.php';      // db/191: the inference key at enrol, the editions in the answer, retirement
+require_once __DIR__ . '/memory.php';         // db/192: the memory endpoint, retirement
 
 const DESK_SURFACE = 1;
 const DESK_HEARTBEAT_S = 300;
@@ -180,6 +181,7 @@ function desk_retire(PDO $pdo, int $id): void
     desk_revoke_tokens($pdo, $id);
     overlay_free($pdo, $id);      // db/189: its overlay address into quarantine
     inference_member_retire($pdo, $id);      // db/191
+    memory_member_retire($pdo, $id);         // db/192
 }
 
 function desk_heartbeat(PDO $pdo, int $id, string $presence, array $body): void
@@ -262,19 +264,21 @@ function estate_operator(?array $member): bool
     return $member !== null && ($member['business_role'] ?? '') === 'super_admin' && ($member['status'] ?? '') === 'active';
 }
 
-/** What this office publishes to desks. memory, actions and models stay null until their own slice; estate (db/188) to an operator's desk. */
+/** What this office publishes to desks. actions and models stay null until their own slice (memory is real since db/192); estate (db/188) to an operator's desk. */
 function desk_endpoints(?array $member = null): array
 {
     return [
         'heartbeat' => app_url('/api/v1/desks/heartbeat'), 'me' => app_url('/api/v1/desks/me'), 'leave' => app_url('/api/v1/desks/leave'),
         'records' => app_url('/mcp/records'), 'activity' => app_url('/mcp/activity'),
-        'memory' => null, 'actions' => null, 'models' => null,
+        'actions' => null, 'models' => null,
         'estate' => estate_operator($member) ? app_url('/api/v1/desks/estate') : null,
         // db/190: the directory as this desk sees it, the person's estate inbox, the desk's key registration, the keys
         'agents' => app_url('/api/v1/desks/agents'), 'inbox' => app_url('/api/v1/desks/inbox'), 'key' => app_url('/api/v1/desks/key'), 'keys' => app_url('/api/v1/estate/keys'),
         'actions' => estate_operator($member) ? app_url('/api/v1/estate/actions') : null,
         // db/191: the backends this desk may use; a desk that shares its GPU reads its peers at the estate endpoint
         'inference' => app_url('/api/v1/desks/inference'), 'inference_peers' => app_url('/api/v1/estate/inference/peers'),
+        // db/192: the memory holders this desk may ask and the office's own memory (query beneath it); a desk that shares reads its peers at the estate endpoint
+        'memory' => app_url('/api/v1/desks/memory'), 'memory_peers' => app_url('/api/v1/estate/memory/peers'),
     ];
 }
 

@@ -51,5 +51,13 @@ if (isset($body['inference'])) {
 }
 $inf = inference_changed($pdo, $row);
 $peers = peers_changed($pdo, $row);
+// db/192: the node's memory facts (the scopes its face holds and shares), ≤ 8 KB
+if (isset($body['memory'])) {
+    $err = memory_facts_store($pdo, $row, $body['memory']);
+    if ($err !== null) { $pdo->rollBack(); api_error('invalid', $err, 400); }
+}
+$mem = memory_changed($pdo, $row);
+$memPeers = memory_peers_changed($pdo, $row);
 $pdo->commit();
-api_json(node_answer($pdo, $row) + ['overlay_changed' => $changed, 'agents_registered' => $registered, 'inference_changed' => $inf, 'peers_changed' => $peers]);
+api_json(node_answer($pdo, $row) + ['overlay_changed' => $changed, 'agents_registered' => $registered, 'inference_changed' => $inf, 'peers_changed' => $peers,
+                                   'memory_changed' => $mem, 'memory_peers_changed' => $memPeers]);

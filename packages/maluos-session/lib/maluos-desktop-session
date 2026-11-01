@@ -430,6 +430,20 @@ def estate_state(cat):
             "nodes": nodes, "alerts": alerts, "counts": cat.get("counts") or {}}
 
 
+def memory_state(path=None):
+    """Phase 13 slice 4: what the office publishes to this desk's memory face (the holders cache the desk's heartbeat keeps),
+    for the Desk window and the Network tab: holders, their scopes, the office's own scopes."""
+    path = path or os.environ.get("MALUOS_OFFICE_MEMORY", "/run/maluos/office/memory.json")
+    try:
+        with open(path) as f:
+            d = json.load(f) or {}
+    except (OSError, ValueError):
+        return None
+    hs = d.get("holders") or []
+    return {"holders": len(hs), "nodes": [{"node": h.get("node"), "name": h.get("name"), "scopes": [sc.get("scope") for sc in (h.get("scopes") or [])]} for h in hs][:20],
+            "office_scopes": [sc.get("scope") for sc in ((d.get("office") or {}).get("scopes") or [])], "version": d.get("version"), "fetched_at": d.get("fetched_at")}
+
+
 def office_state(conf, hb, agents=None, apps=None, estate=None, inbox=None):
     """What the desk knows about its office: the enrolment, the last heartbeat's outcome, (slice 8) its agents and
     (Phase 13 slice 1) the estate when the office publishes it to this desk's owner."""
@@ -455,6 +469,7 @@ def office_state(conf, hb, agents=None, apps=None, estate=None, inbox=None):
             "apps": {"count": len(apps.get("apps") or []), "installed": sum(1 for a in apps.get("apps") or [] if a.get("installed")),
                      "fetched_at": apps.get("fetched_at"), "stale": bool(apps.get("stale")), "errors": apps.get("errors") or []} if apps else None,
             "estate": estate_state(estate),
+            "memory": memory_state(),      # Phase 13 slice 4
             # Phase 13 slice 2: the person's estate inbox (unread count, the last ten items), the desk key
             "inbox": {"unread": (inbox or {}).get("unread", hb.get("inbox_unread") or 0), "items": [{k: i.get(k) for k in ("id", "kind", "subject", "from", "task_id", "options", "status", "created_at")} for i in ((inbox or {}).get("items") or [])[:10]],
                       "fetched_at": (inbox or {}).get("fetched_at")},

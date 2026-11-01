@@ -1,3 +1,16 @@
+maludb-os-core (2026.10.31maluos1) resolute; urgency=medium
+
+  * Kernel re-vendored at 0c89fc6 (2026-10-31): federated memory, the
+    kernel half of Phase 13 slice 4 (db/192: estate_memory facts per
+    member, estate_memory_policy with subject × scope × holder,
+    estate_memory_settings with the versions, the fan-out and the office's
+    rate; endpoints.memory real for desks; GET /api/v1/estate/memory and
+    /api/v1/desks/memory, the peers with their signing keys, the office as
+    a holder answering claims to a desk's owner or to a node's envelope;
+    Settings → Desks gains the Shared memory section and the rules editor).
+
+ -- Edward Honour <ed@maludb.org>  Sat, 31 Oct 2026 22:30:00 +0000
+
 maludb-os-core (2026.10.29maluos1) resolute; urgency=medium
 
   * Kernel re-vendored at d7ebcfa (2026-10-29): shared inference across

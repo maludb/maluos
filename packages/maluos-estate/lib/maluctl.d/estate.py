@@ -24,6 +24,8 @@ A desk does not enrol twice: its desk row is its node record.
                                             stop_agent, apply_updates; reboot is off unless allowed here)
   maluctl estate inference [--json] [--refresh] [--peers]   Phase 13 slice 3: the inference facts this node reports, the backends the
                                             estate publishes to it and the peers allowed to call it; --refresh re-reads both now
+  maluctl estate memory [--json] [--refresh] [--peers]   Phase 13 slice 4: the memory facts this node reports, the holders the office
+                                            publishes to it (scope by scope), the office's own scopes, the peers allowed to ask it
   sudo maluctl estate inference --new-key   a new inference key (a node joined before slice 3, or a rotation); the old one stops
 
 Files: /etc/maluos/estate.yaml (no secret), /var/lib/maluos/estate/state.json (the daemon's last outcome),
@@ -169,6 +171,10 @@ def join(a):
             os.remove(p)
     run_as(C.USER, ["secret", "delete", C.SECRET_KEY], check=False)
     run_as(C.USER, ["secret", "add", C.SECRET_KEY, "--kind", "generic", "--provider", "estate", "--stdin"], input=priv)
+    try:
+        run_as(C.USER, ["secret", "grant", C.SECRET_KEY, "--to", f"user:{MEMORY_USER}", "--level", "read"])      # slice 4: the memory face signs this host's queries with it
+    except RuntimeError as e:
+        print(f"  warn: the memory face's grant on {C.SECRET_KEY}: {e}", file=sys.stderr)
     # 3. the overlay key (slice 1b): X25519, made here; the private half goes into the vault after the join succeeds
     ov_priv = ov_pub = None
     if not no_overlay:
@@ -231,6 +237,7 @@ def join(a):
 
 
 GATEWAY_USER = os.environ.get("MALUOS_GATEWAY_USER", "maluos-gateway")
+MEMORY_USER = os.environ.get("MALUOS_MEMORY_USER", "maluos-memory")
 
 
 def store_inference_key(principal, key):
@@ -241,6 +248,51 @@ def store_inference_key(principal, key):
         run_as(C.USER, ["secret", "grant", C.SECRET_INFERENCE, "--to", f"user:{GATEWAY_USER}", "--level", "use"])
     except RuntimeError as e:
         print(f"  warn: the gateway's grant on {C.SECRET_INFERENCE}: {e}", file=sys.stderr)
+
+
+def memory_cmd(a):
+    """Phase 13 slice 4: this node's memory facts, the holders published to it, the peers allowed to ask it; --refresh re-reads the caches."""
+    as_json = opt(a, "--json", flag=True); refresh = opt(a, "--refresh", flag=True); show_peers = opt(a, "--peers", flag=True)
+    conf = C.read_conf() or sys.exit(f"not joined (no {C.CONF})")
+    if refresh:
+        tok = C.token(conf)
+        out = C.refresh_memory(conf, tok)
+        for name, (st, r) in out.items():
+            if st != 200:
+                sys.exit(f"{name}: the office answered {st} {r.get('error') or ''}: {r.get('message') or ''}")
+        try:
+            os.makedirs(os.path.dirname(C.MEMORY_CACHE), exist_ok=True)
+            with open(os.path.join(os.path.dirname(C.MEMORY_CACHE), "memory-refresh"), "w") as fh:
+                fh.write(C.utc() + "\n")       # the daemon re-reads at its next heartbeat too, and owns the files thereafter
+        except OSError:
+            pass
+    facts = C.memory_facts()
+    holders = C.read_cache(C.MEMORY_CACHE) or {}
+    peers = C.read_cache(C.MEMORY_PEERS_CACHE) or {}
+    if as_json:
+        print(json.dumps({"facts": facts, "holders": holders, "peers": peers}, indent=1, default=str)); return 0
+    if facts is None:
+        print("facts:     no memory face on this host (nothing to share): install maluos-memory")
+    else:
+        print(f"facts:     shared {', '.join(facts.get('shared') or []) or 'nothing'}; ceiling {facts.get('max_classification')}; port {facts.get('port')}; {'exposed' if facts.get('exposed') else 'not exposed'}; "
+              + (", ".join(f"{s['scope']} {s['count']}" for s in facts.get('scopes') or []) or "no departmental or enterprise memory"))
+    if not holders:
+        print(f"holders:   no cache yet ({C.MEMORY_CACHE}): the daemon writes it after its first heartbeat; --refresh does it now")
+    else:
+        hs = holders.get("holders") or []
+        print(f"holders:   {len(hs)} published to this node (version {holders.get('version')}, fetched {holders.get('fetched_at')}; fan-out {holders.get('fanout_max')})")
+        for h in hs:
+            print(f"  {h.get('name'):<20} {h.get('node'):<14} {h.get('address')}:{h.get('port')}  "
+                  + ", ".join(f"{s['scope']} ({s.get('count', 0)}, ceiling {s.get('classification_max')}{', replicate' if s.get('replicate') else ''})" for s in h.get("scopes") or []))
+        office = holders.get("office") or {}
+        print(f"office:    {office.get('query')}; scopes " + (", ".join(f"{s['scope']} ({s.get('label')})" for s in office.get("scopes") or []) or "none"))
+    if peers:
+        ps = peers.get("peers") or []
+        print(f"peers:     {len(ps)} member(s) may ask this host (version {peers.get('version')}); shared {', '.join(peers.get('shared') or []) or 'nothing'}")
+        if show_peers:
+            for p in ps:
+                print(f"  {p.get('name'):<20} {p.get('node'):<14} {p.get('address') or '-':<14} " + ", ".join(f"{s['scope']} ≤ {s.get('classification_max')}" for s in p.get("scopes") or []) + ("" if p.get("public_key") else "  (no signing key registered)"))
+    return 0
 
 
 def inference_cmd(a):
@@ -469,7 +521,8 @@ def leave(a):
             told = "told; node retired" if st == 200 else f"answered {st} {r.get('error') or ''}: {r.get('message') or ''}".strip()
         except Exception as e:
             told = f"unreachable ({str(e)[:100]}); retire the node from the office's Estate"
-    C.drop_caches()                                     # slice 3: the gateway's estate rungs and peers go with the membership
+    C.drop_caches()                                     # slice 3 and 4: the gateway's estate rungs and peers, the face's holders and peers go with the membership
+    C.memory_reload()
     for s in (C.SECRET_TOKEN, C.SECRET_KEY) + ((C.SECRET_OVERLAY,) if (conf.get("secrets") or {}).get("overlay") else ()) + ((C.SECRET_INFERENCE,) if (conf.get("secrets") or {}).get("inference") else ()):
         try:
             run_as(C.USER, ["secret", "delete", s])
@@ -685,6 +738,8 @@ def main(a):
             return actions_cmd(a)
         if cmd == "inference":
             return inference_cmd(a)
+        if cmd == "memory":
+            return memory_cmd(a)
     except RuntimeError as e:
         sys.exit(f"maluctl estate {cmd}: {e}")
     print(__doc__); return 2

@@ -387,7 +387,144 @@ holder never serves another desk; servers read every department by
 default), and the two maludb-core follow-ups of decision 6 started in
 parallel in maludb-core-26 (scope and principal on statements, claims and
 facts; principal binding in the MC2DB listener). The kernel half (db/192)
-is next; nothing built yet.
+BUILT 2026-10-31 at maludb-os-core d170920 (`docs/build-specs/estate-memory.md`;
+proof `bin/test_estate_memory.php`, 67 checks PASS; the office's own recall
+stubbed where MaluDB is not running): the facts, the holders and peers
+views, the policy with its precedence, the office as a holder answering a
+desk's owner or a node's envelope, Settings → Desks → Memory. One departure
+from the contract above: no `GET …/memory/summaries` at the office (the H4
+memory has no summary kind yet; replication pulls from node holders).
+Awaiting the owner's approval and push, as slices 1 to 3. The maludb-core-26
+follow-ups: the listener's principal binding BUILT on branch
+`mc2dbd-principal-binding` (f313331; the three headers set the 0.106.0
+session settings per request through set_config, `REQUIRE_PRINCIPAL` refuses
+a bare call, 43 listener tests); scope and principal on statements, claims,
+facts and attributes BUILT as maludb-core 0.107.0 on `principal-scope-claims`
+(8734485: the columns, the stamp trigger and the RESTRICTIVE policy on all
+four, the facades with the predicate, `register_claim`/`register_fact` take
+a scope, the ingest workers stamp their namespace, 105 regression tests;
+also the three principal columns on `malu$mc2db_invocation` the listener
+writes). Neither branch is pushed or merged: the owner's.
+
+**The host half BUILT 2026-10-31** (the kernel re-vendored at 0c89fc6 as
+maludb-os-core 2026.10.31maluos1; peers rows gained `public_key`, so a
+holder verifies a peer's envelope from its peers cache alone):
+
+- **maluos-memory 0.1.2** (new): `lib/maluos_memory/{engine,server}.py`,
+  `maluctl memory` (status, facts, whoami, recall [--estate] [--as], remember,
+  forget, usage, share, unshare, expose, unexpose, keys, sync, reload), the
+  first-boot component `50-maluos-memory.py` (the role `maluos-memory` with
+  the engine's executor access, the principals `estate:guest`, `estate:sync`
+  and `user:maluos-memory`, `/etc/maluos/memory.yaml`, the socket), the
+  socket and service units; `tests/memory-local-test.sh` (54 checks, one
+  host playing both sides, `ask_self: true`). As built: the engine's scoped search is the
+  tenant's `maludb_memory` facade (the 0.106.0 view with the principal
+  predicate and the ceiling inlined) with PostgreSQL full-text search over
+  title and summary, not a vector facade: no embedding model is a given on
+  a host, and the view is what the engine enforces. A replicated copy is
+  never re-exported by its holder (a host that is both sides would copy
+  its own copies). The face asks node holders; the office is asked by the
+  caller with its own token (`maluctl office memory recall`, the Agents app),
+  since the face holds no desk or node token.
+- **maluos-estate 0.5.0**: the heartbeat carries the face's facts; the
+  daemon keeps `/run/maluos/estate/memory.json` and `memory-peers.json`
+  (each with the membership's node ref and signing key ref); `maluctl estate
+  memory [--refresh] [--peers]`; the join grants the face a read on the
+  node key; the mock office serves the memory contract (holders, peers with
+  keys, the office as a holder with canned claims, `/mock/memory`).
+- **maluos-desk 0.8.0**: the same for the desk (`/run/maluos/office/*`,
+  `maluctl office memory [--refresh] [--all]`, `maluctl office memory
+  recall`); the enrolment grants the face a read on the desk key;
+  `tests/desk-local-test.sh` 149 checks.
+- **maluos-agent 0.6.1**: `--scope dept:3:read` parsed right (`parse_scope`),
+  the owner's read on the agent's home scope, `MALUOS_MEMORY_SOCKET`;
+  `maluos_agent_tasks.memory_recall()` and `record_memory()`, the task's
+  provenance carries `scopes_read` and `holders`; the demo and personal
+  agents answer "what do we know about …" from memory;
+  `tests/agent-tasks-test.py` (22 checks, in CI).
+- **maluos-agents 0.4.0**: the Memory page real (the agent's claims as its
+  owner through the face, a recall form, an office agent's through the
+  office's memory endpoint); the self-test prints `memory N claims`.
+- **maluos-session 0.12.0**: `office.memory` in the state; maluos-firstboot
+  0.1.13 documents the component; the seeds carry maluos-memory (meta
+  0.2.14).
+- The boot test: the ten desktop steps and the node-side steps of the plan
+  above, both profiles. The image chain (`build/logs/chain-s4.sh`) ran
+  2026-10-31 18:59 to 21:29 UTC (the desktop UEFI test: 427 ok, 7 FAIL; the
+  server test did not run). The findings, fixed the same evening:
+  1. **A host never asks itself.** The desktop of the test is a desk and a
+     node at once, and each membership is published the other as a holder
+     (the kernel excludes the caller per membership): the face asked
+     `desk:41` through the node's cache and `server:57` through the desk's,
+     so a recall over the estate returned every claim three times and the
+     deny rule on one subject left the other identity answering.
+     `Holders.load()` now drops this host's own identities (the memberships'
+     node refs and each cache's `self`); replication skips them too. The
+     one-host proofs (the local test, the boot test) set `ask_self: true` in
+     `memory.yaml` and expect both identities to answer; the boot test
+     first proves the default (`holders: 0 published`, `--estate` asks
+     nobody).
+  2. **A write above the writer's ceiling is `classification`, not a 500.**
+     An agent created by `maluctl agent create` had the engine's default
+     ceiling (internal), so its restricted note failed the facade's check
+     option (`WithCheckOptionViolation`, the row it could not read back);
+     the face reported it as an internal error and the test's later counts
+     were off by one. The engine maps it to 403 `classification`, and
+     `maluctl agent create --max-classification C` now sets the agent's
+     memory ceiling (`maludb_principal.max_sensitivity`) as well as its
+     egress ceiling: one ceiling per agent.
+  3. **The node-side steps left an org summary behind.** Removing agent
+     keeper keeps its memories (as designed); the step now forgets the row
+     it wrote, and the desktop's counts are its own.
+  4. Two test-only races: the Agents app's self-test line gained `memory N
+     claims` (0.4.0) and the check's pattern had not; the slice 3 idle-mark
+     check removed the mark at a random point of the session's 30 s poll
+     (the rewrite could land before the call, as once in the slice 3 chain)
+     and now removes it right after a rewrite.
+  The chain ran again from the packages step at 21:42 UTC (maluos-memory
+  0.1.1, maluos-agent 0.6.1: the first restart had skipped the unbumped
+  packages as built). The desktop test came back with two FAILs among
+  the ten steps' checks, the rest of the slice 4 blocks passing (the
+  default "a host never asks itself", the ceiling, the envelope gate, the
+  deny and replicate rules, the sync, the office as a holder, the personal
+  agent's provenance, the Agents app):
+  5. **The one-host federated recall lost one of its two holders.** The two
+     self-envelopes go out in parallel to the same listener on an emulated
+     CPU, and the face's fan-out timeout was 2 s: the second answer came
+     late and the holder was reported failed (the local reproduction with
+     a desk and a node membership on the dev host, 57 checks, answers
+     both at once). `fanout_s` defaults to 5 s (maluos-memory 0.1.2), the
+     boot test sets 15 s beside `ask_self`, and the check now prints the
+     assertion that failed rather than the answer's head.
+  6. **The slice 3 idle-mark check raced the directory, not the session.**
+     The serving side's switch travels by heartbeat and the directory
+     publishes only a sharing node: after `share off` the desk's cache can
+     drop the rung, and a later call with `--prefer estate` is then served
+     locally with no estate rung to refuse. The check waits for the rung
+     to be back in the desk's cache before each call and accepts the
+     ledger route's `not_shared` on the rung as the refusal.
+  The third run ended at the desktop test (the same two FAILs; the server
+  test never ran). The fourth run (0.1.2, 00:14–02:51 UTC 2026-11-01)
+  came back with 437 ok and one FAIL, the one-host federated recall again,
+  now with its reason printed:
+  7. **Finding 5 was misread: the lost holder was the desk, refused, not
+     late.** The directory publishes a desk at the overlay address the
+     office allocated to the desk's key at enrolment (100.100.0.2 in the
+     test: the hub's fake spoke). A desktop that is also a node never
+     carries that address (its one interface is the node's, slice 1b), so
+     the face asked itself at a dead address and got "connection refused";
+     the local reproduction had given the desk this host's address. Under
+     `ask_self` the face now asks an own identity at its own listener
+     (maluos-memory 0.1.3); the local test publishes the desk at a dead
+     address and port to prove it (57 checks). The longer `fanout_s` stays.
+     Outside the proof the point is moot: a host never asks itself, and a
+     desk holder never serves another desk; a server asking a dual host
+     reaches its departments through the node identity.
+  The fifth run (0.1.3, 02:55–06:23 UTC 2026-11-01: packages, both
+  images, both ISOs, both boot tests) PASSED: desktop 437 checks, server
+  200, no FAIL. Both halves of the slice are boot-tested; the host half
+  waits for the owner's word to commit, the kernel half (0c89fc6) and the
+  two maludb-core branches for the owner's push and merge.
 
 ## Deferred
 

@@ -43,6 +43,13 @@ components:
   maluos-gateway:
     enabled: true
     # ollama: {install: true, pull: [llama3.2:3b, nomic-embed-text], keep_warm: [llama3.2:3b]}
+  # The memory face (package maluos-memory, Phase 13 slice 4): the role, the guest
+  # principal and /etc/maluos/memory.yaml. Nothing is shared or exposed until
+  # `maluctl memory share` / `expose`; share: [org, dept:3] here does the first.
+  maluos-memory:
+    enabled: true
+    # share: [org]
+    # tcp: {enabled: true, host: overlay, port: 11437}
   maludb-api:
     enabled: true
   # The Business OS kernel (package maludb-os-core). Names: <domain>, os.<domain>,

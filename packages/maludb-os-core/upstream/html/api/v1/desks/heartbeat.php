@@ -27,5 +27,12 @@ if (isset($body['inference'])) {      // db/191: a desk's gateway facts (a lapto
 }
 $inf = inference_changed($pdo, $row);
 $peers = peers_changed($pdo, $row);
+if (isset($body['memory'])) {      // db/192: a desk's memory facts (a desk that shares a departmental scope with servers)
+    $err = memory_facts_store($pdo, $row, $body['memory']);
+    if ($err !== null) { api_error('invalid', $err, 400); }
+}
+$mem = memory_changed($pdo, $row);
+$memPeers = memory_peers_changed($pdo, $row);
 api_json(desk_answer($pdo, $row, $ctx['member']) + ['overlay_changed' => $changed, 'inbox_unread' => inbox_unread($pdo, (int) $ctx['member']['id']),      // db/190
-                                                   'inference_changed' => $inf, 'peers_changed' => $peers]);      // db/191
+                                                   'inference_changed' => $inf, 'peers_changed' => $peers,      // db/191
+                                                   'memory_changed' => $mem, 'memory_peers_changed' => $memPeers]);      // db/192

@@ -29,6 +29,7 @@ if [ "$STEP" = packages ] || [ "$STEP" = all ]; then
     python3 tests/install-screens-test.py       # the installer's screens driven in a pty (Phase 11 slice 3)
     python3 tests/apple-t2-test.py              # the Apple T2 round: the firmware renamer and importer, the vendored packages' checksums
     python3 tests/gpu-test.py                   # Phase 13 G1: the GPU reader (nvidia-smi, sysfs, chassis, the sharing rule)
+    python3 tests/agent-tasks-test.py           # Phase 13 slice 4: the task runner's memory provenance, the --scope parsing, the face client
     rm -rf build/gsm-root && dpkg-deb -x build/maluos-system-monitor_*_amd64.deb build/gsm-root \
         && tests/system-monitor-local-test.sh build/gsm-root/usr/bin/gnome-system-monitor   # the GPUs tab against a fake session, under Xvfb
 fi

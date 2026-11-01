@@ -35,6 +35,8 @@ deterministic replies. Lives in maluos-estate; maluos_desk.mock_office is the sa
   -- Phase 13 slice 2 (docs/phase13-slice2-delegation.md): the directory, the keys, envelopes verified as the kernel does
   GET/POST /api/v1/estate/agents[/ID[/tasks]]   the directory; a node registers its agents; an agent's task interface (JSON-RPC)
   GET  /api/v1/estate/keys                 every member's public key and the coordinator's
+  GET  /api/v1/{estate,desks}/memory       slice 4: the holders this member may ask, scope by scope; /api/v1/estate/memory/peers (a holder) who may ask it
+  POST /api/v1/{estate,desks}/memory/query the office as a holder (a node's query carries its envelope); /mock/memory sets rules, departments, claims
   GET  /api/v1/estate/inbox?wait=N, POST …/inbox/ID/result    the node's inbox (tasks and actions, leased) and its results
   GET  /api/v1/estate/tasks/ID, POST /api/v1/estate/tasks (tasks/send by target)
   POST /api/v1/estate/nodes/ID/actions, GET /api/v1/estate/actions[/ID]
@@ -95,6 +97,12 @@ class Office:
         self.inf = {"facts": {}, "rules": [], "next_rule": 1, "version": 1, "peers_version": 1, "scheduler": False, "lease_s": 30}
         self.inf_keys = {}          # sha256 hex -> member ref (desk:41, server:57); fake peers too
         self.fake_peers = []        # members that exist only to call this estate's hosts in tests (/mock/peer)
+        # Phase 13 slice 4: federated memory: each member's memory facts, the policy rules, two versions, the office's own claims
+        self.mem = {"facts": {}, "rules": [], "next_rule": 1, "version": 1, "peers_version": 1, "fanout_max": 8, "rate_per_min": 30,
+                    "departments": {3: "Operations", 9: "Finance"}, "owner_departments": [3],
+                    "claims": [{"text": "The office closes at 17:00 on Fridays", "scope": "org", "kind": "memory", "sensitivity": "internal", "confidence": None},
+                               {"text": "Alex completed forklift training on 2026-09-01 (office record)", "scope": "dept:3", "kind": "memory", "sensitivity": "internal", "confidence": 0.8}],
+                    "queries": []}
 
     # -- Phase 13 slice 3: inference facts, the policy, the backends and the peers the kernel will publish
     INF_CLASSES = {"interactive": 0, "agent": 1, "batch": 2}
@@ -271,6 +279,186 @@ class Office:
                 "members": [{"ref": self.inf_ref(m), "name": m["name"], "published": self.inf_published(m), "address": m.get("overlay_address"), "presence": m.get("presence")} for m in self.inf_members()],
                 "fake_peers": [{"ref": self.inf_ref(p), "name": p["name"]} for p in self.fake_peers], "placements": self.placements[-50:]}
 
+
+    # -- Phase 13 slice 4: memory facts, the policy, the holders and the peers the kernel will publish, the office as a holder
+    MEM_SCOPE = re.compile(r"^(org|dept:[0-9]+)$")
+
+    def mem_store(self, m, facts):
+        if not isinstance(facts, dict):
+            return (400, "invalid", "memory is an object")
+        if len(json.dumps(facts)) > 8 * 1024:
+            return (400, "invalid", "memory is over 8 KB")
+        scopes = {}
+        for x in (facts.get("scopes") or []):
+            if isinstance(x, dict) and isinstance(x.get("scope"), str) and self.MEM_SCOPE.match(x["scope"]):
+                scopes[x["scope"]] = {"scope": x["scope"], "count": int(x.get("count") or 0), "updated_at": x.get("updated_at"), "kinds": x.get("kinds") if isinstance(x.get("kinds"), dict) else {}}
+        shared = sorted({x for x in (facts.get("shared") or []) if isinstance(x, str) and self.MEM_SCOPE.match(x)})
+        row = {"scopes": list(scopes.values()), "shared": shared, "max_classification": facts.get("max_classification") if facts.get("max_classification") in self.INF_SENS else "internal",
+               "port": int(facts.get("port") or 11437), "api_version": int(facts.get("api_version") or 1), "updated_at": now()}
+        sig = json.dumps([sorted(scopes), shared, row["max_classification"], row["port"], row["api_version"]])
+        old = self.mem["facts"].get(self.inf_ref(m))
+        self.mem["facts"][self.inf_ref(m)] = dict(row, signature=sig)
+        if not old or old["signature"] != sig:
+            self.mem["version"] += 1
+        return None
+
+    def mem_forget(self, m):
+        if self.mem["facts"].pop(self.inf_ref(m), None) is not None:
+            self.mem["version"] += 1
+        self.mem["version"] += 1; self.mem["peers_version"] += 1
+
+    def mem_subjects(self, m):
+        out = {"node:%d" % m["id"]: 3, "kind:" + self.inf_kind(m): 1, "org": 0}
+        if self.inf_kind(m) == "desk":
+            for d in self.mem["owner_departments"]:
+                out[f"dept:{d}"] = 2
+        return out
+
+    def mem_rule(self, caller, holder, scope):
+        """holder is a member row or {"id": 0, "kind": "coordinator"}; the kernel's precedence: node > dept > kind > org, holder-specific, scope-specific, deny."""
+        hk = holder.get("kind") if holder.get("id", 0) == 0 else self.inf_kind(holder)
+        if hk == "desk" and self.inf_kind(caller) == "desk":
+            return {"allow": False, "max_classification": None, "replicate": False, "priority": 0, "rule": "desk_to_desk"}
+        subjects = self.mem_subjects(caller)
+        default = scope == "org" or (self.inf_kind(caller) in ("server", "inference")) or (scope in subjects)
+        best, best_key = None, None
+        for r in self.mem["rules"]:
+            if r["subject"] not in subjects or (r["holder"] is not None and r["holder"] != holder.get("id")) or (r["scope"] != "*" and r["scope"] != scope):
+                continue
+            key = (subjects[r["subject"]], 1 if r["holder"] is not None else 0, 1 if r["scope"] != "*" else 0, 0 if r["allow"] else 1)
+            if best is None or key > best_key:
+                best, best_key = r, key
+        if best is None:
+            return {"allow": default, "max_classification": "internal", "replicate": False, "priority": 0, "rule": None if default else "default"}
+        return {"allow": best["allow"], "max_classification": best.get("max_classification") or "internal", "replicate": bool(best.get("replicate")), "priority": int(best.get("priority") or 0), "rule": best["id"]}
+
+    def mem_published(self, m):
+        f = self.mem["facts"].get(self.inf_ref(m))
+        return bool(f and f["shared"] and m.get("overlay_address") and not m.get("overlay_freed_at") and m.get("presence") == "online")
+
+    def mem_office_scopes(self, m):
+        office = {"id": 0, "kind": "coordinator"}
+        out = []
+        if self.inf_kind(m) == "desk":
+            out.append({"scope": "self", "classification_max": "restricted", "label": "you"})
+        r = self.mem_rule(m, office, "org")
+        if r["allow"]:
+            out.append({"scope": "org", "classification_max": r["max_classification"], "label": "the organisation"})
+        for d, name in sorted(self.mem["departments"].items()):
+            r = self.mem_rule(m, office, f"dept:{d}")
+            if r["allow"]:
+                out.append({"scope": f"dept:{d}", "classification_max": r["max_classification"], "label": name})
+        return out
+
+    def mem_holders_answer(self, m, base, everything=False):
+        out = []
+        for h in self.inf_members():
+            if h is m or not self.mem_published(h):
+                continue
+            f = self.mem["facts"][self.inf_ref(h)]
+            held = {x["scope"]: x for x in f["scopes"]}
+            scopes = []
+            for sc in f["shared"]:
+                rule = self.mem_rule(m, h, sc)
+                if not rule["allow"] and not everything:
+                    continue
+                row = {"scope": sc, "count": held.get(sc, {}).get("count", 0), "updated_at": held.get(sc, {}).get("updated_at"), "kinds": held.get(sc, {}).get("kinds", {}),
+                       "classification_max": rule["max_classification"], "replicate": rule["replicate"], "priority": rule["priority"]}
+                if everything:
+                    row["allowed"] = rule["allow"]
+                scopes.append(row)
+            if not scopes:
+                continue
+            out.append({"node": self.inf_ref(h), "id": h["id"], "kind": self.inf_kind(h), "name": self.ov_name(h) or self.ov_label(h["name"]), "display_name": h["name"],
+                        "address": h.get("overlay_address"), "port": f["port"], "api_version": f["api_version"], "max_classification": f["max_classification"], "scopes": scopes, "updated_at": f["updated_at"]})
+        m["memory_seen"] = self.mem["version"]
+        q = f"{base}/api/v1/desks/memory/query" if self.inf_kind(m) == "desk" else f"{base}/api/v1/estate/memory/query"
+        return {"ok": True, "surface": SURFACE, "fetched_at": now(), "self": self.inf_ref(m), "holders": out, "office": {"query": q, "scopes": self.mem_office_scopes(m)},
+                "fanout_max": self.mem["fanout_max"], "rate_per_min": self.mem["rate_per_min"], "refresh_s": 3600, "version": self.mem["version"]}
+
+    def mem_peers_answer(self, host, base):
+        f = self.mem["facts"].get(self.inf_ref(host)) or {"shared": []}
+        peers = []
+        for m in self.inf_members():
+            if m is host or not f["shared"]:
+                continue
+            scopes = [{"scope": sc, "classification_max": r["max_classification"], "replicate": r["replicate"], "priority": r["priority"]}
+                      for sc in f["shared"] for r in [self.mem_rule(m, host, sc)] if r["allow"]]
+            if not scopes:
+                continue
+            peers.append({"node": self.inf_ref(m), "id": m["id"], "kind": self.inf_kind(m), "name": self.ov_name(m) or self.ov_label(m["name"]), "display_name": m["name"],
+                          "address": m.get("overlay_address") if not m.get("overlay_freed_at") else None, "public_key": m.get("public_key"), "scopes": scopes})
+        host["memory_peers_seen"] = self.mem["peers_version"]
+        return {"ok": True, "surface": SURFACE, "fetched_at": now(), "self": self.inf_ref(host), "shared": f["shared"], "peers": peers,
+                "keys": f"{base}/api/v1/estate/keys", "refresh_s": 300, "version": self.mem["peers_version"]}
+
+    def mem_changed(self, m):
+        v = self.mem["version"]
+        if m.get("memory_seen") == v:
+            return False
+        m["memory_seen"] = v
+        return True
+
+    def mem_peers_changed(self, m):
+        v = self.mem["peers_version"]
+        if m.get("memory_peers_seen") == v:
+            return False
+        m["memory_peers_seen"] = v
+        return True
+
+    def mem_query(self, m, b):
+        """The office as a holder: a desk's query as its owner, a node's with its envelope; canned claims filtered by scope and classification."""
+        is_desk = self.inf_kind(m) == "desk"
+        scopes = b.get("scopes") if isinstance(b.get("scopes"), list) else []
+        if not scopes or not all(isinstance(x, str) and (self.MEM_SCOPE.match(x) or (x == "self" and is_desk)) for x in scopes):
+            return (400, "invalid", "scopes are org, dept:N" + (" or self" if is_desk else ""))
+        q = b.get("query")
+        if not isinstance(q, str) or not q.strip() or len(q) > 1000:
+            return (400, "invalid", "query is 1 to 1000 characters")
+        cls = b.get("classification") or "internal"
+        if cls not in self.INF_SENS:
+            return (400, "invalid", "classification is public, internal, restricted or prohibited")
+        env = None
+        if not is_desk:
+            env = b.get("envelope")
+            if not isinstance(env, dict):
+                return (401, "bad_envelope", "a node's query carries an envelope")
+            ok, reason, msg = self.dg_verify(env, self.inf_ref(m))
+            if not ok:
+                return (409 if reason == "replay" else 401, reason, msg)
+            auth = {x.rpartition(":")[0] if x.endswith((":read", ":write")) else x for x in ((env.get("authority") or {}).get("scopes") or []) if isinstance(x, str)}
+            for x in scopes:
+                if x not in auth:
+                    return (403, "forbidden", f"the envelope's authority does not cover {x}")
+            ecls = (env.get("authority") or {}).get("classification") or "internal"
+            if self.INF_SENS[cls] > self.INF_SENS.get(ecls, 1):
+                return (403, "classification", f"the envelope's classification is {ecls}")
+        office = {"id": 0, "kind": "coordinator"}
+        for x in scopes:
+            if x == "self":
+                continue
+            r = self.mem_rule(m, office, x)
+            if not r["allow"]:
+                return (403, "forbidden", f"This member may not read {x} at the office.")
+            if self.INF_SENS[cls] > self.INF_SENS[r["max_classification"] or "internal"]:
+                return (403, "classification", f"The ceiling on {x} is {r['max_classification']}.")
+        words = [w.lower() for w in q.split()]
+        claims = []
+        for c in self.mem["claims"]:
+            if c["scope"] not in scopes or self.INF_SENS[c.get("sensitivity") or "internal"] > self.INF_SENS[cls]:
+                continue
+            if any(w in c["text"].lower() for w in words):
+                claims.append({"text": c["text"], "scope": c["scope"], "kind": c.get("kind") or "memory", "sensitivity": c.get("sensitivity") or "internal", "confidence": c.get("confidence"),
+                               "observed_at": None, "recorded_at": None, "source": {"node": "coordinator", "object": "memory", "id": None, "ref": c.get("ref")}, "writer": None, "holder": "coordinator", "rank": len(claims) + 1})
+        read = sorted({c["scope"] for c in claims})
+        self.mem["queries"].append({"ts": now(), "member": self.inf_ref(m), "scopes": scopes, "scopes_read": read, "classification": cls, "count": len(claims),
+                                    "envelope": (env or {}).get("id"), "originator": ((env or {}).get("originator") or {}).get("principal")})
+        return {"ok": True, "surface": SURFACE, "self": self.inf_ref(m), "holder": "coordinator", "claims": claims, "scopes_asked": scopes, "scopes_read": read, "truncated": False, "count": len(claims)}
+
+    def mem_public(self):
+        return {**{k: v for k, v in self.mem.items() if k not in ("facts", "claims", "queries")}, "facts": self.mem["facts"], "claims": self.mem["claims"], "queries": self.mem["queries"][-50:],
+                "members": [{"ref": self.inf_ref(m), "name": m["name"], "published": self.mem_published(m), "address": m.get("overlay_address"), "presence": m.get("presence")} for m in self.inf_members()]}
+
     # -- the overlay (slice 1b): addresses, the hub, the peers and the names the kernel will publish
     @staticmethod
     def ov_label(name):
@@ -402,18 +590,19 @@ class Office:
 
     def endpoints(self, base):
         return {"heartbeat": f"{base}/api/v1/desks/heartbeat", "me": f"{base}/api/v1/desks/me", "leave": f"{base}/api/v1/desks/leave",
-                "records": f"{base}/mcp/records", "activity": f"{base}/mcp/activity", "memory": f"{base}/mcp/memory", "actions": None,
+                "records": f"{base}/mcp/records", "activity": f"{base}/mcp/activity", "memory": f"{base}/api/v1/desks/memory", "actions": None,
                 "models": {"url": f"{base}/desk-models", "models": list(self.models)}, "apps": f"{base}/api/v1/desks/apps",
                 "agents": f"{base}/api/v1/desks/agents", "estate": f"{base}/api/v1/desks/estate",
                 "inbox": f"{base}/api/v1/desks/inbox", "key": f"{base}/api/v1/desks/key", "keys": f"{base}/api/v1/estate/keys", "actions": f"{base}/api/v1/estate/actions",
-                "inference": f"{base}/api/v1/desks/inference", "inference_peers": f"{base}/api/v1/estate/inference/peers"}
+                "inference": f"{base}/api/v1/desks/inference", "inference_peers": f"{base}/api/v1/estate/inference/peers",
+                "memory_peers": f"{base}/api/v1/estate/memory/peers"}
 
     # -- the estate (Phase 13 slice 1): nodes, the report, the health rules the kernel will apply, the alerts
     CRITICAL_UNITS = ("postgresql@18-main.service", "maluos-vault.service")
 
     def node_endpoints(self, base):
-        return {**{k: f"{base}/api/v1/estate/{k}" for k in ("heartbeat", "me", "leave", "nodes", "agents", "keys", "inbox", "tasks", "inference")},
-                "inference_peers": f"{base}/api/v1/estate/inference/peers"}
+        return {**{k: f"{base}/api/v1/estate/{k}" for k in ("heartbeat", "me", "leave", "nodes", "agents", "keys", "inbox", "tasks", "inference", "memory")},
+                "inference_peers": f"{base}/api/v1/estate/inference/peers", "memory_peers": f"{base}/api/v1/estate/memory/peers"}
 
     def node_answer(self, node, base):
         ov = self.ov_block(node)
@@ -1203,6 +1392,18 @@ class Handler(BaseHTTPRequestHandler):
                 if p.endswith("/peers"):
                     return self.send(200, o.inf_peers_answer(m))
                 return self.send(200, o.inf_backends_answer(m, self.base(), everything=qs.get("all", ["0"])[0] == "1"))
+        if p in ("/api/v1/estate/memory", "/api/v1/desks/memory", "/api/v1/estate/memory/peers"):      # slice 4
+            m, e = self.member_from_bearer()
+            if e:
+                return self.err(*e)
+            qs = urllib.parse.parse_qs(self.path.split("?", 1)[1]) if "?" in self.path else {}
+            with o.lock:
+                if p.endswith("/peers"):
+                    return self.send(200, o.mem_peers_answer(m, self.base()))
+                return self.send(200, o.mem_holders_answer(m, self.base(), everything=qs.get("all", ["0"])[0] == "1"))
+        if p == "/mock/memory":
+            with o.lock:
+                return self.send(200, o.mem_public())
         if p == "/mock/inference":
             with o.lock:
                 return self.send(200, o.inf_public())
@@ -1265,8 +1466,13 @@ class Handler(BaseHTTPRequestHandler):
                     e = o.inf_store(node, b["inference"])
                     if e:
                         return self.err(*e)
+                if "memory" in b:                                  # slice 4: the memory face's facts
+                    e = o.mem_store(node, b["memory"])
+                    if e:
+                        return self.err(*e)
                 return self.send(200, {**o.node_answer(node, self.base()), "overlay_changed": o.ov_changed(node), "agents_registered": registered,
-                                       "inference_changed": o.inf_changed(node), "peers_changed": o.inf_peers_changed(node)})
+                                       "inference_changed": o.inf_changed(node), "peers_changed": o.inf_peers_changed(node),
+                                       "memory_changed": o.mem_changed(node), "memory_peers_changed": o.mem_peers_changed(node)})
         if p == "/api/v1/estate/leave":
             node, e = self.node_from_bearer()
             if e:
@@ -1277,7 +1483,7 @@ class Handler(BaseHTTPRequestHandler):
                 o.clear_alerts(node, set())
                 o.ov_free(node)
                 o.dg_deregister(node)
-                o.inf_forget(node)
+                o.inf_forget(node); o.mem_forget(node)
                 o.node_tokens = {t: n for t, n in o.node_tokens.items() if n != node["id"]}
             return self.send(200, {"ok": True, "surface": SURFACE, "node": {"id": node["id"], "status": "retired"}})
         if p == "/api/v1/estate/overlay/key":
@@ -1327,8 +1533,13 @@ class Handler(BaseHTTPRequestHandler):
                     e = o.inf_store(desk, b["inference"])
                     if e:
                         return self.err(*e)
+                if "memory" in b:                                  # slice 4
+                    e = o.mem_store(desk, b["memory"])
+                    if e:
+                        return self.err(*e)
                 return self.send(200, {**o.answer(desk, self.base()), "overlay_changed": o.ov_changed(desk), "inbox_unread": sum(1 for i in o.inbox if i["status"] == "unread"),
-                                       "inference_changed": o.inf_changed(desk), "peers_changed": o.inf_peers_changed(desk)})
+                                       "inference_changed": o.inf_changed(desk), "peers_changed": o.inf_peers_changed(desk),
+                                       "memory_changed": o.mem_changed(desk), "memory_peers_changed": o.mem_peers_changed(desk)})
         if p == "/api/v1/desks/leave":
             desk, e = self.desk_from_bearer()
             if e:
@@ -1336,7 +1547,7 @@ class Handler(BaseHTTPRequestHandler):
             with o.lock:
                 desk["status"], desk["retired_at"], desk["presence"] = "retired", now(), "offline"
                 o.ov_free(desk)
-                o.inf_forget(desk)
+                o.inf_forget(desk); o.mem_forget(desk)
                 o.tokens = {t: d for t, d in o.tokens.items() if d != desk["id"]}
             return self.send(200, {"ok": True, "surface": SURFACE, "desk": {"id": desk["id"], "status": "retired"}})
         if p == "/desk-models/v1/chat/completions":
@@ -1457,6 +1668,37 @@ class Handler(BaseHTTPRequestHandler):
             with o.lock:
                 o.codes[str(b.get("code") or secrets.token_hex(4))] = {"used": False, "kind": "node" if b.get("kind") in ("node", "server", "inference") else "desk"}
             return self.send(200, {"ok": True, "codes": list(o.codes)})
+        # -- Phase 13 slice 4
+        if p in ("/api/v1/estate/memory/query", "/api/v1/desks/memory/query"):
+            m, e = self.member_from_bearer()
+            if e:
+                return self.err(*e)
+            with o.lock:
+                r = o.mem_query(m, b)
+            if isinstance(r, tuple):
+                return self.err(*r)
+            return self.send(200, r)
+        if p == "/mock/memory":
+            with o.lock:
+                if b.get("delete") is not None:
+                    o.mem["rules"] = [r for r in o.mem["rules"] if r["id"] != int(b["delete"])]
+                elif b.get("clear"):
+                    o.mem["rules"] = []
+                elif b.get("subject"):
+                    r = {"id": o.mem["next_rule"], "subject": b["subject"], "scope": b.get("scope") or "*", "holder": int(b["holder"]) if b.get("holder") is not None else None,
+                         "allow": bool(b.get("allow", True)), "max_classification": b.get("max_classification"), "replicate": bool(b.get("replicate")), "priority": int(b.get("priority") or 0), "note": b.get("note")}
+                    o.mem["rules"].append(r); o.mem["next_rule"] += 1
+                if isinstance(b.get("owner_departments"), list):
+                    o.mem["owner_departments"] = [int(x) for x in b["owner_departments"]]
+                if isinstance(b.get("departments"), dict):
+                    o.mem["departments"] = {int(k): str(v) for k, v in b["departments"].items()}
+                if isinstance(b.get("claims"), list):
+                    o.mem["claims"] = b["claims"]
+                for k in ("fanout_max", "rate_per_min"):
+                    if b.get(k) is not None:
+                        o.mem[k] = int(b[k])
+                o.mem["version"] += 1; o.mem["peers_version"] += 1
+                return self.send(200, {"ok": True, "rules": o.mem["rules"], "owner_departments": o.mem["owner_departments"], "departments": o.mem["departments"]})
         # -- Phase 13 slice 3
         if p == "/api/v1/estate/inference/place":
             auth = self.headers.get("Authorization") or ""

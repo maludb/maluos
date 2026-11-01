@@ -8,10 +8,11 @@ a gateway token, and a hardened systemd unit (maluos-agent@NAME) that runs
 the agent's command as that user with the MaluOS endpoints in its
 environment.
 
-  maluctl agent create NAME [--exec CMD] [--name "Display"] [--home SCOPE] [--scope SCOPE:read|write ...]
+  maluctl agent create NAME [--exec CMD] [--name "Display"] [--home SCOPE] [--scope SCOPE[:read|:write] ...]
                      [--capability TAG ...] [--accept-from org|dept:N|user:LOGIN|agent:NAME|node:KIND ...]
                      [--max-classification public|internal|restricted|prohibited] [--approve CLASS|ORIGINATOR ...]
                      [--personal]                        the person's own representative (Phase 13 slice 2)
+                     (--max-classification is the agent's one ceiling: its egress at the gateway and what it reads from memory)
   maluctl agent policy NAME [set --accept-from ... --max-classification C --approve ... | --clear]
                      [--class agent] [--tiers a,b] [--backends a,b] [--cloud yes|no] [--egress public|internal|restricted]
                      [--budget usd_per_day=1] [--token] [--sandbox standard|strict] [--no-start]
@@ -31,8 +32,14 @@ alerts, their desk shows it as theirs, and a polkit rule lets them start,
 stop and restart its unit without an administrator's password. `--owner
 none` makes a system agent (operators only).
 
+Scopes (Phase 13 slice 4): `--scope dept:3:read` grants the principal read
+on the memory scope `dept:3` (the level is the last part when it is `read`
+or `write`, else read: `--scope org:write`, `--scope dept:3`). The home
+scope (`agent:NAME`) is the agent's personal memory; its owner gets a read
+grant on it at create, so the Agents app can show what it remembers.
+
 The agent's process sees MALUOS_PRINCIPAL, MALUOS_GATEWAY_SOCKET,
-MALUOS_VAULT_SOCKET, MALUDB_MC2DBD_URL, OPENAI_BASE_URL (the TCP listener,
+MALUOS_VAULT_SOCKET, MALUOS_MEMORY_SOCKET, MALUDB_MC2DBD_URL, OPENAI_BASE_URL (the TCP listener,
 when enabled) and, with --token, the gateway token as the credential file
 $CREDENTIALS_DIRECTORY/gateway-token. On a desk enrolled with an office
 (maluctl office) it also sees MALUOS_OFFICE_* from /etc/maluos/office.env:
@@ -94,6 +101,15 @@ def agents_hint():
             f.write(str(int(time.time())))
     except OSError:
         pass
+
+
+def parse_scope(s):
+    """--scope SCOPE[:read|:write] -> (scope, level): the level is the last part when it is read or write
+    (dept:3:read is scope dept:3, level read; org:write is org, write), else the whole string with level read."""
+    if s.endswith((":read", ":write")):
+        scope, _, level = s.rpartition(":")
+        return scope, level
+    return s, "read"
 
 
 def check_accept(rules):
@@ -373,10 +389,17 @@ def create(a):
     os.makedirs(f"{HOME}/{n}", exist_ok=True)
     u = pwd.getpwnam(user); os.chown(f"{HOME}/{n}", u.pw_uid, u.pw_gid); os.chmod(f"{HOME}/{n}", 0o750)
     # 2. the principal and its scopes
-    mp.psql(pre + f"SELECT maludb_principal_upsert({mp.ql(ref)}, 'agent', {mp.ql(display)}, {mp.ql(home)}, NULL, true);", db)
+    # one ceiling for the agent: --max-classification is its egress ceiling at the gateway and its reading ceiling in memory (maludb_principal.max_sensitivity)
+    mp.psql(pre + f"SELECT maludb_principal_upsert({mp.ql(ref)}, 'agent', {mp.ql(display)}, {mp.ql(home)}, {mp.ql(maxc) if maxc else 'NULL'}, true);", db)
     for sc in scopes:
-        scope, _, level = sc.partition(":")
-        mp.psql(pre + f"SELECT maludb_principal_grant_scope({mp.ql(ref)}, {mp.ql(scope)}, {mp.ql(level or 'read')});", db)
+        scope, level = parse_scope(sc)
+        mp.psql(pre + f"SELECT maludb_principal_grant_scope({mp.ql(ref)}, {mp.ql(scope)}, {mp.ql(level)});", db)
+    if owner:
+        # Phase 13 slice 4: the owner reads the agent's home scope (its personal memory): the Agents app's Memory page
+        try:
+            mp.psql(pre + f"SELECT maludb_principal_grant_scope({mp.ql(owner)}, {mp.ql(home)}, 'read');", db)
+        except Exception as e:
+            print(f"  warning: {owner} not granted read on {home}: {str(e)[-200:]}", file=sys.stderr)
     # 3. identity for the vault and the gateway
     for conf in ("/etc/maluos/vault.yaml", "/etc/maluos/gateway.yaml"):
         if os.path.exists(conf):
@@ -418,7 +441,7 @@ def create(a):
         pass
     with open(f"{AGENTS}/{n}.env", "w") as f:
         f.write(f"# MaluOS agent {n}: read by maluos-agent@{n}.service and `maluctl agent run`\n")
-        f.write(f"MALUOS_AGENT={n}\nMALUOS_PRINCIPAL={ref}\nMALUOS_GATEWAY_SOCKET=/run/maluos/gateway.sock\nMALUOS_VAULT_SOCKET=/run/maluos/vault.sock\n")
+        f.write(f"MALUOS_AGENT={n}\nMALUOS_PRINCIPAL={ref}\nMALUOS_GATEWAY_SOCKET=/run/maluos/gateway.sock\nMALUOS_VAULT_SOCKET=/run/maluos/vault.sock\nMALUOS_MEMORY_SOCKET=/run/maluos/memory.sock\n")
         f.write("MALUDB_MC2DBD_URL=http://127.0.0.1:5329\n")
         if tcp.get("enabled"):
             f.write(f"OPENAI_BASE_URL=http://{tcp.get('host', '127.0.0.1')}:{tcp.get('port', 11435)}/v1\nOLLAMA_HOST=http://{tcp.get('host', '127.0.0.1')}:{tcp.get('port', 11435)}\n")

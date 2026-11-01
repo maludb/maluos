@@ -395,6 +395,7 @@ function Estate({ estate, timeZone }: { estate: NonNullable<Data["estate"]>; tim
       </div>
       {estate.delegation && <Delegation d={estate.delegation} timeZone={timeZone} />}
       {estate.inference && <Inference inf={estate.inference} nodes={estate.nodes} timeZone={timeZone} />}
+      {estate.memory && <Memory mem={estate.memory} nodes={estate.nodes} timeZone={timeZone} />}
       {estate.alerts.length > 0 && (
         <>
           <h6 className="fw-bold">Open alerts</h6>
@@ -560,6 +561,77 @@ function Inference({ inf, nodes, timeZone }: { inf: NonNullable<NonNullable<Data
         <div className="col-4 col-md-1"><label className="form-label small mb-0">Priority</label><input className="form-control form-control-sm" name="priority" type="number" defaultValue="0" /></div>
         <div className="col-8 col-md-2"><label className="form-label small mb-0">Note</label><input className="form-control form-control-sm" name="note" /></div>
         <div className="col-12 col-md-12"><SubmitButton className="btn btn-sm btn-outline-primary">Add rule</SubmitButton></div>
+      </ActionForm>
+    </div>
+  );
+}
+
+function Memory({ mem, nodes, timeZone }: { mem: NonNullable<NonNullable<Data["estate"]>["memory"]>; nodes: NonNullable<Data["estate"]>["nodes"]; timeZone: string }) {
+  return (
+    <div className="mb-3" id="settings-estate-memory">
+      <h6 className="fw-bold">Shared memory</h6>
+      <p className="text-muted small">
+        Every host keeps its own memory; a member asks the holders of a scope over the overlay with its envelope and gets claims, never records. The office&apos;s own memory answers too.
+        {" "}{mem.counts.holders} holder{mem.counts.holders === 1 ? "" : "s"} published with {mem.counts.scopes} shared scope{mem.counts.scopes === 1 ? "" : "s"}; the office answered {mem.counts.queries_24h} quer{mem.counts.queries_24h === 1 ? "y" : "ies"} in the last day.
+        {" "}The office holds {mem.office.map((o) => o.label).join(", ")}.
+      </p>
+      <div className="table-responsive">
+        <table className="table table-sm table-hover mb-3" id="settings-estate-memory-holders">
+          <thead className="thead-light"><tr><th>Host</th><th>Kind</th><th>Published</th><th>Scopes held</th><th>Shared</th><th>Ceiling</th><th>Updated</th></tr></thead>
+          <tbody>
+            {mem.holders.length === 0 ? (
+              <tr><td colSpan={7} className="text-muted text-center py-3">No memory face has reported yet. A member&apos;s heartbeat carries the scopes it holds once it runs maluos-memory.</td></tr>
+            ) : mem.holders.map((h) => (
+              <tr id={`estate-memory-holder-${h.id}`} key={h.id}>
+                <td><Link href={`/locations/${h.id}`}>{h.display_name}</Link><small className="text-muted"> · {h.name}.internal{h.address ? ` (${h.address}:${h.port})` : ""}</small></td>
+                <td>{h.kind}</td>
+                <td>{h.published ? <span className="badge bg-success">yes</span> : <span className="badge bg-secondary">{h.why ?? "no"}</span>}</td>
+                <td><small>{h.scopes.map((s) => <span key={s.scope}>{s.scope} ({s.count}) </span>)}{h.scopes.length === 0 && "—"}</small></td>
+                <td><small>{h.shared.join(", ") || "nothing"}</small></td>
+                <td><small>{h.max_classification}</small></td>
+                <td>{h.updated_at ? formatDate(h.updated_at, timeZone) : <small className="text-muted">never</small>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <h6 className="fw-bold">Who may read what</h6>
+      <p className="text-muted small">Without a rule every active member reads the organisation&apos;s scope, a desk reads its owner&apos;s departments, a server reads every department, all at an internal ceiling. The most specific subject wins, a rule naming one holder beats one for any, a rule naming one scope beats one for any, and a deny beats an allow. A desk never serves another desk. A rule with replicate lets the subject copy the holder&apos;s summaries of the scope.</p>
+      {mem.rules.length > 0 && (
+        <ul className="list-unstyled mb-3" id="settings-estate-memory-rules">
+          {mem.rules.map((r) => (
+            <li key={r.id} className="mb-1 d-flex align-items-center">
+              <span className={`badge ${r.allow ? "bg-success" : "bg-danger"} me-2`}>{r.allow ? "allow" : "deny"}</span>
+              <span><strong>{r.subject}</strong> → {r.scope === "*" ? "any scope" : r.scope} at {r.holder_name ?? "any holder"}
+                <small className="text-muted">{r.max_classification ? ` · classification ≤ ${r.max_classification}` : ""}{r.replicate ? " · replicate" : ""}{r.priority !== 0 ? ` · priority ${r.priority}` : ""}{r.note ? ` · ${r.note}` : ""}</small>
+              </span>
+              <ActionForm path="/settings/desks/memory.php" className="ms-2" confirm="Remove this rule?">
+                <input type="hidden" name="op" value="rule_delete" />
+                <input type="hidden" name="id" value={r.id} />
+                <SubmitButton className="btn btn-sm btn-link text-danger p-0">remove</SubmitButton>
+              </ActionForm>
+            </li>
+          ))}
+        </ul>
+      )}
+      <ActionForm path="/settings/desks/memory.php" className="row g-2 align-items-end mb-3" id="settings-estate-memory-rule-add" resetOnSuccess>
+        <input type="hidden" name="op" value="rule_add" />
+        <div className="col-6 col-md-2"><label className="form-label small mb-0">Subject</label><input className="form-control form-control-sm" name="subject" defaultValue="org" placeholder="org, dept:3, kind:desk, node:57" /></div>
+        <div className="col-6 col-md-2"><label className="form-label small mb-0">Scope</label><input className="form-control form-control-sm" name="scope" defaultValue="*" placeholder="*, org, dept:3" /></div>
+        <div className="col-6 col-md-2"><label className="form-label small mb-0">Holder</label>
+          <select className="form-select form-select-sm" name="holder_location_id" defaultValue=""><option value="">any</option>{nodes.map((n) => <option key={n.id} value={n.id}>{n.name}</option>)}</select></div>
+        <div className="col-3 col-md-1"><label className="form-label small mb-0">Allow</label><select className="form-select form-select-sm" name="allow" defaultValue="1"><option value="1">allow</option><option value="0">deny</option></select></div>
+        <div className="col-3 col-md-2"><label className="form-label small mb-0">Classification ≤</label><select className="form-select form-select-sm" name="max_classification" defaultValue=""><option value="">internal</option><option value="public">public</option><option value="internal">internal</option><option value="restricted">restricted</option><option value="prohibited">prohibited</option></select></div>
+        <div className="col-3 col-md-1"><label className="form-label small mb-0">Replicate</label><select className="form-select form-select-sm" name="replicate" defaultValue="0"><option value="0">no</option><option value="1">yes</option></select></div>
+        <div className="col-3 col-md-1"><label className="form-label small mb-0">Priority</label><input className="form-control form-control-sm" name="priority" type="number" defaultValue="0" /></div>
+        <div className="col-12 col-md-1"><label className="form-label small mb-0">Note</label><input className="form-control form-control-sm" name="note" /></div>
+        <div className="col-12"><SubmitButton className="btn btn-sm btn-outline-primary">Add rule</SubmitButton></div>
+      </ActionForm>
+      <ActionForm path="/settings/desks/memory.php" className="row g-2 align-items-end mb-3" id="settings-estate-memory-limits">
+        <input type="hidden" name="op" value="limits" />
+        <div className="col-4 col-md-2"><label className="form-label small mb-0">Holders asked at once</label><input className="form-control form-control-sm" name="fanout_max" type="number" defaultValue={mem.fanout_max} min={1} max={32} /></div>
+        <div className="col-4 col-md-2"><label className="form-label small mb-0">Office queries a minute</label><input className="form-control form-control-sm" name="rate_per_min" type="number" defaultValue={mem.rate_per_min} min={1} max={1000} /></div>
+        <div className="col-4 col-md-2"><SubmitButton className="btn btn-sm btn-outline-secondary">Save limits</SubmitButton></div>
       </ActionForm>
     </div>
   );

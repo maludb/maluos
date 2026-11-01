@@ -1,0 +1,14 @@
+#!/bin/sh
+set -e
+case "$1" in
+    configure)
+        if ! getent passwd maluos-memory >/dev/null; then
+            adduser --system --group --no-create-home --home /var/lib/maluos/memory \
+                    --shell /usr/sbin/nologin maluos-memory
+        fi
+        install -d -m 0755 /var/lib/maluos
+        install -d -o maluos-memory -g maluos-memory -m 0750 /var/lib/maluos/memory
+        ;;
+esac
+#DEBHELPER#
+exit 0

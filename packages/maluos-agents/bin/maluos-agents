@@ -6,7 +6,9 @@ One window for every agent the person can use: the agents on this desk
 agent: Talk (tasks sent and answers received over the agent's task
 interface, maluos_agent_tasks: a local socket or the office's task URL),
 Control (start, stop, restart, the unit's logs, a one-off command), Policy,
-Memory and Activity. The UI is web technology (HTML/JS under
+Memory (Phase 13 slice 4: the agent's claims from the memory face, asked as
+its owner, and a recall box; an office agent's through the office's memory
+endpoint) and Activity. The UI is web technology (HTML/JS under
 /usr/share/maluos-agents/ui) in a WebKitGTK window; this program is the
 native side: the window, the session bus (com.maluos.Session), the task
 sockets, the vault, the office, notifications and the icons.
@@ -22,11 +24,13 @@ an agent loads with the desk's identity (the desk token as the Bearer header
 on its first request, so the office can answer with a session cookie); the
 Control and Activity pages re-read on a timer while they are visible.
 """
-import json, os, subprocess, sys, threading, time, urllib.parse
+import http.client, json, os, socket, subprocess, sys, threading, time, urllib.parse
 
 sys.path.insert(0, "/usr/lib/maluos")
 
 UI = os.environ.get("MALUOS_AGENTS_UI") or "/usr/share/maluos-agents/ui/index.html"
+MEMORY_SOCKET = os.environ.get("MALUOS_MEMORY_SOCKET", "/run/maluos/memory.sock")     # Phase 13 slice 4: the memory face
+OFFICE_ENV = os.environ.get("MALUOS_OFFICE_ENV", "/etc/maluos/office.env")
 BUS_NAME, OBJ, IFACE = "com.maluos.Session", "/com/maluos/Session", "com.maluos.Session1"
 XML = """<node><interface name="com.maluos.Session1">
   <method name="GetState"><arg type="s" name="json" direction="out"/></method>
@@ -49,6 +53,55 @@ def read_yaml(path):
             return yaml.safe_load(f) or {}
     except Exception:
         return {}
+
+
+class MemoryError_(Exception):
+    """The memory face refused or is absent: code and a one-sentence message."""
+    def __init__(self, code, message):
+        super().__init__(message); self.code, self.message = code, message
+
+
+class _UnixConn(http.client.HTTPConnection):
+    def __init__(self, path, timeout=30):
+        super().__init__("maluos-memory", timeout=timeout); self._path = path
+
+    def connect(self):
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); s.settimeout(self.timeout); s.connect(self._path); self.sock = s
+
+
+def memory_api(path, body, timeout=30):
+    """POST to the memory face over its Unix socket as the signed-in person (the face identifies the caller by uid).
+    Raises MemoryError_ when the face is absent or refuses."""
+    if not os.path.exists(MEMORY_SOCKET):
+        raise MemoryError_("absent", "the memory face is not running")
+    c = _UnixConn(MEMORY_SOCKET, timeout)
+    try:
+        c.request("POST", path, body=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
+        r = c.getresponse(); raw = r.read()
+    except (OSError, http.client.HTTPException) as e:
+        raise MemoryError_("unreachable", f"the memory face did not answer ({e.__class__.__name__}: {str(e)[:100]})")
+    finally:
+        c.close()
+    try:
+        d = json.loads(raw or b"{}")
+    except ValueError:
+        raise MemoryError_("bad_answer", f"the memory face answered HTTP {r.status} with no JSON")
+    if r.status >= 400 or not isinstance(d, dict):
+        e = (d.get("error") if isinstance(d, dict) else None) or {}
+        raise MemoryError_(e.get("code") or str(r.status), e.get("message") or f"the memory face answered HTTP {r.status}")
+    return d
+
+
+def office_env():
+    """/etc/maluos/office.env as a dict (the desk writes it at enrolment; MALUOS_OFFICE_MEMORY_MCP since slice 4)."""
+    env = {}
+    try:
+        for line in open(OFFICE_ENV):
+            if "=" in line and not line.startswith("#"):
+                k, v = line.rstrip("\n").split("=", 1); env[k] = v.strip('"')
+    except OSError:
+        pass
+    return env
 
 
 def manifest_caps(name):
@@ -87,7 +140,7 @@ class Bridge:
         o = s.get("office") or {}
         return {"service": bool(s), "host": s.get("host") or {}, "me": s.get("me") or {}, "agents": unified(s),
                 "office": {"enrolled": bool(o.get("enrolled")), "name": (o.get("office") or {}).get("name"), "url": o.get("url"), "presence": o.get("presence"),
-                           "agents_error": o.get("agents_error"), "inbox": o.get("inbox") or {}} if o else {"enrolled": False},
+                           "agents_error": o.get("agents_error"), "inbox": o.get("inbox") or {}, "endpoints": o.get("endpoints") or {}} if o else {"enrolled": False},
                 "selected": self.app.selected, "ts": s.get("ts")}
 
     def find(self, aid):
@@ -211,19 +264,70 @@ class Bridge:
         return out
 
     def m_agent_memory(self, p):
+        """The Memory page (Phase 13 slice 4): a local agent's compartments from the vault and its newest claims from the
+        memory face, asked as the signed-in person acting as the agent (the face allows its owner); an office agent's
+        claims through the office's memory endpoint when the desk has one."""
         a = self.find(p["id"])
-        out = {"compartments": [], "note": None}
+        out = {"compartments": [], "claims": [], "scopes": {"read": [], "write": []}, "source": None, "note": None}
         if a["kind"] == "local":
+            notes = []
             try:
                 from maluos_vault_client import Vault
                 v = Vault(os.environ.get("MALUOS_VAULT_SOCKET"))
                 out["compartments"] = [c for c in v.compartments() if c.get("name") == a["principal"] or c.get("owner") == a["principal"] or c.get("owner_ref") == a["principal"]]
             except Exception as e:
-                out["note"] = f"vault: {e.__class__.__name__}: {str(e)[:120]}"
-            out["claims_note"] = "What the agent remembers as claims with provenance comes with Phase 13 slice 4 (federated memory); its vault compartment is listed here."
-        else:
-            out["claims_note"] = "The office's memory endpoint answers agents, not desks, until Phase 13 slice 4."
+                notes.append(f"vault: {e.__class__.__name__}: {str(e)[:120]}")
+            try:
+                r = memory_api("/v1/recent", {"as": a["principal"], "limit": int(p.get("limit") or 30)})
+                out["claims"] = [c for c in (r.get("claims") or []) if isinstance(c, dict)]
+                out["scopes"] = {"read": r.get("read") or [], "write": r.get("write") or []}
+                out["source"] = "the memory face, as the agent's owner"
+            except MemoryError_ as e:
+                notes.append(e.message if e.code in ("absent", "unreachable") else f"the memory face refused ({e.code}): {e.message}")
+            except Exception as e:
+                notes.append(f"memory: {e.__class__.__name__}: {str(e)[:120]}")
+            out["note"] = "; ".join(notes) or None
+            return out
+        url = office_env().get("MALUOS_OFFICE_MEMORY_MCP")
+        st_office = (self.app.state or {}).get("office") or {}
+        if not url or not ((st_office.get("endpoints") or {}).get("memory", True)):
+            out["note"] = "The office publishes no memory endpoint to this desk."
+            return out
+        import urllib.request
+        body = {"scopes": ["org"], "query": a.get("agent") or a.get("name") or "", "limit": 20}
+        req = urllib.request.Request(url.rstrip("/") + "/query", data=json.dumps(body).encode(), method="POST",
+                                     headers={"Authorization": f"Bearer {self.office_token()}", "Accept": "application/json", "Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=15) as r:
+                d = json.loads(r.read() or b"{}")
+        except urllib.error.HTTPError as e:
+            try:
+                err = json.loads(e.read() or b"{}")
+            except ValueError:
+                err = {}
+            out["note"] = f"{a.get('office')} refused the memory query ({e.code}): {(err.get('error') if isinstance(err.get('error'), str) else (err.get('error') or {}).get('message')) or err.get('message') or ''}".strip()
+            return out
+        except Exception as e:
+            out["note"] = f"{a.get('office')} did not answer the memory query ({e.__class__.__name__}: {str(e)[:100]})"
+            return out
+        out["claims"] = [c for c in (d.get("claims") or []) if isinstance(c, dict)]
+        out["scopes"] = {"read": d.get("read") or d.get("scopes") or ["org"], "write": d.get("write") or []}
+        out["source"] = f"{a.get('office')} (memory endpoint)"
         return out
+
+    def m_agent_recall(self, p):
+        """A search in the agent's memory (local agents): the face's /v1/recall as the agent, optionally across the estate."""
+        a = self.find(p["id"])
+        if a["kind"] != "local":
+            raise ValueError("recall is for a local agent; an office agent's claims come through the office's memory endpoint")
+        q = str(p.get("query") or "").strip()
+        if not q:
+            raise ValueError("a query is needed")
+        try:
+            r = memory_api("/v1/recall", {"as": a["principal"], "query": q[:1000], "estate": bool(p.get("estate")), "limit": int(p.get("limit") or 12)}, timeout=40)
+        except MemoryError_ as e:
+            raise ValueError(e.message)
+        return {"claims": r.get("claims") or [], "holders": r.get("holders") or [], "holders_failed": r.get("holders_failed") or [], "scopes": r.get("scopes") or [], "count": r.get("count", len(r.get("claims") or []))}
 
     # -- Phase 13 slice 2: the policy editor, the personal agent, the inbox
     def m_policy_set(self, p):
@@ -465,10 +569,19 @@ def run_gui(argv, selected, self_test):
                     st = self.bridge.state()
                     loc = [a for a in st["agents"] if a["kind"] == "local"]; off = [a for a in st["agents"] if a["kind"] == "office"]
                     personal = [a for a in loc if "personal" in (a.get("capabilities") or [])]
+                    # Phase 13 slice 4: the Memory page of the selected local agent (else the first) through the face
+                    mem_agent = next((a for a in loc if a["id"] == self.selected), None) or (loc[0] if loc else None)
+                    memory = "memory unavailable (no local agent)"
+                    if mem_agent:
+                        try:
+                            m = self.bridge.m_agent_memory({"id": mem_agent["id"]})
+                            memory = f"memory {len(m['claims'])} claims" if m.get("source") else f"memory unavailable ({m.get('note') or 'no answer'})"
+                        except Exception as e:
+                            memory = f"memory unavailable ({e.__class__.__name__}: {str(e)[:80]})"
                     print(f"self-test ok: Agents: service {'reachable' if st['service'] else 'unreachable'}, {len(loc)} local agents, {len(off)} office agents"
                           + (f" at {st['office'].get('name')}" if st["office"].get("enrolled") else ", no office")
                           + f", directory {len([a for a in off if a.get('node_ref')])}, personal agent {'present (' + personal[0]['name'] + ')' if personal else 'absent'}"
-                          + f", inbox {((st['office'] or {}).get('inbox') or {}).get('unread', 0)} unread"
+                          + f", inbox {((st['office'] or {}).get('inbox') or {}).get('unread', 0)} unread, {memory}"
                           + (f", selected {self.selected}" if self.selected else "") + f", ui {params.get('version')}")
                     self.quit(); return False
                 GLib.timeout_add(800, report)

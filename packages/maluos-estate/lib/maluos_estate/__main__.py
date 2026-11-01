@@ -17,6 +17,7 @@ from maluos_estate import client as C, report as R
 LADDER = (10, 30, 60)
 KEYS_EVERY = 300          # the directory's keys are re-read this often (and at once after a bad signature)
 INFERENCE_HINT = os.environ.get("MALUOS_ESTATE_INFERENCE_HINT", "/run/maluos/estate/inference-refresh")   # slice 3: `maluctl estate inference --refresh` asks the daemon too
+MEMORY_HINT = os.environ.get("MALUOS_ESTATE_MEMORY_HINT", "/run/maluos/estate/memory-refresh")            # slice 4: `maluctl estate memory --refresh`
 TASK_WAIT_S = 100         # how long a task is waited for before it is reported running and followed up
 TASK_MAX_S = 1800
 
@@ -194,6 +195,23 @@ def main(argv=None):
     threading.Thread(target=inbox.loop, daemon=True).start()
     manifests_due = True                      # slice 2: the agents are registered with the first heartbeat, each report, and after the hint
     inf_at, peers_at = 0.0, 0.0               # slice 3: when the backends and the peers caches were last written
+    mem_at, mem_peers_at = 0.0, 0.0           # slice 4: the memory holders and peers caches
+
+    def memory_refresh(conf, tok, which):
+        nonlocal mem_at, mem_peers_at
+        try:
+            for name, (st, r) in C.refresh_memory(conf, tok, which).items():
+                if st == 200:
+                    if name == "holders":
+                        mem_at = time.time()
+                        log(f"memory: {len(r.get('holders') or [])} holder(s) published to this node (version {r.get('version')}); the office holds {len((r.get('office') or {}).get('scopes') or [])} scope(s) for it")
+                    else:
+                        mem_peers_at = time.time()
+                        log(f"memory: {len(r.get('peers') or [])} peer(s) may ask this host (version {r.get('version')})")
+                else:
+                    log(f"memory {name}: {st} {r.get('error') or ''}: {r.get('message') or ''}")
+        except Exception as e:
+            log(f"memory: {e.__class__.__name__}: {str(e)[:120]}")
 
     def inference_refresh(conf, tok, which):
         nonlocal inf_at, peers_at
@@ -239,7 +257,8 @@ def main(argv=None):
             manifests_due = True
         agents = C.manifests() if (manifests_due or rep is not None) else None
         inference = C.gateway_inference()         # slice 3: what this host's gateway serves, its queue and its sharing switch
-        res = C.heartbeat(conf, tok, "online", rep, agents=agents, inference=inference)
+        memory = C.memory_facts()                 # slice 4: the scopes this host's memory face holds and shares
+        res = C.heartbeat(conf, tok, "online", rep, agents=agents, inference=inference, memory=memory)
         if res["ok"]:
             fails = 0
             inbox.set(conf, tok)
@@ -261,6 +280,20 @@ def main(argv=None):
             if which:
                 inference_refresh(conf, tok, which)
             res["inference"] = {"sent": inference is not None, "backends_at": inf_at or None, "peers_at": peers_at or None, "editions": res.get("editions")}
+            # slice 4: the memory holders (hourly, on memory_changed, on the hint) and the peers (every 5 min, on memory_peers_changed)
+            mhinted = False
+            try:
+                os.remove(MEMORY_HINT); mhinted = True
+            except OSError:
+                pass
+            mwhich = []
+            if (conf.get("endpoints") or {}).get("memory") and (res.get("memory_changed") or mhinted or time.time() - mem_at > C.MEMORY_REFRESH_S):
+                mwhich.append("holders")
+            if (conf.get("endpoints") or {}).get("memory") and (res.get("memory_peers_changed") or mhinted or time.time() - mem_peers_at > C.MEMORY_PEERS_REFRESH_S):
+                mwhich.append("peers")
+            if mwhich:
+                memory_refresh(conf, tok, mwhich)
+            res["memory"] = {"sent": memory is not None, "holders_at": mem_at or None, "peers_at": mem_peers_at or None}
             if rep is not None:
                 last_report = time.time(); res["last_report_at"] = res["ts"]
             else:

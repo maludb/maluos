@@ -1,0 +1,39 @@
+maluos-memory (0.1.3) resolute; urgency=medium
+
+  * ask_self: an own identity is asked at this face's own listener. The
+    directory publishes a desk at the overlay address the office allocated to
+    the desk's key, which a desktop that is also a node never carries (its
+    interface is the node's): the one-host proof got "connection refused".
+
+ -- Edward Honour <ed@maludb.org>  Sun, 01 Nov 2026 03:10:00 +0000
+
+maluos-memory (0.1.2) resolute; urgency=medium
+
+  * fanout_s defaults to 5 s (2 s was tight for two parallel queries at an
+    emulated CPU, and for a slow holder on a real estate); memory.yaml sets it.
+
+ -- Edward Honour <ed@maludb.org>  Sun, 01 Nov 2026 00:10:00 +0000
+
+maluos-memory (0.1.1) resolute; urgency=medium
+
+  * The face never asks, or replicates from, this host's own identities (a desk that is
+    a node too is published itself through the other membership); memory.yaml `ask_self:
+    true` keeps the one-host proofs.
+    A write above the writer's ceiling (the facade's check option) is refused 403
+    classification instead of an internal error.
+
+ -- Edward Honour <ed@maludb.org>  Sat, 31 Oct 2026 21:50:00 +0000
+
+maluos-memory (0.1.0) resolute; urgency=medium
+
+  * Phase 13 slice 4 (docs/phase13-slice4-memory.md): the memory face of a
+    MaluOS host. A Unix socket for local principals (recall, remember,
+    forget, usage, the facts the heartbeat carries) and an overlay listener
+    for the estate (a slice 2 envelope as the credential, verified against
+    the peers the office publishes; the delegated scopes intersected with
+    what this host shares; claims, never records). `maluctl memory`: status,
+    facts, whoami, recall [--estate], remember, forget, usage, share,
+    unshare, expose, unexpose, keys, sync, reload. The first-boot component
+    makes the role, the guest and sync principals and the configuration.
+
+ -- Edward Honour <ed@maludb.org>  Sat, 31 Oct 2026 22:00:00 +0000

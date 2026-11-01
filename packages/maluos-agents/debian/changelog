@@ -1,3 +1,21 @@
+maluos-agents (0.4.0) resolute; urgency=medium
+
+  * Phase 13 slice 4, federated memory (docs/phase13-slice4-memory.md): the
+    Memory page is real. A local agent's page shows the scopes it reads
+    and writes and its newest claims (when, scope, kind, sensitivity, the
+    text, the writer, the holder) from the memory face, asked over
+    /run/maluos/memory.sock as the signed-in person acting as the agent
+    (the face allows its owner); a Recall box searches the agent's memory,
+    optionally across the estate, and names the holders asked and those
+    that did not answer; a face that is absent or refuses leaves an empty
+    list with the reason. An office agent's claims come through the
+    office's memory endpoint (MALUOS_OFFICE_MEMORY_MCP in office.env) when
+    the office publishes one.
+  * --self-test loads the Memory page of the selected (else first) local
+    agent and reports "memory N claims" or "memory unavailable (why)".
+
+ -- Edward Honour <ed@maludb.org>  Sat, 31 Oct 2026 22:30:00 +0000
+
 maluos-agents (0.3.1) resolute; urgency=medium
 
   * The Agents app folder is written only when its name, flag or app list

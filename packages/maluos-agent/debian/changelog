@@ -1,3 +1,33 @@
+maluos-agent (0.6.1) resolute; urgency=medium
+
+  * `maluctl agent create --max-classification C` sets the agent's memory ceiling
+    (maludb_principal.max_sensitivity) as well as its egress ceiling: one ceiling per agent.
+
+ -- Edward Honour <ed@maludb.org>  Sat, 31 Oct 2026 21:50:00 +0000
+
+maluos-agent (0.6.0) resolute; urgency=medium
+
+  * Phase 13 slice 4, federated memory (docs/phase13-slice4-memory.md):
+    maluctl agent create parses --scope dept:3:read as scope dept:3, level
+    read (the level is the last part when it is read or write; the first
+    colon split made the scope "dept" and the level "3:read"); the owner is
+    granted read on the agent's home scope, so the Agents app can list
+    what the agent remembers; the env file carries MALUOS_MEMORY_SOCKET;
+    the unit wants and starts after maluos-memory.socket (Wants, not
+    Requires: an agent still runs without the face).
+  * maluos_agent_tasks: memory_recall() asks the face's /v1/recall with the
+    task's envelope and classification and records the scopes read and the
+    holders asked; record_memory() for queries made another way; the
+    task's provenance carries scopes_read and holders (the sorted unions)
+    instead of an empty list.
+  * The demo agent and the personal agent answer "what do we know about X"
+    and "recall X" from memory, one line per claim with its scope,
+    sensitivity and holder; everything else still goes to the gateway.
+  * tests/agent-tasks-test.py: the scope parsing, record_memory and the
+    provenance, memory_recall against a fake face socket.
+
+ -- Edward Honour <ed@maludb.org>  Sat, 31 Oct 2026 22:30:00 +0000
+
 maluos-agent (0.5.2) resolute; urgency=medium
 
   * Estate tasks: the model calls an agent makes while it works a task

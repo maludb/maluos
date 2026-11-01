@@ -1,0 +1,29 @@
+Source: maluos-memory
+Section: admin
+Priority: optional
+Maintainer: Edward Honour <ed@maludb.org>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.6.2
+Homepage: https://github.com/maludb/maluos
+Rules-Requires-Root: no
+
+Package: maluos-memory
+Architecture: all
+Depends: ${misc:Depends}, adduser, python3 (>= 3.12), python3-psycopg, python3-yaml, python3-cryptography, maluos-firstboot (>= 0.1.12), maluos-vault (>= 0.4.2), maluos-estate (>= 0.5.0)
+Recommends: maluos-agent (>= 0.6.0)
+Description: MaluOS memory face: scoped memory for local principals and the estate
+ Every MaluOS host is a memory host (its MaluDB tenant, the principals and
+ scopes of its agents). The face is the one service that opens principal-
+ bound sessions on it (Phase 13 slice 4, docs/phase13-slice4-memory.md):
+ over /run/maluos/memory.sock it answers local principals, identified by
+ their uid (recall, remember, forget, usage); over the overlay (port 11437,
+ `maluctl memory expose`) it answers the estate: a query carries a slice 2
+ envelope, the face verifies it against the peers the office publishes,
+ intersects the delegated scopes with what this host shares (`maluctl
+ memory share`, the guest principal's grants and ceiling), and answers
+ claims: the memory's text with its scope, sensitivity, confidence, time,
+ source and holder, never the record behind it. `maluctl memory recall
+ --estate` asks every holder the office publishes for the scopes asked;
+ `maluctl memory sync` copies the summaries a rule lets this host replicate,
+ provenance kept. Every query answered or asked is one ledger row with the
+ scopes and the counts, never the text.

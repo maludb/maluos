@@ -1,3 +1,11 @@
+maluos-meta (0.2.14) resolute; urgency=medium
+
+  * Phase 13 slice 4: maluos-server and maluos-desktop depend on
+    maluos-memory (the memory face: maluctl memory, scoped memory for
+    local principals and the estate).
+
+ -- Edward Honour <ed@maludb.org>  Sat, 31 Oct 2026 22:30:00 +0000
+
 maluos-meta (0.2.13) resolute; urgency=medium
 
   * Phase 13 slice 1: maluos-server and maluos-desktop depend on

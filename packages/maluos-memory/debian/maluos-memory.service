@@ -1,0 +1,43 @@
+[Unit]
+Description=MaluOS memory face: scoped memory for local principals and the estate
+Documentation=https://github.com/maludb/maluos
+Requires=maluos-memory.socket
+After=maluos-memory.socket postgresql.service maluos-vault.socket
+
+[Service]
+Type=simple
+User=maluos-memory
+Group=maluos-memory
+WorkingDirectory=/usr/lib/maluos
+Environment=PYTHONPATH=/usr/lib/maluos
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 -s -m maluos_memory
+StateDirectory=maluos/memory
+StateDirectoryMode=0750
+Restart=on-failure
+RestartSec=2
+
+# Hardening: PostgreSQL over its socket, the vault over its socket, the overlay over TCP; writes only its state directory.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

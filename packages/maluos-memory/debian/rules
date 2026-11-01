@@ -1,0 +1,10 @@
+#!/usr/bin/make -f
+%:
+	dh $@
+
+override_dh_installsystemd:
+	dh_installsystemd --no-enable --no-start maluos-memory.service
+	dh_installsystemd --name=maluos-memory --no-enable --no-start maluos-memory.socket
+
+override_dh_auto_clean:
+	find lib -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true

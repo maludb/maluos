@@ -23,10 +23,14 @@ Server, in an agent:
 
     tasks.gateway_headers()                # inside a task: X-MaluOS-Sensitivity and X-MaluOS-Envelope for the gateway
     tasks.record_model_call(resp.headers)  # after a gateway call: the provenance's models list
+    tasks.memory_recall("alex training")   # slice 4: the memory face's /v1/recall with the task's envelope; the claims,
+                                           # and the scopes read and holders asked land in the provenance
+    tasks.record_memory(["dept:3"], ["server:57"])   # by hand, after a memory query made another way
 
 serve() returns at once (a daemon thread); tasks run one at a time in order.
 A task is {"id", "state": submitted|working|pending_approval|completed|failed|refused, "ts", "input": {"text"},
-"output": {"text", "artifacts"}, "error", "done_ts", "envelope_id", "provenance", "usage", "ask"}. While it works,
+"output": {"text", "artifacts"}, "error", "done_ts", "envelope_id", "provenance", "usage", "ask"}; provenance carries
+scopes_read and holders (the union over the task's memory queries, docs/phase13-slice4-memory.md decision 10). While it works,
 output.text is whatever the handler reported through progress() so far; the final return value replaces it.
 
 Client:
@@ -39,7 +43,8 @@ import http.client, json, os, pwd, socket, struct, sys, threading, time, urllib.
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import UnixStreamServer
 
-VERSION = "0.3"
+VERSION = "0.4"
+MEMORY_SOCKET = os.environ.get("MALUOS_MEMORY_SOCKET", "/run/maluos/memory.sock")
 SOCKET_DIR = os.environ.get("MALUOS_AGENT_SOCKET_DIR", "/run/maluos/agents")
 AGENTS_DIR = os.environ.get("MALUOS_AGENTS_DIR", "/etc/maluos/agents")
 ESTATE_USER = os.environ.get("MALUOS_ESTATE_USER", "maluos-estate")
@@ -105,6 +110,51 @@ def record_model_call(headers=None, model=None, backend=None, usd=None):
     b, _, m = bm.partition("/")
     t.setdefault("_models", []).append({"request": h.get("x-maluos-request"), "model": model or m or None, "backend": backend or b or None,
                                         "usd": usd if usd is not None else None, "ts": utc()})
+
+
+def record_memory(scopes_read, holders=None):
+    """Remember a memory query for the task's provenance (slice 4): the scopes it read and the holders it asked.
+    provenance.scopes_read and provenance.holders are the sorted unions over the task."""
+    t = current()
+    if t is None:
+        return
+    t.setdefault("_memory", []).append({"scopes_read": sorted({str(x) for x in (scopes_read or [])}),
+                                        "holders": sorted({str(x) for x in (holders or [])}), "ts": utc()})
+
+
+def memory_recall(query, scopes=None, classification=None, limit=12, estate=True, timeout=30):
+    """Ask the memory face (MALUOS_MEMORY_SOCKET) for claims about `query` as this agent: POST /v1/recall with the
+    current task's envelope when there is one (the holders verify its signer) and the envelope's classification
+    unless one is given. The answer (claims, holders, holders_failed) is returned as the face gave it, and the scopes
+    read and the holders asked are recorded for the task's provenance. A face that is absent or refuses answers
+    {"ok": False, "error": {"code", "message"}}; nothing raises."""
+    t = current()
+    env = (t.get("_envelope") or t.get("envelope")) if t else None
+    if not classification:
+        classification = (env.get("authority") or {}).get("classification") if isinstance(env, dict) else None
+    body = {"query": query, "scopes": scopes, "classification": classification or "internal", "limit": int(limit), "estate": bool(estate),
+            "envelope": env if isinstance(env, dict) else None}
+    conn = _UnixConn(MEMORY_SOCKET, timeout)
+    try:
+        conn.request("POST", "/v1/recall", body=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
+        r = conn.getresponse(); data = r.read()
+    except (OSError, http.client.HTTPException) as e:
+        return {"ok": False, "error": {"code": "unavailable", "message": f"the memory face is not reachable at {MEMORY_SOCKET} ({e.__class__.__name__}: {str(e)[:120]})"}}
+    finally:
+        conn.close()
+    try:
+        d = json.loads(data or b"{}")
+    except ValueError:
+        return {"ok": False, "error": {"code": "bad_answer", "message": f"HTTP {r.status}: not JSON"}}
+    if r.status >= 400 or not isinstance(d, dict) or not d.get("ok", r.status < 400):
+        err = (d.get("error") if isinstance(d, dict) else None) or {}
+        if not isinstance(err, dict):
+            err = {"code": str(err)}
+        return {"ok": False, "error": {"code": err.get("code") or str(r.status), "message": err.get("message") or f"HTTP {r.status}"}}
+    claims = [c for c in (d.get("claims") or []) if isinstance(c, dict)]
+    read = d.get("scopes_read") if isinstance(d.get("scopes_read"), list) else [c.get("scope") for c in claims if c.get("scope")]
+    record_memory(read, d.get("holders") or [])
+    return d
 
 
 # -- the policy (slice 2): read at every envelope-bearing send, so `maluctl agent policy set` applies at once
@@ -348,11 +398,14 @@ class Agent:
         """The task's provenance and usage (slice 2): the envelope's chain plus this hop, the model calls made, the budget."""
         env = t.get("_envelope")
         models = t.pop("_models", []) or []
+        memory = t.pop("_memory", []) or []
         usd = sum(float(m.get("usd") or 0) for m in models)
         me = {"principal": self.card.get("principal") or f"agent:{self.name}", "node": (env or {}).get("target", {}).get("node") if env else None}
         chain = list((env or {}).get("chain") or []) + [dict(me, ts=t["done_ts"], task_id=t["id"])]
         t["provenance"] = {"envelope": t.get("envelope_id"), "node": me["node"], "agent": me["principal"], "chain": chain, "models": models,
-                           "scopes_read": [], "started_at": t.get("_started"), "done_ts": t["done_ts"]}
+                           "scopes_read": sorted({s for q in memory for s in (q.get("scopes_read") or [])}),
+                           "holders": sorted({h for q in memory for h in (q.get("holders") or [])}),
+                           "started_at": t.get("_started"), "done_ts": t["done_ts"]}
         t["usage"] = {"usd": round(usd, 6), "calls": len(models), "budget": ((env or {}).get("authority") or {}).get("budget")}
 
 

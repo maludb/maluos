@@ -1,3 +1,22 @@
+maluos-desk (0.8.0) resolute; urgency=medium
+
+  * Phase 13 slice 4: federated memory. The desk heartbeat carries the
+    memory face's facts (GET /v1/facts over /run/maluos/memory.sock) and
+    keeps the face's caches under /run/maluos/office: memory.json (the
+    holders the estate publishes to this desk and the office's own
+    scopes; hourly or on memory_changed) and memory-peers.json (every 5
+    minutes or on memory_peers_changed), each with the desk's node ref
+    and the vault ref of its signing key. maluctl office memory [--json]
+    [--refresh] [--all]; maluctl office memory recall "QUERY" [--scope
+    S]... [--classification C] [--limit N] (the office as a holder, asked
+    with the desk token). The enrolment (and `office key`) grants
+    user:maluos-memory a read on the desk key, so the face signs this
+    desk's estate queries with it. office.env's MALUOS_OFFICE_MEMORY_MCP
+    keeps its name and now holds endpoints.memory (the kernel's holders
+    view, the query beneath it). leave removes the two caches.
+
+ -- Edward Honour <ed@maludb.org>  Sat, 31 Oct 2026 22:30:00 +0000
+
 maluos-desk (0.7.0) resolute; urgency=medium
 
   * Phase 13 slice 3: the enrolment stores the desk's inference key in

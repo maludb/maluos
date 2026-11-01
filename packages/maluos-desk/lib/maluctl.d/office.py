@@ -33,6 +33,13 @@ shows the desk and whether it is online.
                                                    rungs estate:NAME) and the peers allowed to call it; --refresh re-reads both now;
                                                    --all (an operator) every backend in the estate with its queue and wait
   sudo maluctl office inference --new-key          a new inference key (a desk enrolled before slice 3, or a rotation)
+  maluctl office memory [--json] [--refresh] [--all]      Phase 13 slice 4: the memory holders the estate publishes to this desk (its
+                                                   memory face asks them, signing with this desk's key), the office's own scopes and
+                                                   the peers allowed to ask this desk; --refresh re-reads both caches now; --all (an
+                                                   operator) every holder in the estate with every scope and whether this desk may ask
+  maluctl office memory recall "QUERY" [--scope S]... [--classification C] [--limit N] [--json]
+                                                   ask the office (a holder: its memory narrowed to the owner's scopes, org and self by
+                                                   default) for claims, as the desk's owner with the desk token
   sudo maluctl office leave [--keep-secret]
 
 Agents: /etc/maluos/office.env names the office's endpoints (MALUOS_OFFICE_*)
@@ -45,7 +52,7 @@ import json, os, pwd, socket, subprocess, sys, time, urllib.error, urllib.reques
 sys.path.insert(0, "/usr/lib/maluos")
 from maluos_estate.client import http as _estate_http, flat as _flat     # the shared client (maluos-estate, Phase 13 slice 1)
 
-VERSION = "0.7.0"
+VERSION = "0.8.0"
 SURFACE = 1
 CONF = os.environ.get("MALUOS_OFFICE_CONF", "/etc/maluos/office.yaml")
 ENVF = os.environ.get("MALUOS_OFFICE_ENV", "/etc/maluos/office.env")
@@ -55,6 +62,11 @@ GATEWAY_USER = os.environ.get("MALUOS_GATEWAY_USER", "maluos-gateway")
 INFERENCE_CACHE = os.environ.get("MALUOS_OFFICE_INFERENCE", "/run/maluos/office/inference.json")   # the gateway reads these (estate.py)
 PEERS_CACHE = os.environ.get("MALUOS_OFFICE_PEERS", "/run/maluos/office/peers.json")
 KEY_SECRET = "office-desk-key"              # the desk's ed25519 signing key (Phase 13 slice 2), in the owner's compartment beside the token
+MEMORY_SOCKET = os.environ.get("MALUOS_MEMORY_SOCKET", "/run/maluos/memory.sock")                        # the memory face (Phase 13 slice 4)
+MEMORY_CACHE = os.environ.get("MALUOS_OFFICE_MEMORY", "/run/maluos/office/memory.json")                   # the face reads these: the holders published to this desk
+MEMORY_PEERS_CACHE = os.environ.get("MALUOS_OFFICE_MEMORY_PEERS", "/run/maluos/office/memory-peers.json")  # and the peers allowed to ask it
+MEMORY_USER = os.environ.get("MALUOS_MEMORY_USER", "maluos-memory")   # the face's user: a read grant on the desk key lets it sign this desk's estate queries
+MEMORY_REFRESH_S, MEMORY_PEERS_REFRESH_S = 3600, 300
 PLUGIN_DIR = os.environ.get("MALUCTL_PLUGIN_DIR", "/usr/lib/maluos/maluctl.d")
 MALUCTL = os.environ.get("MALUCTL_BIN", "/usr/bin/maluctl")
 
@@ -676,6 +688,7 @@ def key(a):
         sys.exit(f"the office refused the key ({st} {r.get('error') or ''}): {r.get('message') or r}")
     run_as(owner, ["secret", "delete", KEY_SECRET], check=False)
     run_as(owner, ["secret", "add", KEY_SECRET, "--kind", "generic", "--provider", "office", "--stdin"], input=priv)
+    grant_memory_face(owner)
     conf["key"] = {"secret": KEY_SECRET, "public_key": pub, "registered": True}
     write_conf(conf)
     print(f"desk key registered as {r.get('node')}: vault user:{owner}/{KEY_SECRET}"); return 0
@@ -809,6 +822,7 @@ def enroll(a):
     if r.get("inference_key"):
         store_inference_key(owner, r["inference_key"])
         inf = {"secret": INFERENCE_SECRET}
+    grant_memory_face(owner)        # Phase 13 slice 4: the memory face signs this desk's estate queries with the desk's key
     conf = {"surface": r.get("surface", SURFACE), "url": url, "office": r.get("office") or {"name": None, "url": url}, "desk": desk,
             "owner": {**(r.get("owner") or {}), "login": owner, "principal": principal}, "endpoints": eps,
             "heartbeat_s": int(r.get("heartbeat_s") or 300), "secret": SECRET, "key": {"secret": KEY_SECRET, "public_key": key_pub, "registered": True}, "gateway": None, "enrolled_at": utc(), "maluos_desk": VERSION,
@@ -844,7 +858,18 @@ def enroll(a):
     print("  overlay:  " + ("off (--no-overlay)" if o is None else (f"{o['address']} as {o.get('name')} via the hub at {(o.get('hub') or {}).get('endpoint')} (maluos-overlay.service; maluctl estate overlay status)" if o.get("address") else "a key was sent; no hub has joined the estate yet")))
     print("  inference: " + (f"key {principal}/{INFERENCE_SECRET} (the gateway may use it); the estate's shared GPUs become rungs of this gateway (maluctl gateway estate)"
                              + (f"; editions {', '.join(conf['editions'])}" if conf.get("editions") else "") if inf else "the office issued no inference key (an office before slice 3)"))
+    print("  memory:   " + (f"{eps['memory']} (the holders published to this desk: maluctl office memory); the face reads {principal}/{KEY_SECRET}" if eps.get("memory")
+                            else "the office publishes no memory endpoint (an office before slice 4)"))
     return 0
+
+
+def grant_memory_face(owner):
+    """A read grant on the desk's signing key to the memory face's user (Phase 13 slice 4): the face signs this desk's estate
+    queries with it. Best effort: a desktop without maluos-memory has no such user."""
+    try:
+        run_as(owner, ["secret", "grant", KEY_SECRET, "--to", f"user:{MEMORY_USER}", "--level", "read"])
+    except RuntimeError as e:
+        print(f"  warn: the memory face's grant on {KEY_SECRET}: {e}", file=sys.stderr)
 
 
 def store_inference_key(owner, key):
@@ -943,6 +968,160 @@ def inference(a):
     return 0
 
 
+# -- Phase 13 slice 4: federated memory (docs/phase13-slice4-memory.md): the holders the estate publishes to this desk and the
+# peers allowed to ask it, cached under /run/maluos/office for the memory face (the same pattern as the inference caches above);
+# the office as a holder, asked as the desk's owner with the desk token (no envelope: the token is the desk's)
+def _face_conn(timeout=5):
+    import http.client, socket as _socket
+
+    class _Conn(http.client.HTTPConnection):
+        def connect(self):
+            s = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM); s.settimeout(timeout); s.connect(MEMORY_SOCKET); self.sock = s
+    return _Conn("maluos-memory", timeout=timeout)
+
+
+def memory_facts(timeout=5):
+    """This desk's memory facts from its face (GET /v1/facts over the socket, as _C.gateway_inference does for the gateway), or None without a face."""
+    if not os.path.exists(MEMORY_SOCKET):
+        return None
+    try:
+        c = _face_conn(timeout); c.request("GET", "/v1/facts"); r = c.getresponse(); raw = r.read(); c.close()
+        if r.status != 200:
+            return None
+        d = json.loads(raw)
+        return d if isinstance(d, dict) else None
+    except Exception:
+        return None
+
+
+def memory_reload():
+    """Tell the face its caches changed (best effort: an operator's call; the face re-reads them by their mtime anyway)."""
+    if not os.path.exists(MEMORY_SOCKET):
+        return False
+    try:
+        c = _face_conn(); c.request("POST", "/v1/reload", body=b"{}", headers={"Content-Type": "application/json"}); r = c.getresponse(); r.read(); c.close()
+        return r.status == 200
+    except Exception:
+        return False
+
+
+def write_memory_cache(path, answer, conf):
+    """The face reads these: the office's answer with every key kept, plus this desk's node ref and the vault ref of its signing
+    key (the face signs this desk's estate queries with it). Atomic, world-readable; /run/maluos/office exists (tmpfiles)."""
+    principal = (conf.get("owner") or {}).get("principal")
+    d = dict(answer)
+    d.update({"node": f"desk:{(conf.get('desk') or {}).get('id')}", "key": f"{principal}/{KEY_SECRET}", "principal": principal, "source": "desk", "written_at": utc()})
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = f"{path}.tmp.{os.getpid()}"
+    with open(tmp, "w") as fh:
+        json.dump(d, fh)
+    os.chmod(tmp, 0o644); os.replace(tmp, path)
+    return d
+
+
+def memory_refresh(conf, tok, which=("holders", "peers")):
+    """Re-read the holders published to this desk and/or the peers allowed to ask it with the desk token and write the face's caches (as the owner)."""
+    out = {}
+    eps = conf.get("endpoints") or {}
+    if "holders" in which:
+        st, r = http("GET", eps.get("memory") or conf["url"].rstrip("/") + "/api/v1/desks/memory", token=tok)
+        if st == 200:
+            write_memory_cache(MEMORY_CACHE, r, conf)
+        out["holders"] = (st, r)
+    if "peers" in which:
+        st, r = http("GET", eps.get("memory_peers") or conf["url"].rstrip("/") + "/api/v1/estate/memory/peers", token=tok)
+        if st == 200:
+            write_memory_cache(MEMORY_PEERS_CACHE, r, conf)
+        out["peers"] = (st, r)
+    return out
+
+
+def _scope_text(s):
+    return f"{s.get('scope')} ({s.get('count', 0)}, {s.get('classification_max') or 'internal'}" + (", replicate" if s.get("replicate") else "") + ")"
+
+
+def memory(a):
+    """maluctl office memory: the holders published to this desk, the office's scopes, the peers, this desk's own facts; --refresh, --all; recall."""
+    from maluos_estate import client as _C
+    if a and a[0] == "recall":
+        return memory_recall(a[1:])
+    as_json = opt(a, "--json", flag=True); refresh = opt(a, "--refresh", flag=True); everything = opt(a, "--all", flag=True)
+    conf = read_conf() or sys.exit(f"not enrolled (no {CONF})")
+    eps = conf.get("endpoints") or {}
+    if everything:
+        st, r = http("GET", (eps.get("memory") or conf["url"].rstrip("/") + "/api/v1/desks/memory") + "?all=1", token=token_for_me())
+        if st != 200:
+            sys.exit(f"the office answered {st} {r.get('error') or ''}: {r.get('message') or ''}")
+        if as_json:
+            print(json.dumps(r, indent=1)); return 0
+        hs = r.get("holders") or []
+        print(f"every holder of the estate ({len(hs)}; version {r.get('version')})")
+        for h in hs:
+            print(f"  {str(h.get('name') or '?'):<20} {str(h.get('node') or '?'):<14} {h.get('address')}:{h.get('port')}  ceiling {h.get('max_classification')}")
+            for sc in h.get("scopes") or []:
+                print(f"      {_scope_text(sc)}  " + ("allowed" if sc.get("allowed", True) else "not for this desk"))
+        return 0
+    if refresh:
+        out = memory_refresh(conf, token_for_me())
+        for name, (st, r) in out.items():
+            if st != 200:
+                sys.exit(f"{name}: the office answered {st} {r.get('error') or ''}: {r.get('message') or ''}")
+        memory_reload()
+    facts = memory_facts()
+    holders = _C.read_cache(MEMORY_CACHE) or {}
+    peers = _C.read_cache(MEMORY_PEERS_CACHE) or {}
+    if as_json:
+        print(json.dumps({"facts": facts, "holders": holders, "peers": peers}, indent=1, default=str)); return 0
+    if facts is None:
+        print("facts:    no memory face on this desk (nothing to share; maluos-memory)")
+    else:
+        held = [sc.get("scope") for sc in facts.get("scopes") or [] if isinstance(sc, dict)]
+        print(f"facts:    shared {', '.join(facts.get('shared') or []) or 'nothing'} of {', '.join(held) or 'no shareable scope'}; ceiling {facts.get('max_classification')}; "
+              + f"port {facts.get('port')} " + ("exposed to the estate" if facts.get("exposed") else "not exposed (sudo maluctl memory expose)"))
+    if not holders:
+        print(f"holders:  no cache yet ({MEMORY_CACHE}): the session writes it after a heartbeat; --refresh does it now")
+    else:
+        hs = holders.get("holders") or []
+        print(f"holders:  {len(hs)} published to this desk (version {holders.get('version')}, fetched {holders.get('fetched_at')})")
+        for h in hs:
+            print(f"  {str(h.get('name') or '?'):<20} {str(h.get('node') or '?'):<14} {h.get('address')}:{h.get('port')}  " + " ".join(_scope_text(sc) for sc in h.get("scopes") or []))
+        o = holders.get("office") or {}
+        print(f"office:   {o.get('query') or 'no query endpoint'}; scopes "
+              + (" ".join(f"{sc.get('scope')} ({sc.get('label') or sc.get('classification_max')})" for sc in o.get("scopes") or []) or "none"))
+    if peers:
+        print(f"peers:    {len(peers.get('peers') or [])} member(s) may ask this desk (version {peers.get('version')})")
+    return 0
+
+
+def memory_recall(a):
+    """maluctl office memory recall "QUERY": the office as a holder, asked as the desk's owner (the desk token; no envelope needed)."""
+    from maluos_estate import client as _C
+    as_json = opt(a, "--json", flag=True); classification = opt(a, "--classification"); limit = opt(a, "--limit")
+    scopes = []
+    while "--scope" in a:
+        scopes.append(opt(a, "--scope"))
+    if not a or a[0].startswith("-"):
+        sys.exit('usage: maluctl office memory recall "QUERY" [--scope S]... [--classification C] [--limit N] [--json]')
+    conf = read_conf() or sys.exit(f"not enrolled (no {CONF})")
+    cache = _C.read_cache(MEMORY_CACHE) or {}
+    url = (cache.get("office") or {}).get("query") or conf["url"].rstrip("/") + "/api/v1/desks/memory/query"
+    body = {"scopes": scopes or ["org", "self"], "query": " ".join(a), "classification": classification or "internal", "limit": max(1, min(50, int(limit))) if limit else 12}
+    st, r = http("POST", url, body, token=token_for_me())
+    if as_json:
+        print(json.dumps(r, indent=1, default=str)); return 0 if st == 200 else 1
+    if st != 200:
+        print(f"{r.get('error') or st}: {r.get('message') or ''}", file=sys.stderr); return 1
+    claims = r.get("claims") or []
+    print(f"{len(claims)} claim(s) from the office (holder {r.get('holder') or 'coordinator'})" + ("; truncated" if r.get("truncated") else "")
+          + (f"; scopes read {', '.join(r['scopes_read'])}" if r.get("scopes_read") else ""))
+    for c in claims:
+        src = c.get("source") or {}
+        print(f"  #{c.get('rank')} {c.get('text')}")
+        print(f"       {c.get('scope')} {c.get('kind')} {c.get('sensitivity')}" + (f" confidence {c['confidence']}" if c.get("confidence") is not None else "")
+              + (f" source {src['ref']}" if src.get("ref") else ""))
+    return 0
+
+
 OVERLAY_SECRET = "estate-overlay-key"       # the desk's WireGuard private key, in the owner's compartment (Phase 13 slice 1b)
 OVERLAY_UNIT = "maluos-overlay.service"
 
@@ -1011,10 +1190,14 @@ def heartbeat(a):
             inf = _C.gateway_inference() if presence == "online" else None      # Phase 13 slice 3: this desk's gateway facts (a laptop that shares while idle)
             if inf is not None:
                 body["inference"] = inf
+            mem = memory_facts() if presence == "online" else None             # Phase 13 slice 4: this desk's memory face's facts
+            if mem is not None:
+                body["memory"] = mem
             st, r = http("POST", url, body, token=tok)
             if st == 200:
                 res.update(ok=True, desk=r.get("desk"), heartbeat_s=r.get("heartbeat_s"), office=r.get("office"), overlay_changed=bool(r.get("overlay_changed")),
-                           inference_changed=bool(r.get("inference_changed")), peers_changed=bool(r.get("peers_changed")), editions=r.get("editions"))
+                           inference_changed=bool(r.get("inference_changed")), peers_changed=bool(r.get("peers_changed")), editions=r.get("editions"),
+                           memory_changed=bool(r.get("memory_changed")), memory_peers_changed=bool(r.get("memory_peers_changed")))
                 if r.get("overlay_changed"):
                     from maluos_estate import overlay as _OV
                     _OV.hint()                   # slice 1b: the overlay service refreshes now
@@ -1032,6 +1215,20 @@ def heartbeat(a):
                             res["inference"] = {k: v[0] for k, v in out.items()}
                         except Exception as e:
                             res["inference"] = {"error": f"{e.__class__.__name__}: {str(e)[:120]}"}
+                # slice 4: the memory face's caches: the holders hourly or on memory_changed, the peers every 5 min or on memory_peers_changed
+                if (conf.get("endpoints") or {}).get("memory") and presence == "online":
+                    which = []
+                    hc = _C.read_cache(MEMORY_CACHE); mpc = _C.read_cache(MEMORY_PEERS_CACHE)
+                    if r.get("memory_changed") or not hc or hc.get("principal") != (conf.get("owner") or {}).get("principal") or time.time() - _cache_age(MEMORY_CACHE) > MEMORY_REFRESH_S:
+                        which.append("holders")
+                    if r.get("memory_peers_changed") or not mpc or time.time() - _cache_age(MEMORY_PEERS_CACHE) > MEMORY_PEERS_REFRESH_S:
+                        which.append("peers")
+                    if which:
+                        try:
+                            out = memory_refresh(conf, tok, which)
+                            res["memory"] = {k: v[0] for k, v in out.items()}
+                        except Exception as e:
+                            res["memory"] = {"error": f"{e.__class__.__name__}: {str(e)[:120]}"}
             elif st in (401, 410):
                 res.update(revoked=True, error=f"{st} {r.get('error') or ''}: {r.get('message') or 'the office no longer knows this desk'}")
             else:
@@ -1102,7 +1299,7 @@ def leave(a):
             run_as(owner, ["secret", "delete", INFERENCE_SECRET], check=False)   # slice 3: and the inference key
         except Exception as e:
             print(f"  warn: {e}", file=sys.stderr)
-    for p in (INFERENCE_CACHE, PEERS_CACHE):      # slice 3: the gateway's estate rungs and peers go with the enrolment
+    for p in (INFERENCE_CACHE, PEERS_CACHE, MEMORY_CACHE, MEMORY_PEERS_CACHE):   # slice 3: the gateway's estate rungs and peers go with the enrolment; slice 4: the face's holders and peers
         try:
             os.remove(p)
         except OSError:
@@ -1142,6 +1339,8 @@ def main(a):
             return inbox(a)
         if cmd == "inference":
             return inference(a)
+        if cmd == "memory":
+            return memory(a)
         if cmd == "key":
             return key(a)
     except RuntimeError as e:

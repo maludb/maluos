@@ -2,7 +2,7 @@
 // posts a JSON-RPC request to the WebKit message handler; the native side answers with window.maluos._reply and
 // pushes state with window.maluos._event({type: "state"}).
 "use strict";
-const VERSION = "0.3.0";
+const VERSION = "0.4.0";
 const pending = new Map();
 let seq = 0;
 window.maluos = {
@@ -248,7 +248,10 @@ function table(rows, head) {
   return `<table><thead><tr>${head.map((h) => `<th>${esc(h)}</th>`).join("")}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((c, i) => `<td class="${i === 0 ? "ts" : ""}">${esc(c)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
 }
 
-// -- Memory
+// -- Memory (Phase 13 slice 4: the agent's claims from the memory face, as its owner; a recall box)
+const claimRows = (claims) => table(claims.map((c) => [when(c.recorded_at || c.observed_at), c.scope || "", c.kind || "", c.sensitivity || "",
+                                                       String(c.text || "").length > 160 ? String(c.text).slice(0, 160) + "…" : (c.text || ""), c.writer || "", c.holder || ""]),
+                                   ["When", "Scope", "Kind", "Sensitivity", "Claim", "Writer", "Holder"]);
 function renderMemory() {
   const a = agent(); const el = $("#memory"); el.innerHTML = `<p class="muted">Loading…</p>`;
   window.maluos.call("agent_memory", {id: a.id}).then((r) => {
@@ -256,9 +259,27 @@ function renderMemory() {
     let html = `<h3>Compartments</h3>`;
     html += r.compartments.length ? table(r.compartments.map((c) => [c.name, c.owner || c.owner_ref || "", c.scope || "", c.locked ? "locked" : "open", c.secret_count ?? c.secrets ?? ""]), ["Name", "Owner", "Scope", "State", "Secrets"])
                                   : `<p class="muted">${a.kind === "local" ? "No compartment of this agent is visible to you." : "An office agent's compartment lives at the office."}</p>`;
-    html += `<h3>Claims</h3><p class="muted">${esc(r.claims_note || "")}</p>`;
+    const sc = r.scopes || {};
+    html += `<h3>Scopes</h3><p>reads ${(sc.read || []).length ? esc(sc.read.join(", ")) : "nothing"} · writes ${(sc.write || []).length ? esc(sc.write.join(", ")) : "nothing"}</p>`;
+    if (a.kind === "local") {
+      html += `<form id="recall-form" class="policy-form recall-form"><label>Recall <input name="query" placeholder="what do we know about …" required></label>`
+            + `<label><input type="checkbox" name="estate" value="1"> across the estate</label> <button type="submit">Recall</button></form><div id="recall-result"></div>`;
+    }
+    html += `<h3>Claims</h3>`;
+    html += (r.claims || []).length ? claimRows(r.claims) : `<p class="muted">Nothing remembered yet.</p>`;
+    if (r.source) html += `<p class="muted">Source: ${esc(r.source)}</p>`;
     if (r.note) html += `<p class="muted">${esc(r.note)}</p>`;
     el.innerHTML = html;
+    const f = $("#recall-form"); if (f) f.onsubmit = (ev) => {
+      ev.preventDefault(); const d = new FormData(f); const out = $("#recall-result"); out.innerHTML = `<p class="muted">Recalling…</p>`;
+      window.maluos.call("agent_recall", {id: a.id, query: d.get("query"), estate: !!d.get("estate")}).then((res) => {
+        if (selected !== a.id) return;
+        let h = (res.claims || []).length ? claimRows(res.claims) : `<p class="muted">Nothing in memory about ${esc(d.get("query"))}.</p>`;
+        if ((res.holders || []).length) h += `<p class="muted">Holders asked: ${esc(res.holders.join(", "))}</p>`;
+        if ((res.holders_failed || []).length) h += `<p class="muted">No answer from: ${esc(res.holders_failed.map((x) => `${x.holder} (${x.error || x.status || "?"})`).join(", "))}</p>`;
+        out.innerHTML = h;
+      }).catch((e) => { out.innerHTML = `<p class="muted">${esc(e.message)}</p>`; toast(e.message); });
+    };
   }).catch((e) => { if (selected === a.id) el.innerHTML = `<p class="muted">${esc(e.message)}</p>`; });
 }
 

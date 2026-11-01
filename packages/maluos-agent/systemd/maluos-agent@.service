@@ -1,8 +1,8 @@
 [Unit]
 Description=MaluOS agent %i
 Documentation=https://github.com/maludb/maluos
-After=network-online.target maluos-gateway.socket maluos-vault.socket maludb-mc2dbd.service
-Wants=maluos-gateway.socket maluos-vault.socket
+After=network-online.target maluos-gateway.socket maluos-vault.socket maluos-memory.socket maludb-mc2dbd.service
+Wants=maluos-gateway.socket maluos-vault.socket maluos-memory.socket
 
 [Service]
 Type=simple

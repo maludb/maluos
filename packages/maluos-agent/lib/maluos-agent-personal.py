@@ -16,6 +16,7 @@ SOCK = os.environ.get("MALUOS_GATEWAY_SOCKET", "/run/maluos/gateway.sock")
 MODEL = os.environ.get("MALUOS_DEMO_MODEL", "fast")
 OFFICE_CONF = os.environ.get("MALUOS_OFFICE_CONF", "/etc/maluos/office.yaml")
 ASK = re.compile(r"^\s*ask\s+([a-z][a-z0-9-]{0,30})\s*(?:to\s+|:\s*)?(.*)$", re.S | re.I)
+RECALL = re.compile(r"^\s*(?:what do we know about|recall)\s+(.+?)\s*\??\s*$", re.S | re.I)   # slice 4: a question to memory
 
 
 class U(http.client.HTTPConnection):
@@ -81,16 +82,35 @@ def ask_agent(name, text, task):
     return ((t.get("output") or {}).get("text") or "") + line
 
 
+def recall_answer(subject):
+    """What memory holds about a subject, as the person's agent (its own scopes and the estate's holders): one line per claim."""
+    r = T.memory_recall(subject)
+    if not r.get("ok"):
+        return f"memory is not available: {(r.get('error') or {}).get('message') or (r.get('error') or {}).get('code') or 'unknown error'}"
+    claims = r.get("claims") or []
+    if not claims:
+        return f"nothing in memory about {subject}" + (f" (asked {', '.join(r['holders'])})" if r.get("holders") else "")
+    lines = [f"- {c.get('text') or ''} ({c.get('scope')}, {c.get('sensitivity')}, from {c.get('holder') or 'this host'})" for c in claims]
+    failed = r.get("holders_failed") or []
+    if failed:
+        lines.append(f"(no answer from {', '.join(str(f.get('holder')) for f in failed)})")
+    return "\n".join(lines)
+
+
 def handle(t):
     m = ASK.match(t["text"])
     if m:
         return ask_agent(m.group(1).lower(), m.group(2).strip() or "hello", t)
+    m = RECALL.match(t["text"])
+    if m:
+        t["progress"](f"recalling: {m.group(1)[:80]}\n")
+        return recall_answer(m.group(1))
     t["progress"](f"working on: {t['text'][:80]}\n")
     return ask_gateway(t["text"])
 
 
 print(f"personal agent {os.environ.get('MALUOS_AGENT')} as {os.environ.get('MALUOS_PRINCIPAL')} for {os.environ.get('MALUOS_AGENT_OWNER')}", flush=True)
-if T.serve(handle, card={"description": "your own agent: answers you, and asks other agents in the estate on your behalf (\"ask NAME …\")", "capabilities": ["personal", "chat"]}):
+if T.serve(handle, card={"description": "your own agent: answers you, asks other agents in the estate on your behalf (\"ask NAME …\") and memory (\"what do we know about X\")", "capabilities": ["personal", "chat", "memory"]}):
     print(f"tasks: serving {T.socket_path()}", flush=True)
 while True:
     time.sleep(3600)

@@ -12,6 +12,7 @@ declare(strict_types=1);
  */
 require_once dirname(__DIR__, 2) . '/features/estate/desks.php';
 require_once dirname(__DIR__, 2) . '/features/estate/inference.php';      // db/191
+require_once dirname(__DIR__, 2) . '/features/estate/memory.php';         // db/192
 
 const NODE_HEARTBEAT_S = 60;
 const NODE_REPORT_S = 300;
@@ -107,6 +108,7 @@ function node_retire(PDO $pdo, int $id): void
 {
     agents_deregister($pdo, $id);      // db/190: its agents leave the directory
     inference_member_retire($pdo, $id);      // db/191: its facts and its key leave; the peers everyone sees change
+    memory_member_retire($pdo, $id);         // db/192: its memory facts leave; the holders and peers everyone sees change
     $pdo->prepare("UPDATE locations SET status = 'retired', retired_at = COALESCE(retired_at, now()), presence = 'offline', updated_at = now() WHERE id = :id")
         ->execute(['id' => $id]);
     node_revoke_tokens($pdo, $id);
@@ -301,7 +303,9 @@ function node_endpoints(bool $overlay = false): array
             // db/190: the directory, the keys, this node's inbox and where it registers its agents
             'agents' => app_url('/api/v1/estate/agents'), 'keys' => app_url('/api/v1/estate/keys'), 'inbox' => app_url('/api/v1/estate/inbox'), 'tasks' => app_url('/api/v1/estate/tasks'),
             // db/191: the backends this node may use, and (a serving host) the peers allowed to call it
-            'inference' => app_url('/api/v1/estate/inference'), 'inference_peers' => app_url('/api/v1/estate/inference/peers')];
+            'inference' => app_url('/api/v1/estate/inference'), 'inference_peers' => app_url('/api/v1/estate/inference/peers'),
+            // db/192: the memory holders this node may ask (the office's own scopes with them), and (a holder) the peers allowed to ask it
+            'memory' => app_url('/api/v1/estate/memory'), 'memory_peers' => app_url('/api/v1/estate/memory/peers')];
 }
 
 /** The contract's answer for join (with the token and enrolled_by added by the caller), heartbeat and me. */
@@ -441,5 +445,6 @@ function present_estate_for_settings(PDO $pdo): array
             'alerts' => array_values(array_filter($ans['alerts'], static fn ($a) => $a['cleared_at'] === null)),
             'overlay' => present_overlay_for_settings($pdo),
             'delegation' => present_delegation_for_settings($pdo),      // db/190
-            'inference' => present_inference_for_settings($pdo)];       // db/191
+            'inference' => present_inference_for_settings($pdo),       // db/191
+            'memory' => present_memory_for_settings($pdo)];            // db/192
 }

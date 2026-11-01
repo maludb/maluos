@@ -720,7 +720,7 @@ selected agent:
 | Talk | a conversation with the agent: tasks sent and answers received, with the ledger rows each answer caused and the files or records it touched | the same, through the office |
 | Control | start, stop, restart, the unit's logs live, `run` a one-off command | start, stop, restart and logs as the operator's authority allows (Phase 13 slice 2 envelope) |
 | Policy | class, tiers, backends, cloud, egress, budget and what is used of it; the delegations the agent holds (use-only keys) and the scopes it reads | read; edits where the kernel's Agent HR allows |
-| Memory | what the agent remembers in its compartment and scopes, as claims with provenance | the same, through the office's `memory` endpoint (Phase 13 slice 4) |
+| Memory | what the agent remembers in its compartment and scopes, as claims with provenance (real since Phase 13 slice 4, maluos-agents 0.4.0: the memory face's newest claims as the owner, the scopes read and written, a recall box) | the same, through the office's `memory` endpoint (Phase 13 slice 4) |
 | Activity | the audit trail: calls, grant requests, tasks delegated and received | the same |
 
 One protocol for both columns: the A2A-compatible task interface that

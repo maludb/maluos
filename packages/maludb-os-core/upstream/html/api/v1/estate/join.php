@@ -58,6 +58,7 @@ if ($oerr === 'hub_exists') {
 }
 $infKey = inference_key_mint($pdo, (int) $made['node']['id']);      // db/191: the estate's inference credential, shown once
 inference_mark_seen($pdo, (int) $made['node']['id']);
+memory_mark_seen($pdo, (int) $made['node']['id']);      // db/192
 $node = node_row($pdo, (int) $made['node']['id']);
 log_activity($pdo, 'node.join', 'location', (int) $node['id'], ['source' => 'node',
     'after' => ['name' => $node['name'], 'kind' => $node['kind'], 'hostname' => $node['hostname'], 'app_version' => $node['app_version'], 'principal' => $principal]]);

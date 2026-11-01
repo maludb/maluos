@@ -135,6 +135,18 @@ export const mySettings = z.object({
       scheduler: z.boolean(), lease_s: z.number().int(), version: z.number().int(), peers_version: z.number().int(), members_with_keys: z.number().int(),
       queue: z.object({ queued: z.number().int(), running: z.number().int(), backends: z.number().int() }),
     }).nullable().default(null),
+    /** db/192: federated memory — every member's memory facts (the scopes it holds and shares), which are published, the policy rules, the office's own scopes (maluos docs/phase13-slice4-memory.md). */
+    memory: z.object({
+      holders: z.array(z.object({ node: z.string(), id: z.number().int(), kind: z.string(), name: z.string(), display_name: z.string(), address: z.string().nullable(),
+        port: z.number().int(), api_version: z.number().int(), max_classification: z.string(),
+        scopes: z.array(z.object({ scope: z.string(), count: z.number().int(), updated_at: z.string().nullable(), shared: z.boolean() })),
+        shared: z.array(z.string()), updated_at: z.string().nullable(), presence: z.string(), published: z.boolean(), why: z.string().nullable() })),
+      rules: z.array(z.object({ id: z.number().int(), subject: z.string(), scope: z.string(), holder_location_id: z.number().int().nullable(), holder_name: z.string().nullable(),
+        allow: z.boolean(), max_classification: z.string().nullable(), replicate: z.boolean(), priority: z.number().int(), note: z.string().nullable(), created_at: z.string().nullable() })),
+      office: z.array(z.object({ scope: z.string(), label: z.string() })),
+      version: z.number().int(), peers_version: z.number().int(), fanout_max: z.number().int(), rate_per_min: z.number().int(),
+      counts: z.object({ holders: z.number().int(), scopes: z.number().int(), queries_24h: z.number().int() }),
+    }).nullable().default(null),
   }).nullable().default(null),
   section: z.enum(["profile", "notifications", "security", "tokens", "desks"]),
   timezones: z.array(z.string()),

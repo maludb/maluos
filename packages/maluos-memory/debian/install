@@ -1,0 +1,3 @@
+lib/maluos_memory              usr/lib/maluos
+lib/maluctl.d/memory.py        usr/lib/maluos/maluctl.d
+components/50-maluos-memory.py usr/lib/maluos/components

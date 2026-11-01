@@ -10,3 +10,5 @@ maluos-gateway
 maluos-agent
 # estate membership (Phase 13 slice 1): maluctl estate join, the node's heartbeat and report
 maluos-estate
+# the memory face (Phase 13 slice 4): scoped memory for local principals and the estate
+maluos-memory

@@ -174,7 +174,7 @@ def endpoint(conf, name):
     return (conf.get("endpoints") or {}).get(name) or conf["url"].rstrip("/") + f"/api/v1/estate/{name}"
 
 
-def heartbeat(conf, tok, presence="online", report=None, timeout=20, agents=None, inference=None):
+def heartbeat(conf, tok, presence="online", report=None, timeout=20, agents=None, inference=None, memory=None):
     """One heartbeat: presence, facts, (when given) the report, (slice 2) the agents this node registers and (slice 3) the
     gateway's inference facts. The outcome in the shape state.json keeps."""
     res = {"ts": utc(), "ok": False, "presence": presence, "revoked": False, "error": None, "node": None, "report_sent": report is not None}
@@ -188,6 +188,8 @@ def heartbeat(conf, tok, presence="online", report=None, timeout=20, agents=None
             body["agents"] = agents
         if inference is not None:
             body["inference"] = inference
+        if memory is not None:
+            body["memory"] = memory          # slice 4: the memory face's facts
         st, r = http("POST", endpoint(conf, "heartbeat"), body, token=tok, timeout=timeout)
         if st == 200:
             res.update(ok=True, node=r.get("node"), office=r.get("office"), heartbeat_s=r.get("heartbeat_s"), report_s=r.get("report_s"),
@@ -384,11 +386,101 @@ def read_cache(path):
 
 
 def drop_caches(*paths):
-    for p in paths or (INFERENCE_CACHE, PEERS_CACHE):
+    for p in paths or (INFERENCE_CACHE, PEERS_CACHE, MEMORY_CACHE, MEMORY_PEERS_CACHE):
         try:
             os.remove(p)
         except OSError:
             pass
+
+
+# -- Phase 13 slice 4: federated memory (docs/phase13-slice4-memory.md): the holders this member may ask, the peers allowed to
+# ask it, its own face's facts, the caches the face reads (each with the vault ref of this membership's signing key)
+MEMORY_CACHE = os.environ.get("MALUOS_ESTATE_MEMORY", "/run/maluos/estate/memory.json")
+MEMORY_PEERS_CACHE = os.environ.get("MALUOS_ESTATE_MEMORY_PEERS", "/run/maluos/estate/memory-peers.json")
+MEMORY_SOCKET = os.environ.get("MALUOS_MEMORY_SOCKET", "/run/maluos/memory.sock")
+MEMORY_REFRESH_S = 3600
+MEMORY_PEERS_REFRESH_S = 300
+
+
+def memory(conf_or_url, tok, timeout=15):
+    """GET endpoints.memory: the holders the caller may ask, scope by scope, and the office's own scopes."""
+    url = conf_or_url if isinstance(conf_or_url, str) else ((conf_or_url.get("endpoints") or {}).get("memory") or conf_or_url["url"].rstrip("/") + "/api/v1/estate/memory")
+    return http("GET", url, token=tok, timeout=timeout)
+
+
+def memory_peers(conf_or_url, tok, timeout=15):
+    """GET endpoints.memory_peers: the members allowed to ask this host, with their keys and the scopes each may read."""
+    url = conf_or_url if isinstance(conf_or_url, str) else ((conf_or_url.get("endpoints") or {}).get("memory_peers") or conf_or_url["url"].rstrip("/") + "/api/v1/estate/memory/peers")
+    return http("GET", url, token=tok, timeout=timeout)
+
+
+def memory_facts(timeout=5):
+    """This host's memory facts from its face (GET /v1/facts over the socket), or None without a face."""
+    if not os.path.exists(MEMORY_SOCKET):
+        return None
+    import http.client, socket as _socket
+
+    class _Conn(http.client.HTTPConnection):
+        def __init__(self, path):
+            super().__init__("maluos-memory", timeout=timeout); self._path = path
+
+        def connect(self):
+            s = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM); s.settimeout(timeout); s.connect(self._path); self.sock = s
+    try:
+        c = _Conn(MEMORY_SOCKET); c.request("GET", "/v1/facts"); r = c.getresponse(); raw = r.read(); c.close()
+        if r.status != 200:
+            return None
+        d = json.loads(raw)
+        return d if isinstance(d, dict) else None
+    except Exception:
+        return None
+
+
+def memory_reload():
+    """Tell the face its caches changed (best effort: it re-reads them on its own when their mtime moves)."""
+    if not os.path.exists(MEMORY_SOCKET):
+        return False
+    import http.client, socket as _socket
+
+    class _Conn(http.client.HTTPConnection):
+        def connect(self):
+            s = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM); s.settimeout(5); s.connect(MEMORY_SOCKET); self.sock = s
+    try:
+        c = _Conn("maluos-memory", timeout=5); c.request("POST", "/v1/reload", body=b"{}", headers={"Content-Type": "application/json"}); r = c.getresponse(); r.read(); c.close()
+        return r.status == 200
+    except Exception:
+        return False
+
+
+def write_memory_cache(path, answer, conf, source="node"):
+    """The face reads these: the directory's answer plus this membership's node ref and the vault ref of its signing key."""
+    d = dict(answer)
+    node = conf.get("node") or {}
+    d.update({"node": f"{node.get('kind', 'server')}:{node.get('id')}", "key": f"{conf.get('principal')}/{SECRET_KEY}", "principal": conf.get("principal"), "source": source, "written_at": utc()})
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = f"{path}.tmp.{os.getpid()}"
+    with open(tmp, "w") as fh:
+        json.dump(d, fh)
+    os.chmod(tmp, 0o644); os.replace(tmp, path)
+    return d
+
+
+def refresh_memory(conf, tok, which=("holders", "peers"), timeout=15):
+    """Re-read the directory's holders and/or the peers for a node and write the face's caches. Returns {name: (status, answer)}."""
+    out = {}
+    if "holders" in which:
+        st, r = memory(conf, tok, timeout=timeout)
+        if st == 200:
+            write_memory_cache(MEMORY_CACHE, r, conf)
+        out["holders"] = (st, r)
+    if "peers" in which:
+        st, r = memory_peers(conf, tok, timeout=timeout)
+        if st == 200:
+            write_memory_cache(MEMORY_PEERS_CACHE, r, conf)
+        out["peers"] = (st, r)
+    if out and any(st == 200 for st, _ in out.values()):
+        memory_reload()
+    return out
 
 
 def refresh_inference(conf, tok, which=("backends", "peers"), timeout=15):

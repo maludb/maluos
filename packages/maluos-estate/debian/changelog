@@ -1,3 +1,20 @@
+maluos-estate (0.5.0) resolute; urgency=medium
+
+  * Phase 13 slice 4 (docs/phase13-slice4-memory.md): the heartbeat carries
+    the memory face's facts (the scopes this host holds and shares, its
+    ceiling, its port); the daemon keeps the directory's memory holders
+    (/run/maluos/estate/memory.json, hourly and on memory_changed) and the
+    peers allowed to ask this host (memory-peers.json, every five minutes
+    and on memory_peers_changed) for the face, each with the membership's
+    node ref and signing key ref; the join grants the face a read on the
+    node key, so it signs this host's queries; `maluctl estate memory
+    [--refresh] [--peers]`; leave drops the caches. The mock office serves
+    the memory contract (holders, peers with their keys, the office as a
+    holder answering canned claims, /mock/memory for rules, departments
+    and claims).
+
+ -- Edward Honour <ed@maludb.org>  Sat, 31 Oct 2026 22:30:00 +0000
+
 maluos-estate (0.4.0) resolute; urgency=medium
 
   * Phase 13 slice 3: the heartbeat carries the gateway's inference
