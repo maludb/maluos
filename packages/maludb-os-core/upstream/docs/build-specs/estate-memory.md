@@ -2,7 +2,7 @@
 
 Built 2026-10-31 from the MaluOS specification `docs/phase13-slice4-memory.md` (maluos repository), on top of the
 nodes (db/188), the overlay (db/189), the directory and the envelope (db/190) and shared inference (db/191). Proof:
-`BOS_INTERNAL_URL=http://127.0.0.1:8089 php bin/test_estate_memory.php` (67 checks, re-runnable; the office's own
+`BOS_INTERNAL_URL=http://127.0.0.1:8089 php bin/test_estate_memory.php` (74 checks with db/193, re-runnable; the office's own
 recall is stubbed where MaluDB is not running, as on this host).
 
 ## What it does
@@ -70,3 +70,17 @@ asked and read, the count, the classification, the envelope id, the task id and 
 join and enrol endpoints; `node_retire()` / `desk_retire()` → `memory_member_retire()`; `html/settings/desks/memory.php`;
 `web/components/settings/MySettings.tsx` (`Memory`) and `web/lib/schemas/settings.ts`; `docs/deploy/apache-react-cutover.conf`
 (the allow-list).
+
+## db/193: the Memory MCP for desks, and a host with two memberships (MaluOS slice 4b, 2026-11-01)
+
+Built from `docs/phase13-slice4b-memory.md` (maluos), decisions 6, 7 and 9. Proofs: `bin/test_estate_memory.php` (74),
+`bin/test_desk_enrolment.php`, `python3 bin/test_memory_mcp_desk.py` (9: the relay against a fake office, no Postgres).
+
+| Change | Where |
+|---|---|
+| `mcp_resolve_token()` answers `token_scope` and `location_id` beside the member and the role (a desk token names its desk; a node token still never resolves) | `db/193_memory_mcp_desks.sql` |
+| The MCP middleware keeps them in the request context with the raw bearer (`db.request_token_scope`, `request_location_id`, `request_token`) | `mcp/db.py`, `mcp/server_common.py` |
+| **The Memory MCP's `recall` from a desk token relays** to `GET /api/v1/desks/memory` (the office's scopes for the desk) and `POST /api/v1/desks/memory/query` with the same bearer, the tool's scope (`self`, `department`, `org`, none) mapped onto those scopes: the estate policy, the ceiling, the rate and the `memory.query` row are PHP's, the answer the one the desk's CLI gets. `core_memory` and `session_search` act as the owner, as the records and activity MCPs do. `APP_URL` (config/.env) or `BOS_INTERNAL_URL` names the office | `mcp/memory_server.py` |
+| `/mcp/memory` proxied to 127.0.0.1:8814 like records and activity; the rewrite pass-through | `docs/deploy/apache-mcp-proxy.conf`, `docs/deploy/apache-react-cutover.conf` |
+| `endpoints.memory_mcp` at enrol, heartbeat and me (`memory` stays the holders view) | `app/features/estate/desks.php` |
+| **A desk whose machine id is an active node's is not a memory holder**: its face is the node's, published as the node (the office allocated the desk an overlay address its host never carries). Settings → Desks says why ("the node X of the same host") | `memory_holder_rows()`, `memory_holder_is_other_membership()`, `memory_holder_published()` in `app/features/estate/memory.php` |

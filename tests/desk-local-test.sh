@@ -70,7 +70,7 @@ check "enroll refuses an unknown owner" "root office enroll http://127.0.0.1:$PO
 check "enroll (no gateway) as root for $ME" "root office enroll http://127.0.0.1:$PORT --code good-code --owner $ME --name 'Local desk' --no-gateway | grep -q \"enrolled: desk 'Local desk' (#41) at Local Office for user:$ME\""
 check "the code is spent" "root office enroll http://127.0.0.1:$PORT --code good-code --owner $ME --force 2>&1 | grep -q 'bad_code'"
 check "office.yaml: url, owner, no token" "grep -q '^url: http://127.0.0.1:$PORT' $W/etc/office.yaml && grep -q 'principal: user:$ME' $W/etc/office.yaml && ! grep -q desk_ $W/etc/office.yaml"
-check "office.env for agents" "grep -q 'MALUOS_OFFICE_MEMORY_MCP=\"http://127.0.0.1:$PORT/api/v1/desks/memory\"' $W/etc/office.env && grep -q 'MALUOS_OFFICE_DESK_ID=\"41\"' $W/etc/office.env"
+check "office.env for agents" "grep -q 'MALUOS_OFFICE_MEMORY_URL=\"http://127.0.0.1:$PORT/api/v1/desks/memory\"' $W/etc/office.env && grep -q 'MALUOS_OFFICE_MEMORY_MCP=\"http://127.0.0.1:$PORT/mcp/memory\"' $W/etc/office.env && grep -q 'MALUOS_OFFICE_DESK_ID=\"41\"' $W/etc/office.env"
 check "the token is in $ME's compartment, kind token" "me secret list | grep -q \"user:$ME/office-desk-token\" && me secret info office-desk-token | grep -q 'token'"
 check "the token works at the office (records MCP)" "curl -fsS --max-time 5 -H \"Authorization: Bearer \$(me secret show office-desk-token)\" http://127.0.0.1:$PORT/mcp/records -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}' | grep -q mock-office-records"
 check "without a token the office refuses (401)" "curl -sS -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:$PORT/mcp/records -d '{}' | grep -q 401"

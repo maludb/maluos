@@ -37,6 +37,9 @@ def make_app(mcp, db_user_key: str, db_pw_key: str, endpoint_name: str | None = 
             return
         db.request_member_id.set(ctx[0])
         db.request_role.set(ctx[1])
+        db.request_token_scope.set(ctx[2] if len(ctx) > 2 else None)
+        db.request_location_id.set(ctx[3] if len(ctx) > 3 else None)
+        db.request_token.set(token)
         run = db.verify_run_token(token)
         db.request_run_id.set(run[1] if run else None)
         await inner(scope, receive, send)

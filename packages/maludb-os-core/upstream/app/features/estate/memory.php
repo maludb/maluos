@@ -238,17 +238,27 @@ function memory_rule_delete(PDO $pdo, int $id): bool
 function memory_holder_rows(PDO $pdo): array
 {
     return $pdo->query(<<<'SQL'
-        SELECT l.id, l.kind, l.name, l.owner_member_id, l.presence, host(l.overlay_address) AS address, l.overlay_address_freed_at,
-               m.scopes, m.shared, m.max_classification, m.port, m.api_version, m.updated_at
+        SELECT l.id, l.kind, l.name, l.owner_member_id, l.presence, host(l.overlay_address) AS address, l.overlay_address_freed_at, l.machine_id,
+               m.scopes, m.shared, m.max_classification, m.port, m.api_version, m.updated_at,
+               (SELECT n.name FROM locations n WHERE n.kind <> 'desk' AND n.status = 'active' AND n.machine_id IS NOT NULL
+                   AND n.machine_id = l.machine_id AND n.id <> l.id ORDER BY n.id LIMIT 1) AS node_of_host
           FROM estate_memory m JOIN locations l ON l.id = m.location_id
          WHERE l.status = 'active'
          ORDER BY l.name
     SQL)->fetchAll();
 }
 
+/** db/193 (slice 4b, decision 9): a desk whose machine id is an active node's is that node's host; its face is one and is
+ *  published as the node (the office allocated the desk an overlay address the host never carries: its interface is the node's). */
+function memory_holder_is_other_membership(array $h): bool
+{
+    return ($h['kind'] ?? '') === 'desk' && ($h['node_of_host'] ?? null) !== null;
+}
+
 function memory_holder_published(array $h): bool
 {
-    return ($h['address'] ?? null) !== null && ($h['overlay_address_freed_at'] ?? null) === null && ($h['presence'] ?? '') === 'online' && inference_json($h['shared'], []) !== [];
+    return ($h['address'] ?? null) !== null && ($h['overlay_address_freed_at'] ?? null) === null && ($h['presence'] ?? '') === 'online' && inference_json($h['shared'], []) !== []
+        && !memory_holder_is_other_membership($h);
 }
 
 /** The scopes a holder holds, keyed by name. */
@@ -497,7 +507,7 @@ function present_memory_for_settings(PDO $pdo): array
         $row['shared'] = array_values(array_filter($shared, 'is_string'));
         $row['presence'] = (string) $h['presence'];
         $row['published'] = memory_holder_published($h);
-        $row['why'] = $row['published'] ? null : ($shared === [] ? 'shares nothing' : ($h['address'] === null || $h['overlay_address_freed_at'] !== null ? 'no overlay address' : 'offline'));
+        $row['why'] = $row['published'] ? null : ($shared === [] ? 'shares nothing' : (memory_holder_is_other_membership($h) ? 'the node ' . $h['node_of_host'] . ' of the same host' : ($h['address'] === null || $h['overlay_address_freed_at'] !== null ? 'no overlay address' : 'offline')));
         if ($row['published']) { $scopeCount += count($row['shared']); }
         $holders[] = $row;
     }

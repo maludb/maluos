@@ -1,3 +1,11 @@
+maluos-gateway (0.6.1) resolute; urgency=medium
+
+  * The mock Ollama's embeddings are a synonym-aware bag of words over 256
+    dimensions (forklift and lift truck, training and certification, …) so a
+    test can prove recall by meaning; the dimension was 8 random bytes.
+
+ -- Edward Honour <ed@maludb.org>  Sun, 01 Nov 2026 08:20:00 +0000
+
 maluos-gateway (0.6.0) resolute; urgency=medium
 
   * Phase 13 slice 3, shared inference across the estate

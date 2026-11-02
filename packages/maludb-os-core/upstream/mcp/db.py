@@ -26,6 +26,11 @@ request_member_id: contextvars.ContextVar[int | None] = contextvars.ContextVar("
 request_role: contextvars.ContextVar[str] = contextvars.ContextVar("role", default="anon")
 # The agent run a request belongs to, when its bearer is an agent RUN token (else None).
 request_run_id: contextvars.ContextVar[int | None] = contextvars.ContextVar("run_id", default=None)
+# db/193: what the bearer is (mcp, api, application, desk; "action" for the assistant's signed token) and, for a desk
+# token, the desk it belongs to; the raw bearer, for a tool that relays a call to PHP under the same credential.
+request_token_scope: contextvars.ContextVar[str | None] = contextvars.ContextVar("token_scope", default=None)
+request_location_id: contextvars.ContextVar[int | None] = contextvars.ContextVar("location_id", default=None)
+request_token: contextvars.ContextVar[str | None] = contextvars.ContextVar("token", default=None)
 
 
 def load_env() -> dict[str, str]:
@@ -139,21 +144,22 @@ def relay_signature(token: str) -> str | None:
     return hmac.new(key.encode(), token.encode(), hashlib.sha256).hexdigest() if key else None
 
 
-async def resolve_token(pool: asyncpg.Pool, raw_token: str) -> tuple[int, str] | None:
-    """Resolve a bearer token to (member_id, role). Accepts a personal MCP access token
-    (via the mcp_resolve_token function) or the assistant's signed action token."""
+async def resolve_token(pool: asyncpg.Pool, raw_token: str) -> tuple[int, str, str, int | None] | None:
+    """Resolve a bearer token to (member_id, role, token_scope, location_id). Accepts a personal MCP access token
+    (via the mcp_resolve_token function; db/193 says the token's scope and, for a desk token, its desk) or the
+    assistant's signed action token (scope "action")."""
     if not raw_token:
         return None
     async with pool.acquire() as con:
-        row = await con.fetchrow("SELECT member_id, member_role FROM mcp_resolve_token($1)", hash_token(raw_token))
+        row = await con.fetchrow("SELECT member_id, member_role, token_scope, location_id FROM mcp_resolve_token($1)", hash_token(raw_token))
     if row is not None:
-        return int(row["member_id"]), str(row["member_role"])
+        return int(row["member_id"]), str(row["member_role"]), str(row["token_scope"] or "mcp"), (int(row["location_id"]) if row["location_id"] is not None else None)
     mid = verify_action_token(raw_token)
     if mid is not None:
         async with pool.acquire() as con:
             role = await con.fetchval("SELECT mcp_member_role($1)", mid)
         if role:
-            return mid, str(role)
+            return mid, str(role), "action", None
     return None
 
 

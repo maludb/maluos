@@ -93,7 +93,7 @@ def memory_api(path, body, timeout=30):
 
 
 def office_env():
-    """/etc/maluos/office.env as a dict (the desk writes it at enrolment; MALUOS_OFFICE_MEMORY_MCP since slice 4)."""
+    """/etc/maluos/office.env as a dict (the desk writes it at enrolment; MALUOS_OFFICE_MEMORY_URL since slice 4b)."""
     env = {}
     try:
         for line in open(OFFICE_ENV):
@@ -288,7 +288,7 @@ class Bridge:
                 notes.append(f"memory: {e.__class__.__name__}: {str(e)[:120]}")
             out["note"] = "; ".join(notes) or None
             return out
-        url = office_env().get("MALUOS_OFFICE_MEMORY_MCP")
+        url = office_env().get("MALUOS_OFFICE_MEMORY_URL")       # the holders view (slice 4b: MALUOS_OFFICE_MEMORY_MCP is the Memory MCP now)
         st_office = (self.app.state or {}).get("office") or {}
         if not url or not ((st_office.get("endpoints") or {}).get("memory", True)):
             out["note"] = "The office publishes no memory endpoint to this desk."

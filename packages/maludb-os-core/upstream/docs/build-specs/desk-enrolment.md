@@ -64,7 +64,7 @@ COMMENT ON COLUMN locations.machine_id IS 'desk: what the companion reports as i
 The answer shape (`surface: 1`) is in MaluOS `docs/desk-enrolment.md`: `desk {id, name, status,
 presence, last_seen_at}`, `office {name: business_name(), url: app_url('/')}`, `owner {member_id,
 email, display_name}`, `token` (enroll only), `endpoints {heartbeat, me, leave, records, activity,
-memory: null, actions: null, models: null | {url, models[]}}`, `heartbeat_s: 300`.
+memory (the holders view, db/192), memory_mcp (the Memory MCP proxied at /mcp/memory, db/193), actions: null, models: null | {url, models[]}}`, `heartbeat_s: 300`.
 
 `endpoints.memory`, `actions` and `models` stay `null` in this slice: publishing the memory and
 actions MCP servers and the ledger proxy's model routes to desks is the plan's own D2 security

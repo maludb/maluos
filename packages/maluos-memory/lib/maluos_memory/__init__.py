@@ -6,7 +6,7 @@ scoping: maludb_core.principal_ref / principal_scopes / principal_readonly, tran
 never records: the memory's summary with its scope, sensitivity, confidence, time, source, writer and holder; the
 payload stays on the host that owns it.
 """
-VERSION = "0.1.3"
+VERSION = "0.2.1"
 API_VERSION = 1
 DEFAULT_PORT = 11437
 SENSITIVITY = {"public": 0, "internal": 1, "restricted": 2, "prohibited": 3}

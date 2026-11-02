@@ -15,6 +15,9 @@
   sudo maluctl memory keys                               grant the face a read on this host's signing keys (the node's, the desk owner's), to sign its queries
   sudo maluctl memory sync [--json]                      copy the summaries the rules replicate to this host now (the face does it hourly)
   sudo maluctl memory reload                             re-read /etc/maluos/memory.yaml and the listener
+  maluctl memory embed [--json]                          semantic recall (slice 4b): the embedding model, the space, how much is embedded
+  sudo maluctl memory embed MODEL [--pull] [--url URL|gateway] [--min-score 0.35]   set the model (pulled through the gateway with --pull); new memories get vectors
+  sudo maluctl memory embed --backfill | --probe | --off  vectors for what lacks one; a probe of the model; text recall again
 """
 import datetime, http.client, json, os, socket, subprocess, sys
 
@@ -156,6 +159,56 @@ def status(a):
     print(f"peers:     {len(s['peers'])} may ask this host" + ("" if not s["peers"] else ": " + "; ".join(f"{p['name'] or p['node']} ({', '.join(p['scopes'])})" for p in s["peers"])))
     if s.get("copies"):
         print("copies:    " + "; ".join(f"{c['count']} of {c['scope']} from {c['node']}" for c in s["copies"]))
+    e = s.get("embed") or {}
+    print("embed:     " + (f"{e['model']} via {e.get('url') or 'gateway'} ({e['embedded']} of {e['total']} memories in {e['space']})" + (f"; last error {e['last_error']}" if e.get("last_error") else "")
+                          if e.get("model") else "no model (text recall); `sudo maluctl memory embed MODEL`"))
+    return 0
+
+
+def embed(a):
+    """maluctl memory embed [MODEL [--url URL|gateway] [--pull] | --off | --backfill | --probe] [--json]"""
+    as_json = opt(a, "--json", flag=True); off = opt(a, "--off", flag=True); backfill = opt(a, "--backfill", flag=True); probe = opt(a, "--probe", flag=True)
+    pull = opt(a, "--pull", flag=True); url = opt(a, "--url"); minscore = opt(a, "--min-score")
+    model = next((x for x in a if not x.startswith("--")), None)
+    if off or model or url or minscore is not None:
+        need_root()
+        d = conf_read(); e = dict(d.get("embed") or {})
+        if off:
+            e["model"] = None
+        if model:
+            if pull:
+                r = subprocess.run(["maluctl", "gateway", "ollama", "pull", model], capture_output=True, text=True)
+                print((r.stdout or r.stderr).strip()[-300:])
+                if r.returncode != 0:
+                    sys.exit(f"maluctl memory embed: the pull failed; the model is not set")
+            e["model"] = model
+        if url:
+            e["url"] = url
+        if minscore is not None:
+            e["min_score"] = float(minscore)
+        d["embed"] = e; conf_write(d)
+        api("POST", "/v1/reload", {})
+        if e.get("model"):
+            r = api("POST", "/v1/embed", {"probe": True})
+            print(f"embedding: {r['model']} via {e.get('url') or 'gateway'} (dim {r['dim']}, space {r['space']}); vectors for new memories; `sudo maluctl memory embed --backfill` for the rest")
+        else:
+            print("embedding: off (text recall); the vectors stay for a later `maluctl memory embed MODEL`")
+        return 0
+    if probe:
+        need_root(); r = api("POST", "/v1/embed", {"probe": True}); print(json.dumps(r, indent=1) if as_json else f"probe ok: {r['model']} dim {r['dim']}"); return 0
+    if backfill:
+        need_root(); r = api("POST", "/v1/embed", {"backfill": True}, timeout=600)
+        if as_json:
+            print(json.dumps(r, indent=1)); return 0
+        print(f"backfill: embedded {r['embedded']}, failed {r['failed']}, remaining {r['remaining']}" + (f"; error {r['error']}" if r.get("error") else "") + (f"; {r['note']}" if r.get("note") else ""))
+        return 1 if r.get("failed") else 0
+    e = api("GET", "/v1/embed")
+    if as_json:
+        print(json.dumps(e, indent=1)); return 0
+    if not e.get("model"):
+        print("embedding: no model (text recall). `sudo maluctl memory embed MODEL [--pull]` sets one, e.g. nomic-embed-text through the gateway"); return 0
+    print(f"embedding: {e['model']} via {e.get('url') or 'gateway'}; space {e['space']}; {e['embedded']} of {e['total']} memories embedded; min score {e.get('min_score')}"
+          + (f"; dim {e['dim']}, last ok {e['last_ok_at']}" if e.get("dim") else "") + (f"\n  last error {e['last_error_at']}: {e['last_error']}" if e.get("last_error") else ""))
     return 0
 
 
@@ -201,7 +254,8 @@ def recall(a):
         print(f"  #{c['rank']:<3} {c['text'][:160]}")
         print(f"       {c['scope']}  {c['kind']}  {c['sensitivity']}" + (f"  confidence {c['confidence']}" if c.get("confidence") is not None else "")
               + (f"  source {src['ref']}" if src.get("ref") else "") + f"  by {c.get('writer') or '?'}  at {c.get('observed_at') or c.get('recorded_at') or '?'}"
-              + f"  holder {c.get('holder')}" + (f"  (copy of {c['origin']['node']}#{c['origin']['id']})" if c.get("origin") else "") + f"  id {c['id']}")
+              + f"  holder {c.get('holder')}" + (f"  (copy of {c['origin']['node']}#{c['origin']['id']})" if c.get("origin") else "") + f"  id {c['id']}"
+              + (f"  semantic {c['score']}" if c.get("match") == "semantic" else ""))
         if detail and c.get("detail") is not None:
             print(f"       detail {json.dumps(c['detail'])[:300]}")
     return 0
@@ -223,7 +277,7 @@ def remember(a):
         except ValueError:
             sys.exit("--detail is JSON")
     r = api("POST", "/v1/remember", body)
-    print(f"remembered #{r['id']} in {r['scope']} ({r['kind']}) as {r['principal']} at {r['recorded_at']}")
+    print(f"remembered #{r['id']} in {r['scope']} ({r['kind']}) as {r['principal']} at {r['recorded_at']}" + (" (with its vector)" if r.get("embedded") else ""))
     return 0
 
 
@@ -382,7 +436,7 @@ def main(args):
         print(__doc__); return 0
     cmd = a.pop(0)
     cmds = {"status": status, "facts": facts, "whoami": whoami, "recall": recall, "remember": remember, "forget": forget, "usage": usage,
-            "share": share, "unshare": unshare, "expose": expose, "unexpose": unexpose, "keys": keys, "sync": sync, "reload": reload}
+            "share": share, "unshare": unshare, "expose": expose, "unexpose": unexpose, "keys": keys, "sync": sync, "reload": reload, "embed": embed}
     if cmd not in cmds:
         print(__doc__); return 2
     try:

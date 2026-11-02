@@ -42,7 +42,8 @@ def provision(ctx):
         with open(CONF, "w") as f:
             f.write("# MaluOS memory face (maluos-memory). database/tenant are set by first boot; tcp by `maluctl memory expose`.\n"
                     "# See docs/phase13-slice4-memory.md. What the host shares is the guest principal's grants: `maluctl memory share`.\n"
-                    "# ask_self: true lets the face ask its own identities (a one-host test); a host never asks itself otherwise.\n")
+                    "# ask_self: true lets the face ask its own identities (a one-host test); a host never asks itself otherwise.\n"
+                    "# embed: {model, url} is semantic recall (`maluctl memory embed MODEL`); no model means text recall.\n")
             yaml.safe_dump(want, f, sort_keys=True)
         os.chmod(CONF, 0o644)
     os.makedirs("/var/lib/maluos/memory", exist_ok=True)
@@ -64,6 +65,12 @@ def provision(ctx):
     if isinstance(ccfg.get("share"), list) and ccfg["share"]:
         r = subprocess.run(["maluctl", "memory", "share", *[str(s) for s in ccfg["share"]]], capture_output=True, text=True)
         log(f"memory: share from firstboot.yaml: {(r.stdout or r.stderr).strip()[-160:]}")
+    emb = ccfg.get("embed")
+    if isinstance(emb, dict) and emb.get("model"):
+        # slice 4b: semantic recall as an option of first boot (never a default: a pull is a download, a model is a choice)
+        args = ["maluctl", "memory", "embed", str(emb["model"])] + (["--pull"] if emb.get("pull") else []) + (["--url", str(emb["url"])] if emb.get("url") else [])
+        r = subprocess.run(args, capture_output=True, text=True)
+        log(f"memory: embed from firstboot.yaml: {(r.stdout or r.stderr).strip()[-200:]}")
     log(f"memory face healthy at /run/maluos/memory.sock; shares nothing until `maluctl memory share`")
     return {"healthy": True, "socket": "/run/maluos/memory.sock", "role": ROLE, "guest": GUEST}
 

@@ -1,3 +1,12 @@
+maluos-estate (0.6.0) resolute; urgency=medium
+
+  * Slice 4b, the mock office: endpoints.memory_mcp and /mcp/memory with a
+    recall tool answered for the desk under the office's memory policy; a desk
+    whose machine id is an active node's is not a memory holder (decision 9:
+    the kernel publishes the host once, as the node).
+
+ -- Edward Honour <ed@maludb.org>  Sun, 01 Nov 2026 08:15:00 +0000
+
 maluos-estate (0.5.0) resolute; urgency=medium
 
   * Phase 13 slice 4 (docs/phase13-slice4-memory.md): the heartbeat carries

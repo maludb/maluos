@@ -1,3 +1,10 @@
+maluos-installer (0.3.3) resolute; urgency=medium
+
+  * lintian overrides for what the medium does on purpose: the cdrom apt
+    source it installs and the diversion of plymouth's Ubuntu watermark.
+
+ -- Edward Honour <ed@maludb.org>  Sun, 01 Nov 2026 07:20:00 +0000
+
 maluos-installer (0.3.2) resolute; urgency=medium
 
   * From the first MacBookPro15,1 round: a retry after a failed configure

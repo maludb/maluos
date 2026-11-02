@@ -13,14 +13,14 @@ bad()  { n=$((n+1)); fail=$((fail+1)); echo "  FAIL $*"; }
 check(){ if (set +o pipefail; eval "$2"); then ok "$1"; else bad "$1"; fi; }
 
 sudo -n true 2>/dev/null || { echo "needs passwordless sudo"; exit 2; }
-pkill -f "$W/lib/maluos_vault.py" 2>/dev/null; pkill -f "maluos_memory --socket $W/memory.sock" 2>/dev/null; sleep 0.5
+pkill -f "$W/lib/maluos_vault.py" 2>/dev/null; pkill -f "maluos_memory --socket $W/memory.sock" 2>/dev/null; [ -f "$W/mock.pid" ] && kill $(cat "$W/mock.pid") 2>/dev/null; sleep 0.5
 sudo rm -rf "$W"; mkdir -p "$W/lib/maluctl.d" "$W/cred" "$W/state" "$W/etc" "$W/fb" "$W/estate-run" "$W/mem-state"; chmod 755 "$W" "$W/lib" "$W/lib/maluctl.d" "$W/etc" "$W/fb" "$W/estate-run"
 cp "$ROOT"/packages/maluos-firstboot/lib/maluos_provision.py "$ROOT"/packages/maluos-firstboot/bin/maluctl \
    "$ROOT"/packages/maluos-vault/lib/maluos_vault.py "$ROOT"/packages/maluos-vault/lib/maluos_vault_client.py \
    "$ROOT"/packages/maluos-vault/components/40-maluos-vault.py "$ROOT"/packages/maluos-vault/share/schema.sql \
    "$ROOT"/packages/maluos-memory/components/50-maluos-memory.py "$W/lib/"
 cp "$ROOT"/packages/maluos-vault/lib/maluctl.d/secret.py "$ROOT"/packages/maluos-memory/lib/maluctl.d/memory.py "$W/lib/maluctl.d/"
-cp -r "$ROOT"/packages/maluos-memory/lib/maluos_memory "$ROOT"/packages/maluos-estate/lib/maluos_estate "$W/lib/"
+cp -r "$ROOT"/packages/maluos-memory/lib/maluos_memory "$ROOT"/packages/maluos-estate/lib/maluos_estate "$ROOT"/packages/maluos-gateway/lib/maluos_gateway "$W/lib/"
 chmod -R a+rX "$W/lib"; head -c 32 /dev/urandom > "$W/cred/maluos-vault.key"
 HOST=$(hostname)
 cat > "$W/vault.yaml" <<EOY
@@ -118,6 +118,26 @@ check "--scope dept:9 is refused forbidden (not a scope of this principal)" "me 
 check "--scope org finds the summary; --kind summary filters" "me memory recall safety --scope org --kind summary | grep -q 'org  summary  internal' && ! me memory recall forklift --kind summary | grep -q forklift"
 check "--as agent:sched (dept:3 read, ceiling internal): the note, never the restricted one, not even when asked" "me memory recall forklift --as agent:sched 2>&1 | grep -q 'not_owner' || true; root memory recall forklift --as agent:sched | grep -q 'forklift' && ! root memory recall lifting --as agent:sched --classification restricted | grep -q 'lifting'"
 check "the facts: dept:3 holds 2 (note 2), org 1 (summary 1), the home scope never listed, nothing shared" "me memory facts --json | python3 -c 'import json,sys; f=json.load(sys.stdin); s={x[\"scope\"]: x for x in f[\"scopes\"]}; assert set(s)=={\"dept:3\",\"org\"} and s[\"dept:3\"][\"count\"]==2 and s[\"dept:3\"][\"kinds\"]=={\"note\": 2} and s[\"org\"][\"kinds\"]=={\"summary\": 1} and f[\"shared\"]==[] and f[\"port\"]==$PORT, f'"
+
+echo "== semantic recall (slice 4b): a model through an embedder URL (the mock Ollama here; the gateway's socket on a host)"
+MOCKP=$((20000 + RANDOM % 20000))
+( cd "$W" && exec env PYTHONPATH=$W/lib python3 -m maluos_gateway.mock_ollama --port $MOCKP --models mock-embed >"$W/mock-ollama.log" 2>&1 ) & echo $! > "$W/mock.pid"
+for i in $(seq 1 40); do curl -fsS --max-time 1 http://127.0.0.1:$MOCKP/api/tags >/dev/null 2>&1 && break; sleep 0.25; done
+check "embed status before: no model, text recall" "me memory embed | grep -q 'no model' && me memory status | grep -q 'embed:     no model'"
+check "sudo maluctl memory embed mock-embed --url …/api/embed: the model probed (dim 256), the space memory/mock-embed" "root memory embed mock-embed --url http://127.0.0.1:$MOCKP/api/embed | grep -q 'embedding: mock-embed via http://127.0.0.1:$MOCKP/api/embed (dim 256, space memory/mock-embed)'"
+check "status: the model, nothing embedded yet (the memories predate it)" "me memory status | grep -qE 'embed:     mock-embed via http://127.0.0.1:$MOCKP/api/embed \\(0 of [1-9][0-9]* memories in memory/mock-embed\\)'"
+check "a query by meaning finds nothing yet: 'lift truck certification' shares no word with the forklift note" "me memory recall 'lift truck certification' | grep -q '0 claim(s)'"
+check "sudo maluctl memory embed --backfill: every memory gets a vector in the space" "root memory embed --backfill | grep -qE 'embedded [1-9][0-9]*, failed 0, remaining 0' && me memory embed | grep -qE '([1-9][0-9]*) of \\1 memories embedded'"
+check "'lift truck certification' finds the forklift note by meaning (semantic, its score); the restricted note stays hidden at internal" "me memory recall 'lift truck certification' | grep -q 'forklift training' && me memory recall 'lift truck certification' | grep -qE 'semantic 0\\.[0-9]+' && ! me memory recall 'lift truck certification' | grep -q 'lifting restriction'"
+check "every claim says how it matched (semantic with a score, or text)" "me memory recall forklift --json | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r[\"claims\"] and all(c[\"match\"] in (\"semantic\", \"text\") and (c[\"score\"] is None) == (c[\"match\"] == \"text\") for c in r[\"claims\"]), r'"
+check "a new memory is embedded as it is written (with its vector) and found by meaning at once" "me memory remember 'Sam renewed the forklift certificate' --scope dept:3 | grep -q '(with its vector)' && me memory recall 'lift truck' | grep -q 'Sam renewed'"
+check "the scope and ceiling filters hold over the semantic hits: --scope org finds no forklift note by meaning" "! me memory recall 'lift truck certification' --scope org | grep -q forklift"
+check "the ledger: memory.embed rows for the probe and the backfill, counts only" "root memory usage --json | python3 -c 'import json,sys; e=[x for x in json.load(sys.stdin)[\"events\"] if x[\"event\"]==\"memory.embed\"]; assert len(e)>=2 and all(\"forklift\" not in json.dumps(x) for x in e), e'"
+kill $(cat "$W/mock.pid") 2>/dev/null; sleep 0.5
+check "the embedder gone: recall is text alone and still answers; the status keeps the error" "me memory recall forklift | grep -q 'forklift training' && me memory recall 'lift truck certification' | grep -q '0 claim(s)' && me memory embed | grep -q 'last error'"
+check "a write with the embedder gone still lands, without a vector (the keeper backfills later)" "me memory remember 'Pat drove the lift truck' --scope dept:3 | grep -q 'remembered' && ! me memory remember 'Pat parked the lift truck' --scope dept:3 | grep -q 'with its vector'"
+for q in 'Sam renewed' 'Pat drove' 'Pat parked'; do for id in $(me memory recall "$q" --json | python3 -c 'import json,sys; print(" ".join(str(c["id"]) for c in json.load(sys.stdin)["claims"]))'); do me memory forget "$id" >/dev/null; done; done
+check "sudo maluctl memory embed --off: text recall again; the vectors stay for a later model" "root memory embed --off | grep -q 'embedding: off' && me memory embed | grep -q 'no model' && me memory recall forklift | grep -q 'forklift training'"
 
 echo "== sharing and exposing (decision 5): the guest principal's grants are what the host serves"
 check "share needs root" "! me memory share dept:3 >/dev/null 2>&1"

@@ -31,8 +31,16 @@ for pkg in "$ROOT"/packages/*/; do
     mv "$ROOT"/packages/*.deb "$ROOT"/packages/*.changes "$ROOT"/packages/*.buildinfo "$BUILD"/
     ( cd "$pkg" && dpkg-buildpackage -T clean >/dev/null 2>&1 ) || true
 done
+# lintian on the current version of every package but maludb-os-core (its vendored node_modules take lintian minutes
+# and a few GB; the kernel is linted in its own repository), never on the older versions kept in build/
 if [ "${SKIP_LINTIAN:-0}" = 1 ]; then echo "== lintian skipped (SKIP_LINTIAN=1)"; else
 echo "== lintian"
-lintian --tag-display-limit 0 "$BUILD"/*.changes || true
+changes=()
+for pkg in "$ROOT"/packages/*/; do
+    name=$(basename "$pkg"); [ "$name" = maludb-os-core ] && continue
+    ver=$(head -1 "$pkg/debian/changelog" | sed -E 's/.*\(([^)]+)\).*/\1/')
+    for c in "$BUILD/${name}_${ver}"_*.changes; do [ -f "$c" ] && changes+=("$c"); done
+done
+[ ${#changes[@]} -gt 0 ] && { lintian --tag-display-limit 0 "${changes[@]}" || true; }
 fi
 ls -1 "$BUILD"/*.deb

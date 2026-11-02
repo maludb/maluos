@@ -1,0 +1,4 @@
+# The live medium's apt source (the offline pool on the ISO) and the diversion of plymouth-theme-spinner's
+# watermark (Ubuntu's logo; the live splash shows ours) are what this package is for.
+maluos-installer: package-installs-apt-sources *
+maluos-installer: diversion-for-unknown-file *

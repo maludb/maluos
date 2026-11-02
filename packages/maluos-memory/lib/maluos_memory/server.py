@@ -10,7 +10,7 @@ Every query answered or asked is one ledger row: the scopes and the counts, neve
 import datetime, http.server, json, os, pwd, socket, socketserver, struct, sys, threading, time, urllib.request
 
 from . import VERSION, API_VERSION, DEFAULT_PORT, SENSITIVITY
-from .engine import Engine, EngineError, Config, utc, shareable, KINDS
+from .engine import Engine, EngineError, Config, utc, shareable, KINDS, Embedder
 
 ESTATE_CONF = os.environ.get("MALUOS_ESTATE_CONF", "/etc/maluos/estate.yaml")
 OFFICE_CONF = os.environ.get("MALUOS_OFFICE_CONF", "/etc/maluos/office.yaml")
@@ -189,7 +189,8 @@ class Caller:
 class Face:
     def __init__(self, cfg):
         self.cfg = cfg
-        self.engine = Engine(cfg)
+        self.embedder = Embedder(cfg)
+        self.engine = Engine(cfg, self.embedder)
         self.peers = Peers()
         self.holders = Holders(cfg, bound=lambda: self.tcp_bound)
         self.started = utc()
@@ -504,6 +505,7 @@ class Face:
                 keyed[src] = f"{e.__class__.__name__}: {str(e)[:80]}"
         return {"ok": True, "version": VERSION, "api_version": API_VERSION, "started": self.started, "socket": self.cfg["socket"],
                 "tcp": {**self.cfg["tcp"], "bound": self.tcp_bound, "overlay_address": overlay_address()}, "guest": g, "memberships": ms, "signing_keys": keyed,
+                "embed": self.engine.embed_status(),
                 "holders": [{"node": h["node"], "name": h["name"], "address": h["address"], "port": h["port"], "scopes": sorted(h["scopes"]), "source": h["source"]} for h in holders],
                 "peers": [{"node": p["node"], "name": p["name"], "scopes": sorted(p["scopes"]), "key": bool(p.get("public_key"))} for p in self.peers.by_node.values()],
                 "keys_cached": len(keys.table()), "copies": self.engine.copies(), "fanout_s": self.cfg["fanout_s"], "fanout_max": self.cfg["fanout_max"]}
@@ -609,6 +611,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if p == "/v1/facts":
                 tcp = face.cfg["tcp"] or {}
                 return self.send(200, face.engine.facts(tcp.get("port") or DEFAULT_PORT, bool(tcp.get("enabled")) and face.tcp_bound is not None))
+            if p == "/v1/embed":
+                return self.send(200, {"ok": True, **face.engine.embed_status()})
             if p == "/v1/whoami":
                 pr = face.engine.principal(caller.ref)
                 return self.send(200, {"ok": True, "user": caller.user, "uid": caller.uid, "principal": caller.ref, "operator": caller.operator, "enrolled": pr is not None,
@@ -649,6 +653,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if not caller.operator:
                     raise EngineError(403, "not_operator", "sync is an operator's")
                 return self.send(200, face.sync(caller))
+            if p == "/v1/embed":
+                if not caller.operator:
+                    raise EngineError(403, "not_operator", "embedding is an operator's")
+                face.cfg.reload()
+                if body.get("probe"):
+                    vec = (face.embedder.embed(["a probe of the embedding model"]) or [None])[0]
+                    if not vec:
+                        raise EngineError(503, "embed_unavailable", f"the embedder did not answer: {face.embedder.last_error}")
+                    face.engine.ledger("memory.embed", principal_ref=caller.ref, purpose="probe", detail={"model": face.embedder.model, "dim": len(vec)}, linux_user=caller.user, linux_uid=caller.uid, process_ref=caller.process_ref)
+                    return self.send(200, {"ok": True, "model": face.embedder.model, "space": face.embedder.space, "dim": len(vec)})
+                if body.get("backfill"):
+                    r = face.engine.backfill()
+                    face.engine.ledger("memory.embed", principal_ref=caller.ref, purpose="backfill", detail={"model": face.embedder.model, **{k: v for k, v in r.items() if k != "error"}},
+                                       linux_user=caller.user, linux_uid=caller.uid, process_ref=caller.process_ref)
+                    return self.send(200, {"ok": True, **r})
+                raise EngineError(400, "invalid", "probe or backfill")
             if p == "/v1/reload":
                 if not caller.operator:
                     raise EngineError(403, "not_operator", "reload is an operator's")
@@ -714,6 +734,10 @@ def serve(argv=None):
                     r = face.sync()
                     if r["synced"]:
                         log(f"sync: {json.dumps(r['synced'])[:300]}")
+                    if face.embedder.model:
+                        b = face.engine.backfill(limit=500)       # what was written while the embedder was away
+                        if b.get("embedded") or b.get("failed"):
+                            log(f"embed: backfill {json.dumps(b)[:200]}")
             except Exception as e:
                 log(f"keeper: {e.__class__.__name__}: {str(e)[:120]}")
     threading.Thread(target=keeper, daemon=True).start()

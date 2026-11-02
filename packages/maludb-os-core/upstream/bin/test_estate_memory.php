@@ -89,8 +89,9 @@ $ok($st === 201 && ($j['overlay']['role'] ?? '') === 'spoke', 'the HR server joi
 $hrId = (int) $j['node']['id']; $hrTok = (string) $j['token']; $hrRef = "server:{$hrId}"; $hrAddr = (string) $j['overlay']['address'];
 $cd = desk_code_mint($pdo, $admin, '', $admin, 'desk');
 [$st, $j, $e] = $call('POST', '/api/v1/desks/enroll.php', null, ['surface' => 1, 'code' => $cd['code'], 'name' => "SMOKE {$run} desk", 'hostname' => 'desk', 'machine_id' => str_repeat(substr(md5('desk' . $run), 0, 8), 4), 'overlay_public_key' => $wg()]);
-$ok($st === 201 && ($j['desk']['id'] ?? 0) > 0 && ($j['endpoints']['memory'] ?? '') === app_url('/api/v1/desks/memory') && ($j['endpoints']['memory_peers'] ?? '') === app_url('/api/v1/estate/memory/peers'),
-    'the desk enrolled; endpoints.memory is the desks endpoint (null no more), memory_peers the estate one');
+$ok($st === 201 && ($j['desk']['id'] ?? 0) > 0 && ($j['endpoints']['memory'] ?? '') === app_url('/api/v1/desks/memory') && ($j['endpoints']['memory_peers'] ?? '') === app_url('/api/v1/estate/memory/peers')
+    && ($j['endpoints']['memory_mcp'] ?? '') === app_url('/mcp/memory'),
+    'the desk enrolled; endpoints.memory is the desks endpoint (null no more), memory_peers the estate one, memory_mcp the proxied Memory MCP (db/193)');
 $deskId = (int) $j['desk']['id']; $deskTok = (string) $j['token']; $deskRef = "desk:{$deskId}";
 $cd = desk_code_mint($pdo, $admin, '', $admin, 'desk');
 [$st, $j, $e] = $call('POST', '/api/v1/desks/enroll.php', null, ['surface' => 1, 'code' => $cd['code'], 'name' => "SMOKE {$run} laptop", 'hostname' => 'laptop', 'machine_id' => str_repeat(substr(md5('lap' . $run), 0, 8), 4), 'overlay_public_key' => $wg()]);
@@ -266,12 +267,27 @@ $ok($st === 401 && $e === 'bad_signature', 'an envelope signed by another node t
 $after = json_decode((string) $pdo->query("SELECT after FROM activity_log WHERE action = 'memory.query' AND entity_type = 'locations' AND entity_id = {$hrId} ORDER BY id DESC LIMIT 1")->fetchColumn(), true) ?: [];
 $ok(str_starts_with((string) ($after['envelope_id'] ?? ''), 'env_') && ($after['task_id'] ?? null) === 't_smoke' && ($after['originator'] ?? null) === 'agent:hr', 'the office\'s activity row for a node\'s query names the envelope, the task and the originator');
 
+echo "== a host with two memberships (slice 4b, decision 9): a desk on the HR server's machine is published as the server alone\n";
+$cd = desk_code_mint($pdo, $admin, '', $admin, 'desk');
+[$st, $j, $e] = $call('POST', '/api/v1/desks/enroll.php', null, ['surface' => 1, 'code' => $cd['code'], 'name' => "SMOKE {$run} dual", 'hostname' => 'hr', 'machine_id' => str_repeat(substr(md5('hr' . $run), 0, 8), 4), 'overlay_public_key' => $wg()]);
+$ok($st === 201 && ($j['desk']['id'] ?? 0) > 0, 'a desk enrolled from the HR server\'s machine (the same machine id)');
+$dualId = (int) $j['desk']['id']; $dualTok = (string) $j['token']; $dualRef = "desk:{$dualId}";
+[$st, $j, $e] = $call('POST', '/api/v1/desks/heartbeat.php', $dualTok, ['surface' => 1, 'presence' => 'online', 'memory' => $facts(["dept:{$deptId}", 'org'], ["dept:{$deptId}", 'org'])]);
+$ok($st === 200, 'its heartbeat carries the same face\'s facts');
+[$st, $j, $e] = $call('GET', '/api/v1/estate/memory.php', $hubTok);
+$ok($st === 200 && !in_array($dualRef, array_column($j['holders'], 'node'), true) && in_array($hrRef, array_column($j['holders'], 'node'), true), 'the hub is not given the desk of that host: the HR server is its one holder');
+[$st, $j, $e] = $call('GET', '/api/v1/desks/memory.php', $dualTok);
+$ok($st === 200 && in_array($hrRef, array_column($j['holders'], 'node'), true), 'that desk is still told its holders (the HR server among them: the face filters its own identities)');
+$ok(substr_count((string) $pdo->query("SELECT pg_get_functiondef('mcp_resolve_token(text)'::regprocedure)")->fetchColumn(), 'token_scope') >= 1, 'db/193: the MCP token resolver says the token\'s scope and location (a desk token names its desk)');
+
 echo "== settings\n";
 $set = present_memory_for_settings($pdo);
 $mine = array_values(array_filter($set['holders'], static fn ($h) => str_starts_with($h['display_name'], "SMOKE {$run}")));
 $pub = array_values(array_filter($mine, static fn ($h) => $h['published']));
-$ok(count($mine) === 3 && count($pub) === 3 && $set['fanout_max'] === 8 && $set['rate_per_min'] === 30 && in_array('org', array_column($set['office'], 'scope'), true) && $set['counts']['queries_24h'] >= 1,
-    'Settings → Desks: the three reporting members published, the limits, the office\'s scopes, the queries counted');
+$dual = array_values(array_filter($mine, static fn ($h) => $h['node'] === $dualRef))[0] ?? [];
+$ok(count($mine) === 4 && count($pub) === 3 && $set['fanout_max'] === 8 && $set['rate_per_min'] === 30 && in_array('org', array_column($set['office'], 'scope'), true) && $set['counts']['queries_24h'] >= 1,
+    'Settings → Desks: the three reporting members published (the dual desk not), the limits, the office\'s scopes, the queries counted');
+$ok(($dual['published'] ?? null) === false && str_starts_with((string) ($dual['why'] ?? ''), 'the node ') && str_ends_with((string) $dual['why'], ' of the same host'), 'the dual desk\'s row says why: the node of the same host');
 $hrSet = array_values(array_filter($mine, static fn ($h) => $h['node'] === $hrRef))[0] ?? [];
 $ok(count($hrSet['scopes'] ?? []) === 3 && ($hrSet['scopes'][0]['shared'] ?? null) === true && $hrSet['shared'] === $sorted(["dept:{$deptId}", "dept:{$otherDept}", 'org']), 'a holder row for the operator: every scope held with whether it is shared');
 

@@ -1,3 +1,14 @@
+maludb-os-core (2026.11.01maluos1) resolute; urgency=medium
+
+  * Kernel re-vendored at ab00263 (2026-11-01): db/193, the Memory MCP for
+    desks (the token resolver says the token's scope and desk; the MCP's
+    recall from a desk token relays to the desks memory query under the
+    estate policy; /mcp/memory proxied; endpoints.memory_mcp) and a host with
+    two memberships published once as its node (MaluOS Phase 13 slice 4b,
+    docs/phase13-slice4b-memory.md).
+
+ -- Edward Honour <ed@maludb.org>  Sun, 01 Nov 2026 08:30:00 +0000
+
 maludb-os-core (2026.10.31maluos1) resolute; urgency=medium
 
   * Kernel re-vendored at 0c89fc6 (2026-10-31): federated memory, the

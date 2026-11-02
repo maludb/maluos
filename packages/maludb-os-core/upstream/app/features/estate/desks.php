@@ -279,6 +279,9 @@ function desk_endpoints(?array $member = null): array
         'inference' => app_url('/api/v1/desks/inference'), 'inference_peers' => app_url('/api/v1/estate/inference/peers'),
         // db/192: the memory holders this desk may ask and the office's own memory (query beneath it); a desk that shares reads its peers at the estate endpoint
         'memory' => app_url('/api/v1/desks/memory'), 'memory_peers' => app_url('/api/v1/estate/memory/peers'),
+        // db/193 (slice 4b): the Memory MCP (recall, core_memory, session_search) proxied like records and activity; a desk's recall
+        // is answered under the estate policy by relaying to the desks memory query
+        'memory_mcp' => app_url('/mcp/memory'),
     ];
 }
 

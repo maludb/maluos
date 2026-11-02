@@ -63,7 +63,8 @@ $token = (string) ($j['token'] ?? '');
 $deskId = (int) ($j['desk']['id'] ?? 0);
 $ok($j['desk']['name'] === "SMOKE {$run} desk" && $j['desk']['status'] === 'active' && $j['desk']['presence'] === 'online', 'the desk carries the code\'s name, active and online');
 $ok($j['owner']['member_id'] === $person && $j['owner']['email'] === $email, 'the owner is the code\'s person');
-$ok($j['surface'] === 1 && $j['heartbeat_s'] === 300 && $j['endpoints']['records'] === app_url('/mcp/records') && $j['endpoints']['models'] === null && $j['endpoints']['memory'] === null, 'surface, heartbeat_s and the published endpoints (models, memory null)');
+$ok($j['surface'] === 1 && $j['heartbeat_s'] === 300 && $j['endpoints']['records'] === app_url('/mcp/records') && $j['endpoints']['models'] === null
+    && $j['endpoints']['memory'] === app_url('/api/v1/desks/memory') && $j['endpoints']['memory_mcp'] === app_url('/mcp/memory'), 'surface, heartbeat_s and the published endpoints (models null; memory the holders view since db/192, memory_mcp the proxy since db/193)');
 $row = desk_row($pdo, $deskId);
 $ok($row['hostname'] === 'smoke-desk' && (int) $row['cpu_cores'] === 8 && (int) $row['memory_mb'] === 15870 && $row['operating_system'] === 'MaluOS 26.04.20261022' && $row['app_version'] === 'maluos-desk 0.1.1' && $row['machine_id'] === $mid && $row['external_ref'] === 'user:smoke' && $row['platform'] === 'desktop', 'the facts are on the location row');
 $t = $pdo->query("SELECT scope, location_id, label, member_id FROM mcp_access_tokens WHERE token_hash = '" . hash('sha256', $token) . "'")->fetch();

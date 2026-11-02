@@ -138,6 +138,31 @@ async def h_generate(request):
     return await run_generation(request, "generate")
 
 
+# a stand-in for an embedding model: a bag of words over 256 dimensions where a few synonyms share a dimension (forklift and
+# lift truck, training and certification, …), L2-normalised, so "lift truck certification" is near "forklift training" and
+# far from "the office closes at 17:00" the way a real model's cosine would be; the same text always gives the same vector
+EMBED_DIM = 256
+EMBED_SYNONYMS = {"lift": "forklift", "lifttruck": "forklift", "truck": "forklift", "trucks": "forklift", "forklifts": "forklift",
+                  "certification": "training", "certified": "training", "certificate": "training", "course": "training", "trained": "training",
+                  "sick": "leave", "absence": "leave", "absent": "leave", "incident": "safety", "incidents": "safety", "accident": "safety", "injury": "safety",
+                  "closes": "hours", "closing": "hours", "opens": "hours", "opening": "hours", "shift": "shifts", "roster": "shifts", "rota": "shifts"}
+EMBED_STOP = {"a", "an", "the", "of", "on", "in", "at", "to", "and", "or", "is", "are", "was", "were", "for", "with", "by", "about", "what", "do", "we", "know", "until", "has", "have", "had"}
+
+
+def mock_embedding(text):
+    import re as _re, zlib as _zlib
+    vec = [0.0] * EMBED_DIM
+    for tok in _re.findall(r"[a-z0-9]+", text.lower()):
+        if tok in EMBED_STOP:
+            continue
+        tok = EMBED_SYNONYMS.get(tok, tok)
+        vec[_zlib.crc32(tok.encode()) % EMBED_DIM] += 1.0
+    n = sum(x * x for x in vec) ** 0.5
+    if n == 0:
+        vec[0] = 1.0; n = 1.0
+    return [round(x / n, 5) for x in vec]
+
+
 async def h_embed(request):
     body = await request.json()
     model = resolve(body.get("model"))
@@ -147,10 +172,7 @@ async def h_embed(request):
     items = inp if isinstance(inp, list) else [inp]
     STATE["calls"] += 1
     STATE["order"].append({"model": model, "tag": (body.get("options") or {}).get("tag", ""), "kind": "embed", "start": time.time(), "end": time.time(), "prompt": str(items[0])[:40]})
-    embs = []
-    for s in items:
-        h = hashlib.sha256(str(s).encode()).digest()
-        embs.append([round((b - 128) / 128.0, 4) for b in h[:8]])
+    embs = [mock_embedding(str(s)) for s in items]
     await asyncio.sleep(0.02)
     return web.json_response({"model": model, "embeddings": embs, "total_duration": 20_000_000, "load_duration": 0,
                               "prompt_eval_count": sum(len(str(s).split()) for s in items)})

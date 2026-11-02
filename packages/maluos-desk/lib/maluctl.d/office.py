@@ -52,7 +52,7 @@ import json, os, pwd, socket, subprocess, sys, time, urllib.error, urllib.reques
 sys.path.insert(0, "/usr/lib/maluos")
 from maluos_estate.client import http as _estate_http, flat as _flat     # the shared client (maluos-estate, Phase 13 slice 1)
 
-VERSION = "0.8.0"
+VERSION = "0.9.0"
 SURFACE = 1
 CONF = os.environ.get("MALUOS_OFFICE_CONF", "/etc/maluos/office.yaml")
 ENVF = os.environ.get("MALUOS_OFFICE_ENV", "/etc/maluos/office.env")
@@ -151,7 +151,8 @@ def write_env(conf):
              ("MALUOS_OFFICE_DESK_ID", (conf.get("desk") or {}).get("id")), ("MALUOS_OFFICE_DESK_NAME", (conf.get("desk") or {}).get("name")),
              ("MALUOS_OFFICE_OWNER", (conf.get("owner") or {}).get("principal")), ("MALUOS_OFFICE_TOKEN_SECRET", conf.get("secret")),
              ("MALUOS_OFFICE_RECORDS_MCP", eps.get("records")), ("MALUOS_OFFICE_ACTIVITY_MCP", eps.get("activity")),
-             ("MALUOS_OFFICE_MEMORY_MCP", eps.get("memory")), ("MALUOS_OFFICE_ACTIONS_MCP", eps.get("actions")),
+             # slice 4b: the holders view (the Agents app queries beneath it) and the Memory MCP, when the office publishes one
+             ("MALUOS_OFFICE_MEMORY_URL", eps.get("memory")), ("MALUOS_OFFICE_MEMORY_MCP", eps.get("memory_mcp")), ("MALUOS_OFFICE_ACTIONS_MCP", eps.get("actions")),
              ("MALUOS_OFFICE_MODELS_URL", models.get("url") if isinstance(models, dict) else None)]
     tmp = ENVF + ".tmp"
     with open(tmp, "w") as fh:
@@ -1157,7 +1158,7 @@ def status(a):
     print(f"owner:      {w.get('principal')}  {w.get('display_name') or ''} <{w.get('email') or '?'}>  member #{w.get('member_id')}")
     print(f"token:      vault {w.get('principal')}/{conf.get('secret')}" + (f"; key {KEY_SECRET} ({(conf.get('key') or {}).get('public_key', '')[:30]}…)" if conf.get("key") else "; no desk key yet (sudo maluctl office key)"))
     eps = conf.get("endpoints") or {}
-    pub = [k for k in ("records", "activity", "memory", "actions") if eps.get(k)]
+    pub = [k for k in ("records", "activity", "memory", "memory_mcp", "actions") if eps.get(k)]
     models = eps.get("models") if isinstance(eps.get("models"), dict) else None
     print(f"endpoints:  {', '.join(pub) or 'none'}" + (f"; models at {models['url']} ({', '.join(models.get('models') or []) or 'unlisted'})" if models else "; no models for desks"))
     g = conf.get("gateway")

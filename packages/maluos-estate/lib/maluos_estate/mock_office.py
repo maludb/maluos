@@ -332,9 +332,16 @@ class Office:
             return {"allow": default, "max_classification": "internal", "replicate": False, "priority": 0, "rule": None if default else "default"}
         return {"allow": best["allow"], "max_classification": best.get("max_classification") or "internal", "replicate": bool(best.get("replicate")), "priority": int(best.get("priority") or 0), "rule": best["id"]}
 
+    def mem_other_membership(self, m):
+        """Slice 4b, decision 9: a desk whose machine id is an active node's is that node's host; its face is published as the node."""
+        mid = (m.get("facts") or {}).get("machine_id")
+        if self.inf_kind(m) != "desk" or not mid:
+            return None
+        return next((n for n in self.nodes.values() if n["status"] == "active" and (n.get("facts") or {}).get("machine_id") == mid), None)
+
     def mem_published(self, m):
         f = self.mem["facts"].get(self.inf_ref(m))
-        return bool(f and f["shared"] and m.get("overlay_address") and not m.get("overlay_freed_at") and m.get("presence") == "online")
+        return bool(f and f["shared"] and m.get("overlay_address") and not m.get("overlay_freed_at") and m.get("presence") == "online" and not self.mem_other_membership(m))
 
     def mem_office_scopes(self, m):
         office = {"id": 0, "kind": "coordinator"}
@@ -590,7 +597,7 @@ class Office:
 
     def endpoints(self, base):
         return {"heartbeat": f"{base}/api/v1/desks/heartbeat", "me": f"{base}/api/v1/desks/me", "leave": f"{base}/api/v1/desks/leave",
-                "records": f"{base}/mcp/records", "activity": f"{base}/mcp/activity", "memory": f"{base}/api/v1/desks/memory", "actions": None,
+                "records": f"{base}/mcp/records", "activity": f"{base}/mcp/activity", "memory": f"{base}/api/v1/desks/memory", "memory_mcp": f"{base}/mcp/memory", "actions": None,
                 "models": {"url": f"{base}/desk-models", "models": list(self.models)}, "apps": f"{base}/api/v1/desks/apps",
                 "agents": f"{base}/api/v1/desks/agents", "estate": f"{base}/api/v1/desks/estate",
                 "inbox": f"{base}/api/v1/desks/inbox", "key": f"{base}/api/v1/desks/key", "keys": f"{base}/api/v1/estate/keys", "actions": f"{base}/api/v1/estate/actions",
@@ -1851,6 +1858,22 @@ class Handler(BaseHTTPRequestHandler):
             res = {"protocolVersion": "2025-06-18", "serverInfo": {"name": f"mock-office-{server}", "version": "0"}, "capabilities": {"tools": {}}}
         elif method == "tools/list":
             res = {"tools": [{"name": "office.ping", "description": "answers pong, as the desk's owner", "inputSchema": {"type": "object", "properties": {}}}]}
+            if server == "memory":      # slice 4b: the kernel's Memory MCP recall, answered for a desk under the estate memory policy
+                res["tools"].append({"name": "recall", "description": "What do we know about X? The memory this desk may read at the office",
+                                     "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}, "scope": {"type": "string", "enum": ["self", "department", "org"]},
+                                                                                      "limit": {"type": "integer"}}, "required": ["query"]}})
+        elif method == "tools/call" and server == "memory" and ((b.get("params") or {}).get("name") == "recall"):
+            args = (b.get("params") or {}).get("arguments") or {}
+            with o.lock:
+                names = [x["scope"] for x in o.mem_office_scopes(desk)]
+                sc = args.get("scope")
+                scopes = [n for n in names if n == "self"] if sc == "self" else [n for n in names if n.startswith("dept:")] if sc == "department" else [n for n in names if n == "org"] if sc == "org" else names
+                r = o.mem_query(desk, {"scopes": scopes, "query": args.get("query"), "classification": "internal", "limit": int(args.get("limit") or 8)}) if scopes else {"claims": []}
+            if isinstance(r, tuple):
+                res = {"content": [{"type": "text", "text": f"The office refused the desk's recall ({r[1]}): {r[2]}"}], "isError": True}
+            else:
+                res = {"content": [{"type": "text", "text": json.dumps({"searched": scopes, "desk": desk["id"], "holder": "coordinator",
+                                                                        "results": [{"text": c["text"], "from": c["scope"], "kind": c["kind"], "sensitivity": c["sensitivity"]} for c in r["claims"]]})}]}
         elif method == "tools/call":
             res = {"content": [{"type": "text", "text": f"pong from {o.name} ({server}) for {desk['owner']['email']} at desk #{desk['id']}"}]}
         elif method == "notifications/initialized":

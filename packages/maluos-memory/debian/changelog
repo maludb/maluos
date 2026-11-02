@@ -1,3 +1,32 @@
+maluos-memory (0.2.1) resolute; urgency=medium
+
+  * Slice 4b, from the chain's sixth run: every embedding call carries the
+    texts' highest classification (X-MaluOS-Sensitivity) so the gateway's
+    egress policy and the rungs' ceilings apply to it: a restricted note is
+    embedded on this host or not at all. The backfill batches by
+    classification; a replicated batch and a query carry theirs.
+
+ -- Edward Honour <ed@maludb.org>  Sun, 01 Nov 2026 19:01:39 +0000
+
+maluos-memory (0.2.0) resolute; urgency=medium
+
+  * Phase 13 slice 4b (docs/phase13-slice4b-memory.md): semantic recall. With
+    a model set (`maluctl memory embed MODEL [--pull] [--url URL]`, or
+    firstboot.yaml components.maluos-memory.embed), the face embeds title and
+    summary through the gateway's OpenAI face over its socket (or the URL),
+    registers the vector on the engine's object-embedding rail in the space
+    memory/<model> as it writes (remember, the replicated copies), and recall
+    is the union of the nearest memories (maludb_semantic_search at or above
+    min_score, re-read through the facade with the same scope, ceiling, kind
+    and tombstone filters) and the text hits; a claim says match semantic
+    (with its score) or text. Without a model, or when the embedder does not
+    answer, recall is text alone. `maluctl memory embed` shows the model and
+    how much is embedded, --backfill embeds what lacks a vector (the keeper
+    does so hourly), --off clears the model. memory.yaml embed: {model, url,
+    timeout_s, min_score}.
+
+ -- Edward Honour <ed@maludb.org>  Sun, 01 Nov 2026 08:00:00 +0000
+
 maluos-memory (0.1.3) resolute; urgency=medium
 
   * ask_self: an own identity is asked at this face's own listener. The
