@@ -16,4 +16,4 @@ assistant, an MCP server and an HTTP/JSON API for agents).
 
 | Package | Version | sha256 (prefix) |
 |---|---|---|
-| maluos-slides | 0.15.0-1 | 1f4f7b3a81e1a04d… |
+| maluos-slides | 0.15.0-1 | 2abbc06da41aa082… |

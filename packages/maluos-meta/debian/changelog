@@ -1,3 +1,11 @@
+maluos-meta (0.2.16) resolute; urgency=medium
+
+  * maluos-desktop carries maluos-fonts, the presentation and document fonts
+    the office apps render with (vendored binary package in vendor/maluos-fonts);
+    maluos-slides no longer embeds them.
+
+ -- Edward Honour <ed@maludb.org>  Tue, 03 Nov 2026 20:30:00 +0000
+
 maluos-meta (0.2.15) resolute; urgency=medium
 
   * maluos-desktop carries maluos-slides, the MaluOS presentation app

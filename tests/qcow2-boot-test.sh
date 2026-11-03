@@ -383,6 +383,12 @@ else echo "  (no maluos-business-os in this image)"; fi
 # --- the desktop (Phase 12): GNOME on gdm, the MaluOS identity on the login screen, no snaps
 if installed maluos-desktop; then
 for p in maluos-desktop maluos-desktop-branding gdm3 gnome-shell ubuntu-session gnome-control-center nautilus ptyxis firefox gnome-software gnome-software-plugin-deb appstream maluos-archive-mozilla; do installed $p && echo "  ok   $p" || { echo "  FAIL $p"; fail=1; }; done
+# --- the office apps (vendored debs): Malu123 and MaluOS Slides with the shared fonts, their desktop entries, the CLIs answer
+for p in malu123 maluos-slides maluos-fonts; do installed $p && echo "  ok   $p" || { echo "  FAIL $p"; fail=1; }; done
+for d in /usr/share/applications/org.maluos.slides.desktop; do [ -f $d ] && grep -q '^Categories=.*Office' $d && echo "  ok   $(basename $d) in the Office category" || { echo "  FAIL $d"; fail=1; }; done
+v=$(maluos-slides-cli --version 2>/dev/null); echo "$v" | grep -q '^maluos-slides-cli ' && echo "  ok   $v" || { echo "  FAIL maluos-slides-cli --version: $v"; fail=1; }
+grep -q 'application/vnd.openxmlformats-officedocument.presentationml.presentation=org.maluos.slides.desktop' /usr/share/applications/mimeinfo.cache && echo "  ok   .pptx opens with MaluOS Slides (mimeinfo.cache)" || { echo "  FAIL .pptx association"; fail=1; }
+n=$(ls /usr/share/fonts/truetype/maluos-fonts/*/*.ttf 2>/dev/null | wc -l); [ "$n" -ge 60 ] && fc-list | grep -q 'maluos-fonts/inter/Inter-Regular.ttf' && echo "  ok   maluos-fonts: $n faces, fontconfig sees Inter" || { echo "  FAIL maluos-fonts: $n faces"; fail=1; }
 for p in snapd gnome-software-plugin-snap gnome-software-plugin-flatpak update-manager update-notifier ubuntu-release-upgrader-gtk ubuntu-report whoopsie apport; do ! installed $p && echo "  ok   no $p" || { echo "  FAIL $p is installed"; fail=1; }; done
 # --- slice 5: Firefox from Mozilla's repository, GNOME Software with the deb plugin only
 fv=$(dpkg-query -W -f='${Version}' firefox 2>/dev/null); echo "$fv" | grep -qv snap && dpkg-query -W -f='${Maintainer}' firefox | grep -qi mozilla && echo "  ok   firefox $fv is Mozilla's deb, not the snap shim" || { echo "  FAIL firefox version $fv / $(dpkg-query -W -f='${Maintainer}' firefox)"; fail=1; }
