@@ -338,3 +338,47 @@ rebuilt with gateway 0.4.2 and their UEFI boot tests passed on
   data, D1; the estate's queue snapshot and operator actions, D2), the
   `move` route, translations of the tabs' strings, a pairing dialog (the
   pairing stays `maluctl gateway backend add`).
+
+**G5b, the estate half, planned 2026-11-03** (roadmap row G5b; scheduled
+after the three-machine proof, D7, since every dependency is built: D1
+filled the Network tab's Estate group on 2026-10-27, D2 built the
+operator actions on 2026-10-28, D3 the estate's inference contract on
+2026-10-30):
+
+- The Estate group's node actions. A node row gets a menu with the five
+  actions of slice 2 (restart, start or stop an agent, apply updates,
+  reboot) that runs `maluctl office estate action NODE ACTION [AGENT]` as
+  the user, the way the Queue tab's actions run `maluctl gateway node …`;
+  the outcome arrives with a later heartbeat, so the tab shows "sent" at
+  once and the result as a toast when the office reports it. The node
+  decides what it allows (`actions.allow` in estate.yaml); a refused
+  action is shown as refused, not retried. The menu appears only for an
+  operator of the office.
+- The estate's inference backends in the Network tab. The Estate group
+  gains the contract's view of every backend in the estate (node, models,
+  queue depth, expected wait, ceiling, shares-while-idle), from
+  `GET /api/v1/estate/inference` as `maluctl office estate inference`
+  prints it; the Paired Nodes group keeps the directory's rungs as this
+  gateway sees them (slice 3), so the two agree or show why they do not.
+- An Estate section in the Queue tab. Below the local lanes and calls: one
+  row per node with its lanes, running and queued counts and
+  `expected_wait_s`, from the kernel's queue snapshot (each node's queue
+  rides the heartbeat every 60 s). With the `scheduler` entitlement the
+  section is live and names the placement rules in force; without it the
+  section shows the last snapshot with its age. The rules themselves are
+  edited on the Estate page ("Open in Sovereign LLM Manager"), not here.
+- The session service carries both: `office.estate.inference` and
+  `office.estate.queue` in the state, read as the session user and
+  refreshed with the other office data, so the fork stays logic-free
+  (README.maluos.md's rule) and a GNOME rebase touches layout only.
+- Tests: tests/lib/fake_session.py `--estate` gains the inference
+  backends and the queue snapshot; the self-test summary names them
+  ("Estate: N nodes, B backends, Q queued"); tests/system-monitor-local-test.sh
+  runs an action against the fake service and checks the "sent" state;
+  the image boot test runs the action against the mock office (its
+  `POST /api/v1/estate/nodes/ID/actions`, the route slice 2's step 6
+  already exercises, so the result is `ok` for restart_agent and
+  `not_allowed` for reboot) and reads the two sections on the live desktop.
+- Not in G5b: the `move` route, a pairing dialog (the pairing stays
+  `maluctl gateway backend add` and the directory), translations of the
+  tabs' strings, editing the scheduler's rules (the Estate page's).

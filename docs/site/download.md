@@ -6,7 +6,7 @@ holds it, so a site script can substitute it at render time.
 
 ---
 
-## MaluOS 26.04.20261031
+## MaluOS 26.04.20261102
 
 MaluOS is an operating system built around MaluDB: the database, its API,
 the credential vault, the model gateway and the agent runtime install and
@@ -15,16 +15,16 @@ no account or licence is needed. It comes as a server and as a desktop.
 
 | File | Size | Use |
 |---|---|---|
-| [maluos-26.04.20261031-server-amd64.iso](https://download.maluos.com/26.04.20261031/maluos-26.04.20261031-server-amd64.iso) | 5.3 GB | Server installer for physical machines and VMs (BIOS and UEFI, Secure Boot) |
-| [maluos-26.04.20261031-server-amd64.qcow2](https://download.maluos.com/26.04.20261031/maluos-26.04.20261031-server-amd64.qcow2) | 1.7 GB | Server cloud image with cloud-init, for KVM, Proxmox, OpenStack and similar |
-| [maluos-26.04.20261031-desktop-amd64.iso](https://download.maluos.com/26.04.20261031/maluos-26.04.20261031-desktop-amd64.iso) | 5.5 GB | Desktop installer (GNOME) for workstations, laptops and VMs (BIOS and UEFI, Secure Boot) |
-| [maluos-26.04.20261031-desktop-amd64.qcow2](https://download.maluos.com/26.04.20261031/maluos-26.04.20261031-desktop-amd64.qcow2) | 2.0 GB | Desktop image with cloud-init, for a workstation VM |
-| [SHA256SUMS](https://download.maluos.com/26.04.20261031/SHA256SUMS) · [SHA256SUMS.gpg](https://download.maluos.com/26.04.20261031/SHA256SUMS.gpg) | | Checksums and their signature |
-| [RELEASE-NOTES.md](https://download.maluos.com/26.04.20261031/RELEASE-NOTES.md) | | Package versions and changes in this release |
+| [maluos-26.04.20261102-server-amd64.iso](https://download.maluos.com/26.04.20261102/maluos-26.04.20261102-server-amd64.iso) | 5.6 GB | Server installer for physical machines and VMs (BIOS and UEFI, Secure Boot) |
+| [maluos-26.04.20261102-server-amd64.qcow2](https://download.maluos.com/26.04.20261102/maluos-26.04.20261102-server-amd64.qcow2) | 1.7 GB | Server cloud image with cloud-init, for KVM, Proxmox, OpenStack and similar |
+| [maluos-26.04.20261102-desktop-amd64.iso](https://download.maluos.com/26.04.20261102/maluos-26.04.20261102-desktop-amd64.iso) | 5.8 GB | Desktop installer (GNOME) for workstations, laptops and VMs (BIOS and UEFI, Secure Boot) |
+| [maluos-26.04.20261102-desktop-amd64.qcow2](https://download.maluos.com/26.04.20261102/maluos-26.04.20261102-desktop-amd64.qcow2) | 2.0 GB | Desktop image with cloud-init, for a workstation VM |
+| [SHA256SUMS](https://download.maluos.com/26.04.20261102/SHA256SUMS) · [SHA256SUMS.gpg](https://download.maluos.com/26.04.20261102/SHA256SUMS.gpg) | | Checksums and their signature |
+| [RELEASE-NOTES.md](https://download.maluos.com/26.04.20261102/RELEASE-NOTES.md) | | Package versions and changes in this release |
 
-Releases are dated: `26.04` is the package base, `20261031` the build
+Releases are dated: `26.04` is the package base, `20261102` the build
 date. Every release is also on GitHub with the cloud images and checksums
-attached: https://github.com/maludb/maluos/releases/tag/v26.04.20261031
+attached: https://github.com/maludb/maluos/releases/tag/v26.04.20261102
 
 ## The desktop
 
@@ -39,12 +39,18 @@ snaps; the browser is Firefox from Mozilla's own apt repository, GNOME
 Software installs debs only, and security and MaluOS updates install
 themselves through apt (`maluctl update status` shows what is pending).
 
-The desktop is the tenth desktop release and the first that shares
-inference across the estate: a GPU host that joins the estate serves
-every desk and server the estate's policy allows, with no pairing by
-hand (`maluctl office inference` lists the backends); a laptop can lend
-its GPU while idle; with the scheduler edition the office places each
-call from the live queue. It is the second that joins an estate. A desk enrols with an office (`sudo maluctl office enroll`) and
+The desktop is the eleventh desktop release and the first with memory
+across the estate: every host keeps a memory face (`maluctl memory`)
+whose personal, departmental and organisation notes agents write and
+recall under the estate's policy; a question asks the holders the office
+publishes, by meaning once an embedding model is set (`maluctl memory
+embed`), and a desk's agents reach the office's memory through its
+Memory MCP. It is the second that shares inference across the estate: a
+GPU host that joins the estate serves every desk and server the estate's
+policy allows, with no pairing by hand (`maluctl office inference` lists
+the backends); a laptop can lend its GPU while idle; with the scheduler
+edition the office places each call from the live queue. It is the third
+that joins an estate. A desk enrols with an office (`sudo maluctl office enroll`) and
 gets its own signing key; every agent in the estate is listed in the
 Agents app by what it can do, and a task sent to one of them travels in an
 envelope the desk signs, so the node that runs it can verify who asked
@@ -77,7 +83,7 @@ Fetch the key from the package repository, check the signature on the
 checksum file, then check the file you downloaded:
 
 ```sh
-V=26.04.20261031
+V=26.04.20261102
 curl -fsSLO https://download.maluos.com/$V/SHA256SUMS
 curl -fsSLO https://download.maluos.com/$V/SHA256SUMS.gpg
 curl -fsSL  https://apt.maluos.com/bootstrap/maluos-archive-keyring.gpg -o maluos-archive-keyring.gpg
@@ -146,7 +152,7 @@ users:
 UD
 echo 'instance-id: maluos-1' > meta-data
 cloud-localds seed.iso user-data meta-data
-qemu-img create -f qcow2 -b maluos-26.04.20261031-server-amd64.qcow2 -F qcow2 disk.qcow2 40G
+qemu-img create -f qcow2 -b maluos-26.04.20261102-server-amd64.qcow2 -F qcow2 disk.qcow2 40G
 qemu-system-x86_64 -enable-kvm -m 4096 -smp 2 -drive file=disk.qcow2,if=virtio \
   -drive file=seed.iso,if=virtio,format=raw -nic user,hostfwd=tcp::2222-:22
 ssh -p 2222 maluos@127.0.0.1 maluctl status
