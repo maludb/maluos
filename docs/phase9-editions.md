@@ -257,6 +257,11 @@ state per host, drift, usage roll-ups, alerts, identity mappings.
 
 ## 10. Decisions proposed for review
 
+Confirmed by the owner 2026-11-03 (roadmap F8) as written below; the
+estate's boundary (roadmap F5) adds federation between estates to
+Enterprise. Price points are set before slice 5. Slice 1 starts after
+Phase 13's three-machine proof and G5b.
+
 | Decision | Proposed |
 |---|---|
 | What is paid | §5 as written: maintenance, model packs, compliance, audit, backup, support in Professional; fleet, SSO, multi-host scheduling in Enterprise. All agent-native capability stays free. |

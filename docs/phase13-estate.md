@@ -107,7 +107,11 @@ extend rather than replace.
     and `sso` as Enterprise services. Which estate features are
     Community (a desk and a server joining, the operator's view, agent
     discovery) and which are paid (estate-wide scheduling, SSO, many
-    coordinators) is the owner's call before slice 3 ships.
+    coordinators) is the owner's call before slice 3 ships. **Decided
+    2026-11-03 (F5): the estate is free, management is paid.** Community:
+    join, the operator's view, delegation, memory, sharing and the node
+    API, one coordinator, any number of nodes. Paid: `scheduler` (decided
+    2026-10-25), `fleet`, `sso`, federation between estates (slice 6).
 
 ## Slices
 
@@ -254,7 +258,7 @@ architecture without a cluster.
 
 ## Open questions for the owner
 
-- The edition boundary (decision 10).
+- The edition boundary (decision 10): decided 2026-11-03, see there.
 - Whether desks ever contribute inference by default (off, per
   decision 8) or only on servers.
 - The coordinator's availability: one kernel today; what the estate does

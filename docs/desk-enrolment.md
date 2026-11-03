@@ -220,7 +220,11 @@ desk caches the merged catalogue per user for 15 minutes and shows it
 stale when neither source answers. The mock office serves four web apps;
 the kernel's `desks/apps` endpoint is specified here for the kernel
 repository to build (the applications table decides what an office's
-desks see). The public catalogue is served over HTTPS and not yet signed.
+desks see; decided 2026-11-03, F4: `applications` with status active and
+a url, filtered by `application_access` for the desk owner's member row
+or department, plus every built-in of `application_catalog`; the grants
+are the publishing decision). The public catalogue is signed by the
+release key since Phase 12 slice 9.
 
 ## Agents: the directory (Phase 12 slice 8)
 

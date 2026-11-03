@@ -55,7 +55,8 @@ leftovers, all in this repository (docs/phase12-desktop.md "Slice 9").
 | B4 | Re-authentication (polkit auth_self) before a reveal, a rotation and a backup | built 2026-10-24 | M | nothing | the check lives in the vault (pkcheck on the caller, polkit action com.maluos.vault.reveal, auth_self); ledger detail reauth |
 | B5 | Agents app: streaming answers, the office page with the desk's identity, timers | built 2026-10-24 | M | nothing | task progress + Client.stream, Talk draws the answer as it grows, the office page with the desk token, timers |
 | B6 | The public MaluApps catalogue signed and verified | built 2026-10-24 | S | F2 taken by default (release key) | catalog.json.asc by the release key, verified with the archive keyring; scripts/publish-catalog.sh |
-| B7 | Not in slice 9: desktop-background icons (F1), DEP-11 and the upgrade path, branding on hardware | deferred | | | their own slices later |
+| B7 | Not in slice 9: DEP-11 and the upgrade path, branding on hardware (desktop-background icons dropped by F1, 2026-11-03) | deferred | | | their own slices later |
+| B8 | The lid switch on a desk: `HandleLidSwitchExternalPower=ignore` in maluos-desktop-branding's logind drop-in (battery unchanged), the boot test reads `loginctl show-session`/the drop-in | planned 2026-11-03 (F3) | S | nothing | rides the next desktop package bump |
 
 ## C. Kernel-side work (maludb-os-core repository)
 
@@ -64,7 +65,7 @@ change needed on the desk when they land.
 
 | # | Task | Status | Effort | Depends on | Notes |
 |---|---|---|---|---|---|
-| C1 | `desks/apps`: the applications table decides what an office's desks see | specified | M | nothing | the mock office serves four apps |
+| C1 | `desks/apps`: the applications table decides what an office's desks see | specified; the rule settled by F4 on 2026-11-03 (active apps with a url the desk owner's member or department has an `application_access` grant on, plus the built-ins) | M | nothing | the mock office serves four apps |
 | C2 | `desks/agents` with per-agent `tasks`, `activity`, `page` | specified | M | Agent HR | the mock office serves two agents |
 | C3 | The model endpoint for desks (`surface = desk` on the prompt ledger); memory and actions MCP servers published to desks | planned (phase12 "After that" 1) | L | nothing | turns endpoints.models, memory, actions from null into real ones |
 
@@ -81,7 +82,7 @@ owner. Each slice ends with its test on the three-machine proof.
 | D3 | 3 Shared inference: the gateway as a backend for other nodes through the directory, the idle rule, the envelope on remote calls; estate-wide placement and admission as the paid `scheduler` | both halves BUILT and BOOT-TESTED 2026-10-30 on the spec's recommendations (kernel db/191 at maludb-os-core d7ebcfa, 58 checks; gateway 0.6.0, estate 0.4.0, desk 0.7.0, session 0.11.0, firstboot 0.1.12, system-monitor +maluos.5; desk-local-test 133, gateway-local-test 188; UEFI boot tests desktop 389 / server 191 after four chain runs: docs/phase13-slice3-inference.md, Status, "What the image chain found") | L | D1, D1b, D2, G2 | node-to-node traffic over the overlay |
 | D4 | 4 Federated memory: personal, departmental and enterprise memory over the existing scopes; the memory endpoint real | both halves BUILT and BOOT-TESTED 2026-11-01 (docs/phase13-slice4-memory.md, Status: kernel db/192 at maludb-os-core 0c89fc6 with a 68-check proof; the new package maluos-memory 0.1.3, estate 0.5.0, desk 0.8.0, agent 0.6.1, agents 0.4.0, session 0.12.0; local tests 57 + 149 + 22 checks; the image chain's fifth run passed: desktop 437, server 200; seven findings in the Status); PUSHED 2026-11-01 (8920827); slice 4b (docs/phase13-slice4b-memory.md: semantic recall through the gateway, the Memory MCP for desks under the policy, a dual host published once) built 2026-11-01, kernel db/193 ab00263, the chain to run; the maludb-core follow-ups on two branches of maludb-core-26 (0.107.0 scope on claims and statements; the listener's principal binding), the owner's to merge | L | D1, D2 (the envelope, the keys), D3 (the facts/view/peers pattern) | the Agents app's Memory page waits for this; maludb-core 0.106.0 enforces scope on memories, episodes and documents but not on claims or statements, and the MC2DB listener binds no principal: both filed as follow-ups for the owner's other repository Slice 4b (memory quality: semantic recall through the gateway, the Memory MCP to desks under the policy, a dual host published once; docs/phase13-slice4b-memory.md) BUILT and BOOT-TESTED 2026-11-02 (desktop 445, server 200; memory 0.2.1, desk 0.9.0, agents 0.5.0, estate 0.6.0, gateway 0.6.1, kernel db/193 vendored 2026.11.01maluos1). |
 | D5 | 5 Events and durable work | planned | L | D2 | |
-| D6 | 6 Skills, resilience, federation between estates | planned | L | D2 to D5 | |
+| D6 | 6 Skills, resilience, federation between estates | planned; federation is an Enterprise entitlement (F5, 2026-11-03), skills and resilience Community | L | D2 to D5; E4 slice 1 for the entitlement check | |
 | D7 | The three-machine proof | the runbook written 2026-10-29 (docs/phase13-three-machine-proof.md: office, gpu, desk; slices 1, 1b, 2, 3 on real hosts); running it needs the owner's three machines | M | each slice | the GPU host needs no static address: a spoke dials the hub |
 
 Shared GPUs (docs/phase13-shared-gpus.md, decided with the owner
@@ -108,7 +109,7 @@ an RTX x86 box is the MaluOS case.
 | E2 | Phase 11, the Apple T2 round: Intel Macs with the T2 chip (2018 on) for the installer and the installed system (docs/phase11-apple-t2.md): the apple-t2 component (apple-bce and the two patched drivers by DKMS, the Touch Bar and fan daemons, the audio profiles, Vulkan for the Radeon), the installer's Mac facts, the kernel options, the firmware import from macOS, storage.target free beside macOS, the extra Ubuntu pool on the medium | built 2026-10-24 (unit tests, the pty screens test; the QEMU rounds --alongside and --apple in the status); the real MacBookPro15,1 round is the owner's | L | E1 slices 1-3 | the first real T2 Mac decides suspend, audio and the Touch Bar; the firmware comes from the owner's macOS |
 | E2 | A graphical live session on the ISO | folded into Phase 11 slice 5 | L | E1 | |
 | E3 | Phase 7 rest: ISO catalogue layers and the maluctl component selector | in progress | M | nothing | docs/components.md |
-| E4 | Phase 9 rest: editions and entitlements (Professional, Enterprise) | requirements drafted | L | a pricing decision | Phase 13 absorbs fleet and scheduler |
+| E4 | Phase 9 rest: editions and entitlements (Professional, Enterprise) | terms confirmed 2026-11-03 (F5, F8); slice 1 (entitlements: maluos-pro, the contracts stub owning the `scheduler` flag, the esm suite) scheduled after D7 and G5b; price points needed before slice 5 (commerce) | L | D7, G5b; price points for slice 5 | Phase 13 absorbs fleet and scheduler; federation (D6) is Enterprise |
 | E5 | Phase 14+: journal to memory, quality judge | idea | L | D4 | |
 | E6 | arm64 builds | idea | M | nothing | PLAN.md framing decision |
 
@@ -116,14 +117,14 @@ an RTX x86 box is the MaluOS case.
 
 | # | Decision | Where it is written | Blocks |
 |---|---|---|---|
-| F1 | Agent icons on the desktop background: live with the grid folder, or ship our own shell extension | docs/phase12-desktop.md, slice 8 status | B7 |
-| F2 | Which key signs the public apps catalogue: the release key, taken by default in slice 9 (a separate key would need maluos-keyring to ship it) | docs/phase12-desktop.md, slice 9 status | nothing now |
-| F3 | Lid switch behaviour with the new power defaults | docs/phase12-desktop.md, slice 7 | nothing yet |
-| F4 | Office catalogue location in the kernel (which table decides what desks see) | docs/desk-enrolment.md | C1 |
-| F5 | Edition boundary for estate features | docs/phase13-estate.md, open questions; for inference decided 2026-10-25 (Community G1-G3, G5; paid `scheduler` G4), docs/phase13-shared-gpus.md | E4 |
+| F1 | Agent icons on the desktop background: live with the grid folder, or ship our own shell extension | decided 2026-11-03: live with the grid folder and ~/Desktop/Agents; no extension of our own; reopen only if users ask (docs/phase12-desktop.md, slice 8 status) | nothing (B7 loses the item) |
+| F2 | Which key signs the public apps catalogue: the release key, taken by default in slice 9 (a separate key would need maluos-keyring to ship it) | decided 2026-11-03: the release key, as slice 9 built it (docs/phase12-desktop.md, slice 9 status) | nothing |
+| F3 | Lid switch behaviour with the new power defaults | decided 2026-11-03: ignore the lid on external power only (`HandleLidSwitchExternalPower=ignore`; on battery the lid still suspends), so a plugged-in laptop keeps its agents and its shared GPU with the lid shut (docs/phase12-desktop.md, slice 7) | B8 |
+| F4 | Office catalogue location in the kernel (which table decides what desks see) | decided 2026-11-03: `applications` with status active and a url, filtered by `application_access` for the desk owner's member row or department, plus every built-in of `application_catalog`; the grants are the publishing decision, no new table (docs/desk-enrolment.md) | C1 |
+| F5 | Edition boundary for estate features | decided 2026-11-03: the estate is free, management is paid. Community: join, the operator's view, delegation, memory, sharing and the node API, one coordinator, any number of nodes. Paid: `scheduler` (decided 2026-10-25), `fleet`, `sso`, federation between estates (D6) (docs/phase13-estate.md, decision 10) | E4, D6 |
 | F6 | Desk inference contribution rules | decided 2026-10-25: servers always, dedicated desktops opt-in, laptops opt-in and idle only (docs/phase13-shared-gpus.md) | nothing |
 | F7 | Phase 13 slice 3 before 4, or 4 before 3 | settled 2026-10-29: 3 first (the owner started slice 3 on the spec's recommendations) | D4 |
-| F8 | Pricing and editions | docs/phase9-editions.md | E4 |
+| F8 | Pricing and editions | decided 2026-11-03: the terms of docs/phase9-editions.md §10 stand (Professional per machine per year, Enterprise per fleet per year, free personal use on 3 machines, commercial code in separate repositories); price points are set before E4's commerce slice; E4 starts after Phase 13's D7 and G5b | E4 |
 
 ## H. Housekeeping
 
