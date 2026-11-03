@@ -1,3 +1,11 @@
+maluos-meta (0.2.15) resolute; urgency=medium
+
+  * maluos-desktop carries maluos-slides, the MaluOS presentation app
+    (PowerPoint-compatible, built on DeckCraft, with the Malu assistant;
+    vendored binary package in vendor/maluos-slides).
+
+ -- Edward Honour <ed@maludb.org>  Tue, 03 Nov 2026 15:00:00 +0000
+
 maluos-meta (0.2.14) resolute; urgency=medium
 
   * Phase 13 slice 4: maluos-server and maluos-desktop depend on
