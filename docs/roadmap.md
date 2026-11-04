@@ -20,7 +20,7 @@ tooling as it is: S under half a day, M a day, L several days.
 | Phase 13 (estate) | slices 1, 1b, 2, 3, 4 and 4b (D1 to D4) built, boot-tested and released by 2026-11-02 (kernel db/188 to db/193); shared GPUs G1, G2 and G5's local half built by 2026-10-27, G4 with slice 3; the Network tab's Estate group filled by slices 1 and 3; G5b (the tabs' estate half) built and boot-tested 2026-11-03; next: D7 (the three-machine proof, needs the owner's machines), B8, E4 slice 1, G3 and real-hardware G1/G2; D5, D6 planned |
 | Phase 11 (installer) | proposed only |
 | Phases 7 and 9 | partly done; the rest waits (components catalogue, editions) |
-| Dev host | Proxmox VM 4050, 16 GB cap with an 8 GB balloon floor since 2026-10-23; the host OOM-killed it five times before that |
+| Dev host | Proxmox VM 4050, 16 GB cap with an 8 GB balloon floor since 2026-10-23; the host OOM-killed it five times before that; moving to a host with an NVIDIA card and KVM from 2026-11-04 for the real-hardware GPU work (docs/dev-host-handoff.md) |
 
 ## A. Today and tomorrow: the 26.04.20261024 release
 
