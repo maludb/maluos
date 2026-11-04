@@ -84,10 +84,20 @@ keeps /run/maluos/session/idle while all three hold ({"since", "user",
 reads it. `host.idle` in the state says what was measured. The state's
 gateway section carries `estate`: the backends the estate's directory
 gave this gateway, for the Network tab.
+Phase 13 G5b (the tabs' estate half): `office.estate.inference` is the
+office's inference contract as an operator's desk reads it (`maluctl
+office inference --all`): every backend of the estate with its queue
+snapshot and expected waits from its last heartbeat, and whether the
+office has the `scheduler` entitlement. Read with each heartbeat and,
+while a window is reading the state (GetState within the last
+MALUOS_SESSION_ESTATE_WATCH seconds, 60), every 60 s, so the Network
+tab's Estate group and the Queue tab's Estate section are at most that
+old. The node actions themselves run `maluctl office estate action`
+as the user from the tab, not through this service.
 """
 import http.client, json, os, pwd, re, socket, subprocess, sys, threading, time, urllib.parse
 
-VERSION = "0.11.0"
+VERSION = "0.13.0"
 BUS_NAME, OBJ, IFACE = "com.maluos.Session", "/com/maluos/Session", "com.maluos.Session1"
 GW = os.environ.get("MALUOS_GATEWAY_SOCKET", "/run/maluos/gateway.sock")
 VAULT = os.environ.get("MALUOS_VAULT_SOCKET", "/run/maluos/vault.sock")
@@ -103,6 +113,7 @@ IDLE_S = int(os.environ.get("MALUOS_SESSION_IDLE_S", "600"))
 IDLE_POLL = int(os.environ.get("MALUOS_SESSION_IDLE_POLL", "30"))
 OFFICE_SECRET = "office-desk-token"
 OFFICE_RETRY = 60                # after a failed heartbeat
+ESTATE_WATCH_S = int(os.environ.get("MALUOS_SESSION_ESTATE_WATCH", "60"))   # G5b: the estate's queue snapshot while a tab reads the state (its own thread; 60 s keeps the office calls rare under load)
 UPDATE_MARKS = ("/var/lib/dpkg/status", "/var/lib/apt/lists", "/var/lib/apt/periodic/update-success-stamp",
                 "/var/lib/apt/periodic/unattended-upgrades-stamp", "/var/run/reboot-required",
                 "/etc/apt/apt.conf.d/53maluos-auto", "/etc/apt/apt.conf.d/54maluos-origins")
@@ -412,11 +423,38 @@ def office_conf():
         return None
 
 
-def estate_state(cat):
+def estate_inference_state(inf):
+    """office.estate.inference (Phase 13 G5b): every backend of the estate as the office's inference contract lists
+    it to an operator's desk (`maluctl office inference --all`): one row per node that shares, with its queue
+    snapshot and expected waits from its last heartbeat, so the Network tab's Estate group and the Queue tab's
+    Estate section draw from one answer. `scheduler` says the office places calls from the live queue."""
+    if not inf:
+        return {"available": False, "error": None, "backends": [], "counts": {}, "editions": [], "scheduler": False}
+    rows = []
+    for b in inf.get("backends") or []:
+        if not isinstance(b, dict):
+            continue
+        q = b.get("queue") if isinstance(b.get("queue"), dict) else {}
+        rows.append({"node": b.get("node"), "id": b.get("id"), "kind": b.get("kind"), "name": b.get("name"), "display_name": b.get("display_name"),
+                     "address": b.get("address"), "port": b.get("port"), "models": [m.get("name") for m in b.get("models") or [] if isinstance(m, dict) and m.get("name")],
+                     "queue": {"queued": int(q.get("queued") or 0), "running": int(q.get("running") or 0)},
+                     "expected_wait_s": b.get("expected_wait_s") if isinstance(b.get("expected_wait_s"), dict) else {},
+                     "share": bool(b.get("share", True)), "contribution": b.get("contribution"), "class_max": b.get("class_max"),
+                     "classification_max": b.get("classification_max"), "priority": b.get("priority") or 0, "allowed": bool(b.get("allowed", True)),
+                     "updated_at": b.get("updated_at")})
+    eds = [e for e in inf.get("editions") or [] if isinstance(e, str)]
+    return {"available": bool(inf.get("available", True)) and inf.get("error") is None, "fetched_at": inf.get("_fetched_at"), "stale": bool(inf.get("stale")),
+            "error": inf.get("error"), "version": inf.get("version"), "self": inf.get("self"), "editions": eds, "scheduler": "scheduler" in eds,
+            "backends": rows, "counts": {"backends": len(rows), "queued": sum(r["queue"]["queued"] for r in rows), "running": sum(r["queue"]["running"] for r in rows),
+                                         "allowed": sum(1 for r in rows if r["allowed"])}}
+
+
+def estate_state(cat, inf=None):
     """office.estate (Phase 13 slice 1): the estate as the office publishes it to this desk's owner, from
-    `maluctl office estate` after a heartbeat: the nodes' summary rows, the open alerts, the counts."""
+    `maluctl office estate` after a heartbeat: the nodes' summary rows, the open alerts, the counts;
+    (G5b) `inference`, the estate's backends with their queue snapshots, see estate_inference_state."""
     if not cat:
-        return {"available": False, "error": None, "nodes": [], "alerts": [], "counts": {}}
+        return {"available": False, "error": None, "nodes": [], "alerts": [], "counts": {}, "inference": estate_inference_state(inf)}
     keys = ("id", "kind", "name", "hostname", "presence", "health", "summary", "last_seen_at", "last_report_at", "units", "agents", "gateway", "updates",
             "disk_max_pct", "memory_available_pct", "load1")
     nodes = []
@@ -427,7 +465,7 @@ def estate_state(cat):
         nodes.append(row)
     alerts = [{k: a.get(k) for k in ("id", "ts", "node_id", "node", "kind", "severity", "title", "cleared_at")} for a in cat.get("alerts") or []]
     return {"available": bool(cat.get("available")), "fetched_at": cat.get("fetched_at"), "stale": bool(cat.get("stale")), "error": cat.get("error"),
-            "nodes": nodes, "alerts": alerts, "counts": cat.get("counts") or {}}
+            "nodes": nodes, "alerts": alerts, "counts": cat.get("counts") or {}, "inference": estate_inference_state(inf)}
 
 
 def memory_state(path=None):
@@ -444,7 +482,7 @@ def memory_state(path=None):
             "office_scopes": [sc.get("scope") for sc in ((d.get("office") or {}).get("scopes") or [])], "version": d.get("version"), "fetched_at": d.get("fetched_at")}
 
 
-def office_state(conf, hb, agents=None, apps=None, estate=None, inbox=None):
+def office_state(conf, hb, agents=None, apps=None, estate=None, inbox=None, inference=None):
     """What the desk knows about its office: the enrolment, the last heartbeat's outcome, (slice 8) its agents and
     (Phase 13 slice 1) the estate when the office publishes it to this desk's owner."""
     if not conf:
@@ -468,7 +506,7 @@ def office_state(conf, hb, agents=None, apps=None, estate=None, inbox=None):
             "agents_fetched_at": agents.get("fetched_at"),
             "apps": {"count": len(apps.get("apps") or []), "installed": sum(1 for a in apps.get("apps") or [] if a.get("installed")),
                      "fetched_at": apps.get("fetched_at"), "stale": bool(apps.get("stale")), "errors": apps.get("errors") or []} if apps else None,
-            "estate": estate_state(estate),
+            "estate": estate_state(estate, inference),
             "memory": memory_state(),      # Phase 13 slice 4
             # Phase 13 slice 2: the person's estate inbox (unread count, the last ten items), the desk key
             "inbox": {"unread": (inbox or {}).get("unread", hb.get("inbox_unread") or 0), "items": [{k: i.get(k) for k in ("id", "kind", "subject", "from", "task_id", "options", "status", "created_at")} for i in ((inbox or {}).get("items") or [])[:10]],
@@ -515,11 +553,15 @@ class Service:
         self.key_asked = False
         self.office_lock = threading.Lock()
         self.office_wake = threading.Event()
+        self.inference_wake = threading.Event()    # G5b: the estate thread reads the inference contract after a heartbeat
         self.office_force = False
         self.office_token = None         # the desk token, read from the vault once per enrolment (not persisted)
         self.office_agents = None        # the office's agents, from `maluctl office agents` after a heartbeat (slice 8)
         self.office_apps = None          # the MaluApps catalogue summary, re-read after a heartbeat (slice 7 leftover)
         self.office_estate = None        # the estate as the office publishes it to this desk's owner (Phase 13 slice 1)
+        self.office_inference = None     # the estate's backends with their queue snapshots (G5b): after each heartbeat, and every ESTATE_WATCH_S while GetState is being read (estate_loop)
+        self.office_inference_at = 0.0
+        self.last_get_state = 0.0        # when GetState was last called: a tab is reading the state
         self.estate_notified = set()     # ids of the estate alerts already notified
         self.icons_key = None            # what the agent icons were last synced for (slice 8)
         self.updates = None              # the last reading (updates thread writes, under updates_lock)
@@ -701,11 +743,32 @@ class Service:
             u["reading"] = self.updates_reading
             u["last_action"] = self.updates_last_action
         with self.office_lock:
-            hb = self.office_hb; oa = self.office_agents; op = self.office_apps; oe = self.office_estate
+            hb = self.office_hb; oa = self.office_agents; op = self.office_apps; oe = self.office_estate; oi = self.office_inference
         host = host_state(); host["idle"] = dict(self.idle)          # slice 3: the idle rule's measurements
         st = {"version": VERSION, "ts": int(time.time()), "host": host, "gateway": gw, "me": me_state(me), "node": node_state(gw.get("available"), me),
-              "vault": vault, "agents": agents_state(units, mine), "alerts": alerts_state(), "updates": u, "office": office_state(office_conf(), hb, oa, op, oe, self.office_inbox)}
+              "vault": vault, "agents": agents_state(units, mine), "alerts": alerts_state(), "updates": u, "office": office_state(office_conf(), hb, oa, op, oe, self.office_inbox, oi)}
         return st
+
+    def office_inference_read(self):
+        """`maluctl office inference --all --json` as this user (G5b): the office's answer (every backend of the estate for an
+        operator's desk, the desk's own list otherwise), stamped with when it was read; on a failure the last answer marked stale."""
+        env = dict(os.environ)
+        if self.office_token:
+            env["MALUOS_OFFICE_TOKEN"] = self.office_token
+        try:
+            r = subprocess.run(["maluctl", "office", "inference", "--all", "--json"], capture_output=True, text=True, timeout=60, env=env)
+            d = json.loads(r.stdout) if r.returncode == 0 and r.stdout.strip() else None     # one indented JSON object, nothing else
+            if not isinstance(d, dict) or not isinstance(d.get("backends"), list):
+                raise RuntimeError((r.stderr or r.stdout or f"exit {r.returncode}").strip().splitlines()[-1][:160] if (r.stderr or r.stdout).strip() else f"exit {r.returncode}")
+            d["_fetched_at"] = int(time.time()); d["error"] = None; d["stale"] = False
+            return d
+        except (OSError, ValueError, IndexError, RuntimeError, subprocess.SubprocessError) as e:
+            err = f"maluctl office inference: {str(e)[:160]}"
+            with self.office_lock:
+                prev = self.office_inference
+            if prev and prev.get("backends"):
+                return {**prev, "stale": True, "error": err}
+            return {"backends": [], "editions": [], "_fetched_at": int(time.time()), "error": err, "stale": False}
 
     def office_estate_read(self):
         """`maluctl office estate --json --refresh` as this user: the estate when the office publishes it (endpoints.estate)."""
@@ -832,6 +895,8 @@ class Service:
                         oa = self.office_agents_read() if d.get("ok") else ({"fetched_at": int(time.time()), "agents": [], "error": "the office retired this desk"} if d.get("revoked") else None)
                         op = self.office_apps_read() if d.get("ok") else None
                         oe = self.office_estate_read() if d.get("ok") and (conf.get("endpoints") or {}).get("estate") else None
+                        if d.get("ok") and (conf.get("endpoints") or {}).get("inference"):
+                            self.inference_wake.set()                     # G5b: the estate thread reads the inference contract now
                         if d.get("ok") and (conf.get("endpoints") or {}).get("inbox"):
                             self.inbox_wake.set()                         # slice 2: the inbox thread reads now
                         if d.get("ok") and (conf.get("endpoints") or {}).get("key") and not conf.get("key") and not self.key_asked:
@@ -849,6 +914,29 @@ class Service:
             except Exception as e:
                 log(f"office: {e.__class__.__name__}: {str(e)[:160]}")
             self.office_wake.wait(POLL); self.office_wake.clear()
+
+    def estate_loop(self):
+        """Its own thread (G5b), so the heartbeat cycle costs what it did: the estate's inference contract is read after
+        each successful heartbeat (the office loop sets inference_wake) and, while a window reads the state (GetState
+        within the last ESTATE_WATCH_S), every ESTATE_WATCH_S; dropped when the desk leaves its office."""
+        while True:
+            try:
+                conf = office_conf()
+                woken = self.inference_wake.is_set(); self.inference_wake.clear()
+                if not conf or not (conf.get("endpoints") or {}).get("inference"):
+                    if self.office_inference is not None:
+                        with self.office_lock:
+                            self.office_inference = None
+                        self.refresh_soon(0.5)
+                elif (self.office_hb or {}).get("ok") and (woken or (time.time() - self.last_get_state < ESTATE_WATCH_S
+                                                                      and time.time() - self.office_inference_at >= ESTATE_WATCH_S)):
+                    oi = self.office_inference_read()
+                    with self.office_lock:
+                        self.office_inference = oi; self.office_inference_at = time.time()
+                    self.refresh_soon(0.5)
+            except Exception as e:
+                log(f"estate: {e.__class__.__name__}: {str(e)[:160]}")
+            self.inference_wake.wait(ESTATE_WATCH_S if time.time() - self.last_get_state < ESTATE_WATCH_S else POLL)
 
     def office_inbox_read(self, wait=0):
         """`maluctl office inbox --json` as this user (the token from the vault, or the cached one)."""
@@ -1259,6 +1347,7 @@ class Service:
         GLib = self.GLib
         try:
             if method == "GetState":
+                self.last_get_state = time.time()
                 with self.lock:
                     invocation.return_value(GLib.Variant("(s)", (json.dumps(self.state, default=str),)))
             elif method == "Refresh":
@@ -1329,6 +1418,7 @@ class Service:
         threading.Thread(target=self.office_loop, daemon=True).start()
         threading.Thread(target=self.inbox_loop, daemon=True).start()        # Phase 13 slice 2: the person's estate inbox
         threading.Thread(target=self.idle_loop, daemon=True).start()         # Phase 13 slice 3: the idle rule
+        threading.Thread(target=self.estate_loop, daemon=True).start()       # Phase 13 G5b: the estate's inference contract
 
         def on_term():
             self.office_goodbye(); loop.quit(); return False

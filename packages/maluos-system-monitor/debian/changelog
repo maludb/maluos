@@ -1,3 +1,25 @@
+maluos-system-monitor (49.1+maluos.6) resolute; urgency=medium
+
+  * Phase 13 G5b, the tabs' estate half (docs/phase13-shared-gpus.md,
+    "G5b"). The MaluOS Network tab: a server's row in the Estate group
+    gets a menu for a system manager (restart, start or stop an agent,
+    apply updates, reboot where the node allows it), which runs
+    `maluctl office estate action NODE ACTION [AGENT] --wait 60` as the
+    user with this desk's envelope and shows "sent" at once and the
+    node's answer as a toast; the Estate group lists the estate's shared
+    GPUs (office.estate.inference in the session's state, maluos-session
+    0.13.0): each backend with its address, models, queue snapshot,
+    expected waits, ceiling, priority and whether it is for this desk,
+    and one line for the estate (shared GPUs, queued and running, the
+    scheduler entitlement). The Queue tab: an Estate group with one row
+    per node that shares a GPU, its running and queued counts, waits and
+    models, live with the scheduler entitlement and the last snapshot
+    with its age without. The self-test line gains "Estate: …";
+    MALUOS_SELF_TEST_ACTION=NODE:ACTION[:AGENT] runs one action through
+    the tab's path and prints "self-test action: …" before the summary.
+
+ -- Edward Honour <ed@maludb.org>  Tue, 03 Nov 2026 14:50:00 +0000
+
 maluos-system-monitor (49.1+maluos.5) resolute; urgency=medium
 
   * Phase 13 slice 3 (docs/phase13-slice3-inference.md): the MaluOS

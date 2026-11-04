@@ -36,6 +36,11 @@ JsonObject *gsm_maluos_session_get_state     (GsmMaluosSession *self);   /* the 
 /* --maluos-self-test: GetState and NodeQueue once, print one line from the tabs' summaries, exit. */
 void gsm_maluos_session_set_summary (GsmMaluosSession *self, const char *tab, const char *summary);
 void gsm_maluos_session_self_test   (GsmMaluosSession *self);
+/* G5b: a tab that runs a step of the self-test (an action through its path) holds the result until the step
+ * is done; the summary line waits for every hold.  is_self_test says whether the process runs the self-test. */
+gboolean gsm_maluos_session_is_self_test     (GsmMaluosSession *self);
+void     gsm_maluos_session_self_test_hold   (GsmMaluosSession *self);
+void     gsm_maluos_session_self_test_release (GsmMaluosSession *self);
 
 /* Run a command (maluctl …) and hand its outcome back: ok and the last line of its output (stderr when it failed). */
 typedef void (*GsmMaluosRunDone) (gboolean ok, const char *output, gpointer data);

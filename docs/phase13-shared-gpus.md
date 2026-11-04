@@ -382,3 +382,77 @@ operator actions on 2026-10-28, D3 the estate's inference contract on
 - Not in G5b: the `move` route, a pairing dialog (the pairing stays
   `maluctl gateway backend add` and the directory), translations of the
   tabs' strings, editing the scheduler's rules (the Estate page's).
+
+**G5b built 2026-11-03** (the fork's local test passes on the dev host, eight
+checks; the desktop image chain with its UEFI boot test launched 14:55 UTC,
+`build/logs/chain-g5b.log`):
+
+- maluos-session 0.13.0: `office.estate.inference` in the state, the
+  office's inference contract as this desk reads it (`maluctl office
+  inference --all --json`: every backend of the estate for a system
+  manager's desk, with its queue snapshot and expected waits from its
+  last heartbeat, `allowed` for this desk, the `editions`); one answer
+  serves the Network tab's Estate group and the Queue tab's Estate
+  section, so the planned `office.estate.queue` is not a second key. Read
+  with each heartbeat and, while a window reads the state (GetState within
+  the last 30 s), every 30 s (`MALUOS_SESSION_ESTATE_WATCH`); a failed
+  read keeps the last answer marked `stale`. VERSION in the service had
+  stayed at 0.11.0 through 0.12.0; it now matches the package.
+- maluos-system-monitor 49.1+maluos.6: the Network tab's Estate group gets
+  a menu per server row for a system manager (`office.endpoints.actions`
+  in the state): restart, start or stop an agent (a dialog asks the
+  agent's name, prefilled from the directory), apply updates, reboot (a
+  destructive confirmation); the action runs `maluctl office estate
+  action NODE ACTION [AGENT] --wait 60` as the user, a toast says "sent"
+  at once and the node's answer (completed, or refused with its reason)
+  comes as a second toast and to the inbox. A desk's row has no menu (its
+  owner runs their own machine). The group also lists the estate's
+  shared GPUs: one line for the estate (shared GPUs, how many this desk
+  may use, queued and running, the scheduler entitlement or each
+  gateway's own ranking) and one row per backend (address, models, queue
+  snapshot, waits per class, ceiling and class, priority, shares-while,
+  not for this desk). The Queue tab's Estate group: one row per node that
+  shares a GPU with its running and queued counts, waits and models; the
+  description says live placement with the scheduler, or the last
+  snapshot and its age without. The self-test line gains `Estate: N
+  nodes, Q queued, R running[, scheduler]` (`no office`, `not published`);
+  `MALUOS_SELF_TEST_ACTION=NODE:ACTION[:AGENT]` runs one action through
+  the tab's path and prints `self-test action: …` before the summary,
+  which waits for it.
+- Tests: tests/lib/fake_session.py `--estate` carries the inference answer
+  and the actions endpoint, `--estate-no-actions` a desk whose owner is
+  not a system manager; tests/system-monitor-local-test.sh runs the action
+  case against a fake `maluctl` on PATH and checks the argv the tab
+  composed; the image boot test reads `office.estate.inference` after a
+  heartbeat and runs `restart_agent helper` on test-node from the tab's
+  path against the mock office, checking the unit restarted.
+- Not built: the planned "sent" state on the row itself (the toast says
+  it), the scheduler's rules by name (the kernel publishes none yet).
+- The first image chain (2026-11-03 14:46, desktop UEFI): the three G5b
+  checks on the live session passed in substance (`office.estate.inference`
+  with server:57's queue snapshot; the self-test summary with
+  `inference 1 backend (0 queued), actions` and `Estate: 1 nodes`), and
+  the action ran the whole way, tab to office to node, which refused it
+  `no_agent`: the test had removed the helper agent before that point,
+  so the check now targets the idle `desk` agent. The slice 3 regex for
+  the Network tab also needed the inserted inference part. Later checks
+  of that run timed out under load (gnome-shell spinning at 140 %, the
+  known frozen-shell case, with every `maluctl office` child of the
+  session past its 60 s limit between 17:15 and 17:24): the session's
+  inference read, which ran inline in the office loop and every 30 s
+  while a window read the state, had added to the heartbeat cycle. It
+  now runs in its own thread (`estate_loop`), after each successful
+  heartbeat and every 60 s while watched, so the heartbeat path costs
+  what it did before.
+- **The second chain (2026-11-03 17:33, desktop UEFI, build/logs/chain-g5b.run2.log)
+  passed 447 checks with one FAIL**, the slice 3 idle-mark race the test
+  itself describes (three tries to land a call in the session's poll gap
+  after the idle file is removed; the estate rung had also taken over two
+  minutes to return beforehand): not G5b's, and green in the first run.
+  The three G5b checks passed: `office.estate.inference` with server:57's
+  queue snapshot and waits; the self-test summary `estate 2 nodes (…),
+  inference 1 backend (0 queued), actions, 2 estate backends; … Estate: 1
+  nodes, 0 queued, 0 running`; and `restart_agent desk on test-node`
+  driven through the tab's path, completed through the mock office with
+  the unit restarted on the node. The office loop's timeouts of the first
+  run did not recur. G5b is boot-tested.

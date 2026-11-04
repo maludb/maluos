@@ -57,11 +57,14 @@ struct _GsmMaluosQueueView
   GtkWidget *note_row;       /* why there is nothing to show */
   GtkWidget *queue_group;
   GtkWidget *empty_row;
+  GtkWidget *estate_group;   /* G5b: the estate's queue snapshot per node, from office.estate.inference in the state */
+  GtkWidget *estate_note_row;
   GtkWidget *more_group;
   GtkWidget *manager_row;
 
   GPtrArray *lane_rows;
   GPtrArray *job_rows;
+  GPtrArray *estate_rows;    /* one row per backend of the estate (G5b) */
   char      *office_url;
 
   GsmMaluosSession *session;
@@ -537,6 +540,169 @@ apply_queue (GsmMaluosQueueView *self, JsonObject *reply, const char *error)
   g_string_free (summary, TRUE);
 }
 
+/* ---- the estate (G5b): one row per backend of the estate with its queue snapshot and expected waits, from
+ * office.estate.inference in the state (the office's inference contract, read by the session with each heartbeat
+ * and every 30 s while this window is open) */
+
+typedef struct
+{
+  GtkWidget *row;
+  char      *name;
+} EstateRow;
+
+static void
+estate_row_free (gpointer data)
+{
+  EstateRow *r = (EstateRow *) data;
+  g_free (r->name);
+  g_free (r);
+}
+
+static char *
+estate_backend_subtitle (JsonObject *b)
+{
+  GString *s = g_string_new (NULL);
+  JsonObject *q = jo (b, "queue");
+  JsonObject *w = jo (b, "expected_wait_s");
+  JsonArray *models = ja (b, "models");
+  double queued = 0, running = 0;
+  if (q)
+    {
+      jd (q, "queued", &queued);
+      jd (q, "running", &running);
+    }
+  g_string_append_printf (s, _("%.0f running, %.0f queued"), running, queued);
+  if (w)
+    {
+      GList *names = json_object_get_members (w);
+      GString *ws = g_string_new (NULL);
+      for (GList *l = names; l; l = l->next)
+        {
+          double v = 0;
+          if (jd (w, (const char *) l->data, &v))
+            {
+              if (ws->len)
+                g_string_append (ws, ", ");
+              g_string_append_printf (ws, "%s %.1f s", (const char *) l->data, v);
+            }
+        }
+      if (ws->len)
+        g_string_append_printf (s, " · %s %s", _("wait"), ws->str);
+      g_string_free (ws, TRUE);
+      g_list_free (names);
+    }
+  if (models && json_array_get_length (models))
+    {
+      g_string_append (s, " · ");
+      for (guint i = 0; i < json_array_get_length (models); i++)
+        {
+          if (i)
+            g_string_append (s, ", ");
+          g_string_append (s, json_array_get_string_element (models, i));
+        }
+    }
+  if (js (b, "contribution") && g_strcmp0 (js (b, "contribution"), "always") != 0)
+    g_string_append_printf (s, " · %s %s", _("shares while"), js (b, "contribution"));
+  if (!jb (b, "allowed"))
+    g_string_append_printf (s, " · %s", _("not for this desk"));
+  return g_string_free (s, FALSE);
+}
+
+static void
+apply_estate (GsmMaluosQueueView *self, JsonObject *root)
+{
+  JsonObject *office = jo (root, "office");
+  JsonObject *estate = office ? jo (office, "estate") : NULL;
+  JsonObject *inf = estate ? jo (estate, "inference") : NULL;
+  JsonArray *backends = inf ? ja (inf, "backends") : NULL;
+  JsonObject *counts = inf ? jo (inf, "counts") : NULL;
+  gboolean have = inf && jb (inf, "available") && backends;
+  guint n = have ? json_array_get_length (backends) : 0;
+  GString *summary = g_string_new (NULL);
+
+  /* the rows: rebuilt when the set of nodes changes, updated otherwise */
+  gboolean same = (n == self->estate_rows->len);
+  for (guint i = 0; same && i < n; i++)
+    same = g_strcmp0 (js (json_array_get_object_element (backends, i), "node"), ((EstateRow *) g_ptr_array_index (self->estate_rows, i))->name) == 0;
+  if (!same)
+    {
+      for (guint i = 0; i < self->estate_rows->len; i++)
+        adw_preferences_group_remove (ADW_PREFERENCES_GROUP (self->estate_group), ((EstateRow *) g_ptr_array_index (self->estate_rows, i))->row);
+      g_ptr_array_set_size (self->estate_rows, 0);
+      for (guint i = 0; i < n; i++)
+        {
+          JsonObject *b = json_array_get_object_element (backends, i);
+          EstateRow *r = g_new0 (EstateRow, 1);
+          r->name = g_strdup (js (b, "node") ? js (b, "node") : "?");
+          r->row = action_row ("?", NULL);
+          gtk_widget_add_css_class (r->row, "property");
+          adw_preferences_group_add (ADW_PREFERENCES_GROUP (self->estate_group), r->row);
+          g_ptr_array_add (self->estate_rows, r);
+        }
+    }
+  for (guint i = 0; i < n; i++)
+    {
+      JsonObject *b = json_array_get_object_element (backends, i);
+      EstateRow *r = (EstateRow *) g_ptr_array_index (self->estate_rows, i);
+      char *title = g_strdup_printf ("%s (%s)", js (b, "display_name") ? js (b, "display_name") : (js (b, "name") ? js (b, "name") : "?"), js (b, "kind") ? js (b, "kind") : "node");
+      char *sub = estate_backend_subtitle (b);
+      set_title (r->row, title);
+      set_subtitle (r->row, sub);
+      g_free (title);
+      g_free (sub);
+    }
+
+  /* the note and the description: live placement with the scheduler, the last snapshot and its age without */
+  if (!office || !jb (office, "enrolled"))
+    {
+      set_subtitle (self->estate_note_row, _("Not enrolled in an office. The estate's queue appears here once this desk is enrolled and its owner is a system manager."));
+      gtk_widget_set_visible (self->estate_note_row, TRUE);
+      g_string_append (summary, "no office");
+    }
+  else if (!have)
+    {
+      const char *why = inf ? js (inf, "error") : NULL;
+      set_subtitle (self->estate_note_row, why ? why : _("The office publishes the estate's queue to system managers (maluctl office inference --all)."));
+      gtk_widget_set_visible (self->estate_note_row, TRUE);
+      g_string_append (summary, why ? "error" : "not published");
+    }
+  else
+    {
+      double nb = 0, queued = 0, running = 0, fetched = 0, ts = 0, age = -1;
+      if (counts)
+        {
+          jd (counts, "backends", &nb);
+          jd (counts, "queued", &queued);
+          jd (counts, "running", &running);
+        }
+      if (jd (inf, "fetched_at", &fetched) && jd (root, "ts", &ts) && ts >= fetched)
+        age = ts - fetched;
+      gtk_widget_set_visible (self->estate_note_row, n == 0);
+      if (n == 0)
+        set_subtitle (self->estate_note_row, _("No node of the estate shares a GPU yet. A server shares always; a desktop or laptop when its owner turns sharing on."));
+      g_string_append_printf (summary, "%.0f nodes, %.0f queued, %.0f running", nb, queued, running);
+      if (jb (inf, "scheduler"))
+        g_string_append (summary, ", scheduler");
+      if (jb (inf, "stale"))
+        g_string_append (summary, ", stale");
+      char *agetxt = age < 0 ? g_strdup ("") : age < 90 ? g_strdup_printf (_(", read %.0f s ago"), age) : g_strdup_printf (_(", read %.0f min ago"), age / 60);
+      char *d;
+      if (jb (inf, "scheduler"))
+        d = g_strdup_printf (_("Every node's queue as its last heartbeat reported it (%.0f queued, %.0f running across the estate)%s. The office has the scheduler entitlement: it places calls from this live queue and applies its rules; the rules are edited on the Estate page.%s"),
+                             queued, running, agetxt, jb (inf, "stale") ? _(" The office did not answer the last read: this is the previous snapshot.") : "");
+      else
+        d = g_strdup_printf (_("Every node's queue as its last heartbeat reported it (%.0f queued, %.0f running across the estate), the last snapshot%s. Without the scheduler entitlement each gateway ranks the estate's rungs by its own estimate.%s"),
+                             queued, running, agetxt, jb (inf, "stale") ? _(" The office did not answer the last read.") : "");
+      adw_preferences_group_set_description (ADW_PREFERENCES_GROUP (self->estate_group), d);
+      g_free (d);
+      g_free (agetxt);
+    }
+  if (!have)
+    adw_preferences_group_set_description (ADW_PREFERENCES_GROUP (self->estate_group), _("The queue of every node of the estate that shares a GPU, from its heartbeat."));
+  gsm_maluos_session_set_summary (self->session, "estate", summary->str);
+  g_string_free (summary, TRUE);
+}
+
 static void
 apply_state (GsmMaluosQueueView *self, JsonObject *root)
 {
@@ -544,6 +710,8 @@ apply_state (GsmMaluosQueueView *self, JsonObject *root)
   JsonObject *queue = jo (gateway, "queue");
   JsonObject *office = jo (root, "office");
   double queued = 0, running = 0;
+
+  apply_estate (self, root);
 
   if (gateway && jb (gateway, "available") && queue)
     {
@@ -646,6 +814,11 @@ gsm_maluos_queue_view_dispose (GObject *object)
       g_ptr_array_free (self->job_rows, TRUE);
       self->job_rows = NULL;
     }
+  if (self->estate_rows)
+    {
+      g_ptr_array_free (self->estate_rows, TRUE);
+      self->estate_rows = NULL;
+    }
   g_clear_pointer (&self->office_url, g_free);
   g_clear_pointer (&self->overlay, gtk_widget_unparent);
 
@@ -667,6 +840,7 @@ gsm_maluos_queue_view_init (GsmMaluosQueueView *self)
 {
   self->lane_rows = g_ptr_array_new_with_free_func (lane_row_free);
   self->job_rows = g_ptr_array_new_with_free_func (job_row_free);
+  self->estate_rows = g_ptr_array_new_with_free_func (estate_row_free);
   self->session = gsm_maluos_session_get ();
 
   self->overlay = adw_toast_overlay_new ();
@@ -695,6 +869,13 @@ gsm_maluos_queue_view_init (GsmMaluosQueueView *self)
   adw_preferences_page_add (ADW_PREFERENCES_PAGE (self->page), ADW_PREFERENCES_GROUP (self->queue_group));
   self->empty_row = action_row (_("Nothing queued or running"), _("Calls appear here the moment the gateway admits them."));
   adw_preferences_group_add (ADW_PREFERENCES_GROUP (self->queue_group), self->empty_row);
+
+  self->estate_group = adw_preferences_group_new ();
+  adw_preferences_group_set_title (ADW_PREFERENCES_GROUP (self->estate_group), _("Estate"));
+  adw_preferences_group_set_description (ADW_PREFERENCES_GROUP (self->estate_group), _("The queue of every node of the estate that shares a GPU, from its heartbeat."));
+  adw_preferences_page_add (ADW_PREFERENCES_PAGE (self->page), ADW_PREFERENCES_GROUP (self->estate_group));
+  self->estate_note_row = action_row (_("Nothing to show"), "—");
+  adw_preferences_group_add (ADW_PREFERENCES_GROUP (self->estate_group), self->estate_note_row);
 
   self->more_group = adw_preferences_group_new ();
   adw_preferences_page_add (ADW_PREFERENCES_PAGE (self->page), ADW_PREFERENCES_GROUP (self->more_group));

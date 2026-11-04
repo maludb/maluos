@@ -1,3 +1,18 @@
+maluos-session (0.13.0) resolute; urgency=medium
+
+  * Phase 13 G5b (docs/phase13-shared-gpus.md, "G5b"): the session state
+    carries office.estate.inference, the estate's backends with their
+    queue snapshots and expected waits as the office's inference
+    contract lists them to this desk (`maluctl office inference --all`),
+    and whether the office has the scheduler entitlement; read with each
+    heartbeat and every 60 s while a window reads the state
+    (MALUOS_SESSION_ESTATE_WATCH). For the Network tab's Estate group
+    and the Queue tab's Estate section.
+  * VERSION in the service now matches the package (it had stayed at
+    0.11.0 through 0.12.0).
+
+ -- Edward Honour <ed@maludb.org>  Tue, 03 Nov 2026 12:00:00 +0000
+
 maluos-session (0.12.0) resolute; urgency=medium
 
   * Phase 13 slice 4: the session state carries office.memory (the memory

@@ -39,6 +39,7 @@ struct _GsmMaluosSession
   guint         self_test_timeout;
   gint64        self_test_deadline;   /* monotonic µs */
   GHashTable   *summaries;            /* tab -> one line, for the self-test */
+  int           self_test_holds;      /* G5b: steps of the self-test still running in the tabs */
 };
 
 G_DEFINE_FINAL_TYPE (GsmMaluosSession, gsm_maluos_session, G_TYPE_OBJECT)
@@ -168,8 +169,8 @@ self_test_done (GsmMaluosSession *self, gboolean ok)
       self->self_test_timeout = 0;
     }
   if (ok)
-    g_print ("self-test ok: GPUs: %s; Network: %s; Queue: %s\n",
-             summary (self, "gpus"), summary (self, "network"), summary (self, "queue"));
+    g_print ("self-test ok: GPUs: %s; Network: %s; Queue: %s; Estate: %s\n",
+             summary (self, "gpus"), summary (self, "network"), summary (self, "queue"), summary (self, "estate"));
   else
     g_print ("self-test FAIL: the MaluOS session service did not answer%s%s\n",
              self->last_error ? ": " : "", self->last_error ? self->last_error : "");
@@ -180,8 +181,28 @@ self_test_done (GsmMaluosSession *self, gboolean ok)
 static void
 self_test_check (GsmMaluosSession *self)
 {
-  if (self->self_test && self->self_test_state_ok && self->self_test_queue_done)
+  if (self->self_test && self->self_test_state_ok && self->self_test_queue_done && self->self_test_holds == 0)
     self_test_done (self, TRUE);
+}
+
+gboolean
+gsm_maluos_session_is_self_test (GsmMaluosSession *self)
+{
+  return self->self_test;
+}
+
+void
+gsm_maluos_session_self_test_hold (GsmMaluosSession *self)
+{
+  self->self_test_holds++;
+}
+
+void
+gsm_maluos_session_self_test_release (GsmMaluosSession *self)
+{
+  if (self->self_test_holds > 0)
+    self->self_test_holds--;
+  self_test_check (self);
 }
 
 /* The self-test runs on slow machines (the boot test under TCG): the window's first paint can hold the main
@@ -196,7 +217,7 @@ cb_self_test_timeout (gpointer data)
   self->self_test_timeout = 0;
   if (!self->self_test)
     return G_SOURCE_REMOVE;
-  if (self->proxy_in_flight || self->state_in_flight || self->queue_in_flight || g_get_monotonic_time () < self->self_test_deadline)
+  if (self->proxy_in_flight || self->state_in_flight || self->queue_in_flight || self->self_test_holds > 0 || g_get_monotonic_time () < self->self_test_deadline)
     {
       self->self_test_timeout = g_timeout_add_seconds (5, cb_self_test_timeout, self);
       return G_SOURCE_REMOVE;

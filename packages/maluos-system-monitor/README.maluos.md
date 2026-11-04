@@ -9,14 +9,14 @@ rebase touches layout only.
 
 ## The patch surface (everything MaluOS added or changed)
 
-G1 added the GPUs tab (49.1+maluos.1), G5 the MaluOS Network and Queue tabs and the shared session client (49.1+maluos.3); Phase 13 slice 1 filled the Network tab's Estate group from office.estate (49.1+maluos.4); slice 3 lists the estate's backends (the directory's rungs) in the Paired Nodes group from gateway.estate (49.1+maluos.5).
+G1 added the GPUs tab (49.1+maluos.1), G5 the MaluOS Network and Queue tabs and the shared session client (49.1+maluos.3); Phase 13 slice 1 filled the Network tab's Estate group from office.estate (49.1+maluos.4); slice 3 lists the estate's backends (the directory's rungs) in the Paired Nodes group from gateway.estate (49.1+maluos.5). G5b added the node actions (a menu per server row, `maluctl office estate action … --wait 60` as the user, toasts), the estate's shared GPUs in the Estate group and the Queue tab's Estate group, both from office.estate.inference (49.1+maluos.6).
 
 | File | Change |
 |---|---|
 | `src/maluos-session.cpp`, `src/maluos-session.h` | new: the one session client of the process (GsmMaluosSession), which talks to `com.maluos.Session`: GetState every 2 s while a tab that draws the state is current, NodeQueue every 2 s while the Queue tab is; each answer is a signal the tabs draw from; `available` (the service answered once: the tabs are shown) and `stale` (a later call failed: a banner); the JSON helpers; `gsm_maluos_run` for the tabs' maluctl actions; `--maluos-self-test` |
 | `src/maluos-gpus.cpp`, `src/maluos-gpus.h` | new: the GPUs view (GsmMaluosGpusView): this computer's GPUs, the sharing switch (`pkexec maluctl gateway share on|off`), the loaded models and the queue, and the office |
-| `src/maluos-network.cpp`, `src/maluos-network.h` | new: the MaluOS Network view (GsmMaluosNetworkView): this node as the node API reports it (name, id, the listener, sharing, the manager, the lanes, the keys issued), the nodes paired by hand, the office; from the state's `node` section (maluos-desktop-session 0.8.0) |
-| `src/maluos-queue.cpp`, `src/maluos-queue.h` | new: the Queue view (GsmMaluosQueueView): every lane with Pause/Resume, every queued or running call with Cancel and its class as a drop-down, from NodeQueue; the actions run `maluctl gateway node pause|resume|cancel|priority`; "Open in Sovereign LLM Manager" opens the office |
+| `src/maluos-network.cpp`, `src/maluos-network.h` | new: the MaluOS Network view (GsmMaluosNetworkView): this node as the node API reports it (name, id, the listener, sharing, the manager, the lanes, the keys issued), the nodes paired by hand, the office and its estate (the nodes with a menu of actions for a system manager, the open alerts, the shared GPUs with their queue snapshots); from the state's `node` and `office.estate` sections (maluos-desktop-session 0.13.0) |
+| `src/maluos-queue.cpp`, `src/maluos-queue.h` | new: the Queue view (GsmMaluosQueueView): every lane with Pause/Resume, every queued or running call with Cancel and its class as a drop-down, from NodeQueue; the Estate group (one row per node of the estate that shares a GPU, from `office.estate.inference` in the state); the actions run `maluctl gateway node pause|resume|cancel|priority`; "Open in Sovereign LLM Manager" opens the office |
 | `data/interface.ui` | the `gpus`, `network` and `queue` AdwViewStackPages after File Systems, hidden until the session answers |
 | `data/icons/public/hicolor/symbolic/apps/maluos-gpus-symbolic.svg`, `src/gsm.gresource.xml.in` | the GPUs tab icon (the other two use Adwaita's network-workgroup and view-list-ordered) |
 | `src/interface.cpp` | `g_type_ensure` for the three views before the builder, the views fetched from the builder, the pages' `visible` bound to the session client's `available`, freeze/thaw of each view in `update_page_activities` |
@@ -42,10 +42,14 @@ Every hunk in an upstream file is marked `MaluOS` in a comment.
 ## The self-test
 
 `gnome-system-monitor --maluos-self-test` builds the window, selects the GPUs tab, reads the
-session state and the queue once (GetState, NodeQueue) and prints one line from the three tabs'
+session state and the queue once (GetState, NodeQueue) and prints one line from the tabs'
 summaries: `self-test ok: GPUs: session reachable, N gpus, chassis X, rule R, share on|off, gateway
-ok|absent; Network: node NAME, L lanes, P paired, K keys, exposed|socket only; Queue: N jobs (R running,
-Q queued) in L lanes`, exit 0 (the Network and Queue parts say `not an operator` / `forbidden (not an
+ok|absent; Network: node NAME, L lanes, P paired, K keys, exposed|socket only[, estate N nodes (…),
+inference B backends (Q queued), actions, E estate backends]; Queue: N jobs (R running,
+Q queued) in L lanes; Estate: N nodes, Q queued, R running[, scheduler]|no office|not published`, exit 0.
+With `MALUOS_SELF_TEST_ACTION=NODE:ACTION[:AGENT]` in the environment the Network tab runs that one action
+through its own path once the estate is on screen and prints `self-test action: <label>: <maluctl's last
+line>` before the summary, which waits for it (G5b) (the Network and Queue parts say `not an operator` / `forbidden (not an
 operator)` for a user who is not an operator of the gateway, `no gateway` without one, and name a
 session service too old for NodeQueue). When a call is refused (no service: ServiceUnknown) or
 nothing has answered within 60 s it prints `self-test FAIL: the MaluOS session service did not answer:

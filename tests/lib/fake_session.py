@@ -6,7 +6,9 @@ MaluOS Network and Queue tabs can be exercised without the desktop session.
 Usage: fake_session.py [--no-gpu] [--not-operator] [--estate] [--ready FILE]
   --no-gpu        a VM: no GPU, chassis vm, an empty queue
   --not-operator  the user is not an operator of the gateway: no node section, NodeQueue is forbidden
-  --estate        an enrolled desk whose office publishes the estate (Phase 13 slice 1): two nodes, one alert; two estate backends from the directory (slice 3)
+  --estate-no-actions  an enrolled desk whose owner is not a system manager: no estate, no actions endpoint (the tabs show no menus)
+  --estate        an enrolled desk whose office publishes the estate (Phase 13 slice 1): two nodes, one alert; two estate backends from the directory (slice 3);
+                  the estate's inference contract with two backends and their queue snapshots, the scheduler entitlement, and the actions endpoint (G5b)
 """
 import json, os, sys
 import gi
@@ -65,15 +67,30 @@ ESTATE = {"available": True, "fetched_at": 1, "stale": False, "error": None,
                      "disk_max_pct": None, "memory_available_pct": None, "load1": None}],
           "alerts": [{"id": 301, "ts": "2026-10-27T03:59:00Z", "node_id": 57, "node": "db-1", "kind": "agent_down", "severity": "warning", "title": "agent helpdesk failed (3 restarts)", "cleared_at": None},
                      {"id": 299, "ts": "2026-10-27T02:00:00Z", "node_id": 57, "node": "db-1", "kind": "disk_full", "severity": "warning", "title": "disk / at 90 %", "cleared_at": "2026-10-27T03:30:00Z"}],
-          "counts": {"nodes": 2, "online": 1, "offline": 1, "alerts": 1}}
+          "counts": {"nodes": 2, "online": 1, "offline": 1, "alerts": 1},
+          # G5b: the estate's backends with their queue snapshots, as `maluctl office inference --all` lists them to an operator's desk
+          "inference": {"available": True, "fetched_at": 1, "stale": False, "error": None, "version": 7, "self": "desk:42", "editions": ["scheduler"], "scheduler": True,
+                        "backends": [{"node": "server:57", "id": 57, "kind": "server", "name": "db-1", "display_name": "db-1", "address": "100.100.0.2", "port": 11435,
+                                      "models": ["qwen3:8b", "qwen3:32b"], "queue": {"queued": 2, "running": 1}, "expected_wait_s": {"interactive": 1.2, "agent": 4.0, "batch": 9.0},
+                                      "share": True, "contribution": "always", "class_max": "agent", "classification_max": "internal", "priority": 10, "allowed": True, "updated_at": "2026-10-27T03:59:00Z"},
+                                     {"node": "desk:12", "id": 12, "kind": "desk", "name": "ed-s-laptop", "display_name": "Ed's laptop", "address": "100.100.0.5", "port": 11435,
+                                      "models": ["qwen3:8b"], "queue": {"queued": 0, "running": 0}, "expected_wait_s": {}, "share": True, "contribution": "idle", "class_max": "interactive",
+                                      "classification_max": "internal", "priority": 0, "allowed": False, "updated_at": "2026-10-27T03:50:00Z"}],
+                        "counts": {"backends": 2, "queued": 2, "running": 1, "allowed": 1}}}
 
 
 def office(estate):
     if not estate:
         return {"enrolled": False}
+    if estate == "no-actions":            # an enrolled desk whose owner is not a system manager: no actions endpoint, no estate
+        return {"enrolled": True, "url": "http://fake.office", "office": {"name": "Fake Office", "url": "http://fake.office"}, "surface": 1, "presence": "online", "ok": True,
+                "revoked": False, "agents": [], "apps": None, "estate": {"available": False, "error": "the office does not publish the estate to this desk", "nodes": [], "alerts": [], "counts": {},
+                                                                        "inference": {"available": False, "error": None, "backends": [], "counts": {}, "editions": [], "scheduler": False}},
+                "endpoints": {"records": True, "activity": True, "memory": True, "actions": False, "models": None}}
     return {"enrolled": True, "url": "http://fake.office", "office": {"name": "Fake Office", "url": "http://fake.office"}, "surface": 1,
             "desk": {"id": 42, "name": "Ed's desk", "status": "active"}, "owner": {"principal": "user:me", "display_name": "Edward Honour"},
-            "presence": "online", "ok": True, "revoked": False, "agents": [], "apps": None, "estate": ESTATE}
+            "presence": "online", "ok": True, "revoked": False, "agents": [], "apps": None, "estate": ESTATE,
+            "endpoints": {"records": True, "activity": True, "memory": True, "actions": True, "models": None}}
 
 
 def state(no_gpu, operator, estate=False):
@@ -110,7 +127,7 @@ def queue(no_gpu, operator):
 def main(argv):
     no_gpu = "--no-gpu" in argv
     operator = "--not-operator" not in argv
-    estate = "--estate" in argv
+    estate = "no-actions" if "--estate-no-actions" in argv else ("--estate" in argv)
     ready = argv[argv.index("--ready") + 1] if "--ready" in argv else None
     loop = GLib.MainLoop()
     node_info = Gio.DBusNodeInfo.new_for_xml(XML)

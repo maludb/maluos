@@ -19,12 +19,22 @@ typedef struct
 {
   GtkWidget *row;
   char      *name;
+  char      *label;    /* an estate node row: the node's name, for the actions (G5b) */
 } NamedRow;
+
+/* G5b: one action on a node of the estate, running `maluctl office estate action NODE ACTION [AGENT] --wait 60` as this user */
+typedef struct
+{
+  GsmMaluosNetworkView *view;
+  char                 *label;
+  gboolean              self_test;   /* a step of the self-test: its outcome is printed and the summary waits for it */
+} NodeAction;
 
 struct _GsmMaluosNetworkView
 {
   GtkWidget parent_instance;
 
+  GtkWidget *overlay;        /* AdwToastOverlay: the outcome of a node action (G5b) */
   GtkWidget *box;
   GtkWidget *banner;
   GtkWidget *page;
@@ -41,10 +51,14 @@ struct _GsmMaluosNetworkView
   GtkWidget *office_group;
   GtkWidget *office_row;
   GtkWidget *alerts_row;     /* the estate's open alerts (Phase 13 slice 1) */
+  GtkWidget *inference_row;  /* G5b: the estate's shared GPUs in one line, then one row per backend */
 
   GPtrArray *paired_rows;
   GPtrArray *estate_rows;    /* one row per node of the estate, rebuilt when the set of ids changes */
   GPtrArray *backend_rows;   /* one row per backend the estate's directory gave this gateway (Phase 13 slice 3), in the paired group */
+  GPtrArray *inference_rows; /* one row per backend of the estate's inference contract (G5b), in the estate group */
+  gboolean   can_act;        /* the office publishes its actions endpoint to this desk (a system manager): the node rows get a menu */
+  gboolean   self_test_action_started;
 
   GsmMaluosSession *session;
   gulong            state_id;
@@ -60,7 +74,191 @@ named_row_free (gpointer data)
 {
   NamedRow *r = (NamedRow *) data;
   g_free (r->name);
+  g_free (r->label);
   g_free (r);
+}
+
+static void
+toast (GsmMaluosNetworkView *self, const char *text)
+{
+  AdwToast *t = adw_toast_new (text && *text ? text : "…");
+  adw_toast_set_timeout (t, 6);
+  adw_toast_overlay_add_toast (ADW_TOAST_OVERLAY (self->overlay), t);
+}
+
+/* ---- the node actions (G5b): restart, start or stop an agent, apply updates, reboot, through the office with this
+ * desk's envelope; the node runs what its estate.yaml allows and reports the outcome, which `maluctl office estate
+ * action … --wait` returns as its last line */
+
+static const char *const NODE_ACTIONS[] = { "restart_agent", "start_agent", "stop_agent", "apply_updates", "reboot", NULL };
+
+static void
+on_node_action_done (gboolean ok, const char *output, gpointer data)
+{
+  NodeAction *a = (NodeAction *) data;
+  char *text = g_strdup_printf ("%s: %s", a->label, output && *output ? output : (ok ? _("done") : _("failed")));
+  if (!ok)
+    g_warning ("maluos network: %s", text);
+  toast (a->view, text);
+  if (a->self_test)
+    {
+      g_print ("self-test action: %s\n", text);
+      fflush (stdout);
+    }
+  g_free (text);
+  gsm_maluos_session_update (a->view->session);
+  if (a->self_test)
+    gsm_maluos_session_self_test_release (a->view->session);
+  g_object_unref (a->view);
+  g_free (a->label);
+  g_free (a);
+}
+
+static void
+run_node_action (GsmMaluosNetworkView *self, const char *node, const char *action, const char *agent, gboolean self_test)
+{
+  const char *argv[10] = { "maluctl", "office", "estate", "action", node, action, NULL };
+  int na = 6;
+  if (agent && *agent)
+    argv[na++] = agent;
+  argv[na++] = "--wait";
+  argv[na++] = "60";
+  argv[na] = NULL;
+  NodeAction *a = g_new0 (NodeAction, 1);
+  a->view = (GsmMaluosNetworkView *) g_object_ref (self);
+  a->label = agent && *agent ? g_strdup_printf ("%s %s on %s", action, agent, node) : g_strdup_printf ("%s on %s", action, node);
+  a->self_test = self_test;
+  char *sent = g_strdup_printf (_("%s: sent to the office; the node answers within a minute"), a->label);
+  toast (self, sent);
+  g_free (sent);
+  if (self_test)
+    gsm_maluos_session_self_test_hold (self->session);
+  gsm_maluos_run (argv, on_node_action_done, a);
+}
+
+/* the first agent of the node the directory lists, to prefill the entry */
+static char *
+first_agent_on (GsmMaluosNetworkView *self, const char *node)
+{
+  JsonObject *root = gsm_maluos_session_get_state (self->session);
+  JsonObject *office = root ? jo (root, "office") : NULL;
+  JsonArray *agents = office ? ja (office, "agents") : NULL;
+  for (guint i = 0; agents && i < json_array_get_length (agents); i++)
+    {
+      JsonObject *a = json_array_get_object_element (agents, i);
+      JsonObject *n = jo (a, "node");
+      if (n && g_strcmp0 (js (n, "name"), node) == 0 && js (a, "name"))
+        return g_strdup (js (a, "name"));
+    }
+  return NULL;
+}
+
+typedef struct
+{
+  GsmMaluosNetworkView *view;
+  char                 *node;
+  char                 *action;
+  GtkWidget            *entry;   /* the agent's name, for the agent actions */
+} Ask;
+
+static void
+on_ask_response (AdwAlertDialog *, const char *response, gpointer data)
+{
+  Ask *ask = (Ask *) data;
+  if (g_strcmp0 (response, "run") == 0)
+    {
+      const char *agent = ask->entry ? gtk_editable_get_text (GTK_EDITABLE (ask->entry)) : NULL;
+      if (ask->entry && (!agent || !*agent))
+        toast (ask->view, _("The agent actions need the agent's name"));
+      else
+        run_node_action (ask->view, ask->node, ask->action, agent, FALSE);
+    }
+  g_object_unref (ask->view);
+  g_free (ask->node);
+  g_free (ask->action);
+  g_free (ask);
+}
+
+static void
+on_estate_act (GSimpleAction *, GVariant *param, gpointer data)
+{
+  GsmMaluosNetworkView *self = (GsmMaluosNetworkView *) data;
+  const char *target = g_variant_get_string (param, NULL);
+  char **parts = g_strsplit (target, "\t", 2);    /* "NODE\tACTION" */
+  if (!parts[0] || !parts[1])
+    {
+      g_strfreev (parts);
+      return;
+    }
+  gboolean agentish = g_str_has_suffix (parts[1], "_agent");
+  Ask *ask = g_new0 (Ask, 1);
+  ask->view = (GsmMaluosNetworkView *) g_object_ref (self);
+  ask->node = g_strdup (parts[0]);
+  ask->action = g_strdup (parts[1]);
+  char *heading = g_strdup_printf ("%s on %s", parts[1], parts[0]);
+  const char *body = agentish ? _("The node restarts, starts or stops the named agent's unit if its estate.yaml allows the action, and reports the outcome to your inbox.")
+                   : g_strcmp0 (parts[1], "reboot") == 0 ? _("The node reboots only if its estate.yaml allows it (off by default); the outcome comes back to your inbox.")
+                   : _("The node applies its pending updates (maluctl update) if its estate.yaml allows it, and reports the outcome to your inbox.");
+  AdwDialog *dlg = adw_alert_dialog_new (heading, body);
+  if (agentish)
+    {
+      ask->entry = gtk_entry_new ();
+      char *first = first_agent_on (self, parts[0]);
+      gtk_entry_set_placeholder_text (GTK_ENTRY (ask->entry), _("agent name"));
+      if (first)
+        gtk_editable_set_text (GTK_EDITABLE (ask->entry), first);
+      g_free (first);
+      adw_alert_dialog_set_extra_child (ADW_ALERT_DIALOG (dlg), ask->entry);
+    }
+  adw_alert_dialog_add_responses (ADW_ALERT_DIALOG (dlg), "cancel", _("Cancel"), "run", _("Run"), NULL);
+  adw_alert_dialog_set_response_appearance (ADW_ALERT_DIALOG (dlg), "run", g_strcmp0 (parts[1], "reboot") == 0 ? ADW_RESPONSE_DESTRUCTIVE : ADW_RESPONSE_SUGGESTED);
+  adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dlg), "run");
+  adw_alert_dialog_set_close_response (ADW_ALERT_DIALOG (dlg), "cancel");
+  g_signal_connect (dlg, "response", G_CALLBACK (on_ask_response), ask);
+  adw_dialog_present (dlg, GTK_WIDGET (self));
+  g_free (heading);
+  g_strfreev (parts);
+}
+
+static GtkWidget *
+node_menu_button (const char *node)
+{
+  GMenu *menu = g_menu_new ();
+  const char *labels[] = { N_("Restart an agent…"), N_("Start an agent…"), N_("Stop an agent…"), N_("Apply updates"), N_("Reboot") };
+  for (int i = 0; NODE_ACTIONS[i]; i++)
+    {
+      char *target = g_strdup_printf ("%s\t%s", node, NODE_ACTIONS[i]);
+      GMenuItem *item = g_menu_item_new (_(labels[i]), NULL);
+      g_menu_item_set_action_and_target_value (item, "estate.act", g_variant_new_string (target));
+      g_menu_append_item (menu, item);
+      g_object_unref (item);
+      g_free (target);
+    }
+  GtkWidget *button = gtk_menu_button_new ();
+  gtk_menu_button_set_icon_name (GTK_MENU_BUTTON (button), "view-more-symbolic");
+  gtk_menu_button_set_menu_model (GTK_MENU_BUTTON (button), G_MENU_MODEL (menu));
+  gtk_widget_set_valign (button, GTK_ALIGN_CENTER);
+  gtk_widget_add_css_class (button, "flat");
+  gtk_widget_set_tooltip_text (button, _("Actions on this node, through the office with your envelope"));
+  g_object_unref (menu);
+  return button;
+}
+
+/* the self-test's action step (G5b): MALUOS_SELF_TEST_ACTION=NODE:ACTION[:AGENT] runs one action through the tab's
+ * path once the estate is on screen, prints "self-test action: …" and holds the summary line until it is answered */
+static void
+self_test_action (GsmMaluosNetworkView *self)
+{
+  const char *spec = g_getenv ("MALUOS_SELF_TEST_ACTION");
+  if (!spec || !*spec || self->self_test_action_started || !gsm_maluos_session_is_self_test (self->session))
+    return;
+  self->self_test_action_started = TRUE;
+  char **parts = g_strsplit (spec, ":", 3);
+  if (parts[0] && parts[1])
+    run_node_action (self, parts[0], parts[1], parts[2], TRUE);
+  else
+    g_printerr ("MALUOS_SELF_TEST_ACTION wants NODE:ACTION[:AGENT]\n");
+  g_strfreev (parts);
 }
 
 static GtkWidget *
@@ -335,6 +533,15 @@ estate_node_subtitle (JsonObject *n)
   return g_string_free (s, FALSE);
 }
 
+static char *
+estate_node_key (JsonObject *node, gboolean can_act)
+{
+  double id = 0;
+  jd (node, "id", &id);
+  gboolean menu = can_act && g_strcmp0 (js (node, "kind"), "desk") != 0;   /* a desk's owner runs their own machine */
+  return g_strdup_printf ("%.0f%s", id, menu ? "+menu" : "");
+}
+
 static void
 apply_estate_nodes (GsmMaluosNetworkView *self, JsonArray *nodes)
 {
@@ -342,10 +549,7 @@ apply_estate_nodes (GsmMaluosNetworkView *self, JsonArray *nodes)
   gboolean same = (n == self->estate_rows->len);
   for (guint i = 0; same && i < n; i++)
     {
-      JsonObject *node = json_array_get_object_element (nodes, i);
-      double id = 0;
-      jd (node, "id", &id);
-      char *key = g_strdup_printf ("%.0f", id);
+      char *key = estate_node_key (json_array_get_object_element (nodes, i), self->can_act);
       same = g_strcmp0 (key, ((NamedRow *) g_ptr_array_index (self->estate_rows, i))->name) == 0;
       g_free (key);
     }
@@ -357,12 +561,13 @@ apply_estate_nodes (GsmMaluosNetworkView *self, JsonArray *nodes)
       for (guint i = 0; i < n; i++)
         {
           JsonObject *node = json_array_get_object_element (nodes, i);
-          double id = 0;
-          jd (node, "id", &id);
           NamedRow *r = g_new0 (NamedRow, 1);
-          r->name = g_strdup_printf ("%.0f", id);
-          r->row = action_row (js (node, "name") ? js (node, "name") : "?", NULL);
+          r->name = estate_node_key (node, self->can_act);
+          r->label = g_strdup (js (node, "name") ? js (node, "name") : "?");
+          r->row = action_row (r->label, NULL);
           gtk_widget_add_css_class (r->row, "property");
+          if (g_str_has_suffix (r->name, "+menu"))
+            adw_action_row_add_suffix (ADW_ACTION_ROW (r->row), node_menu_button (r->label));
           adw_preferences_group_add (ADW_PREFERENCES_GROUP (self->office_group), r->row);
           g_ptr_array_add (self->estate_rows, r);
         }
@@ -376,6 +581,160 @@ apply_estate_nodes (GsmMaluosNetworkView *self, JsonArray *nodes)
       set_subtitle (r->row, sub);
       g_free (sub);
     }
+}
+
+/* ---- the estate's shared GPUs (G5b): the office's inference contract as it lists every backend to a system manager's
+ * desk, with each node's queue snapshot, from office.estate.inference in the state */
+
+static char *
+inference_backend_subtitle (JsonObject *b)
+{
+  GString *s = g_string_new (NULL);
+  JsonObject *q = jo (b, "queue");
+  JsonObject *w = jo (b, "expected_wait_s");
+  JsonArray *models = ja (b, "models");
+  double queued = 0, running = 0, prio = 0;
+  if (js (b, "address"))
+    {
+      double port = 0;
+      jd (b, "port", &port);
+      char *ep = port > 0 ? g_strdup_printf ("%s:%.0f", js (b, "address"), port) : g_strdup (js (b, "address"));
+      join (s, " · ", ep);
+      g_free (ep);
+    }
+  if (models && json_array_get_length (models))
+    {
+      GString *m = g_string_new (NULL);
+      for (guint i = 0; i < json_array_get_length (models); i++)
+        {
+          if (i)
+            g_string_append (m, ", ");
+          g_string_append (m, json_array_get_string_element (models, i));
+        }
+      join (s, " · ", m->str);
+      g_string_free (m, TRUE);
+    }
+  if (q)
+    {
+      jd (q, "queued", &queued);
+      jd (q, "running", &running);
+    }
+  char *qt = g_strdup_printf (_("queue %.0f queued, %.0f running"), queued, running);
+  join (s, " · ", qt);
+  g_free (qt);
+  if (w)
+    {
+      GList *names = json_object_get_members (w);
+      GString *ws = g_string_new (NULL);
+      for (GList *l = names; l; l = l->next)
+        {
+          double v = 0;
+          if (jd (w, (const char *) l->data, &v))
+            {
+              if (ws->len)
+                g_string_append (ws, ", ");
+              g_string_append_printf (ws, "%s %.1f s", (const char *) l->data, v);
+            }
+        }
+      if (ws->len)
+        {
+          char *wt = g_strdup_printf (_("wait %s"), ws->str);
+          join (s, " · ", wt);
+          g_free (wt);
+        }
+      g_string_free (ws, TRUE);
+      g_list_free (names);
+    }
+  if (js (b, "classification_max") || js (b, "class_max"))
+    {
+      char *c = g_strdup_printf (_("ceiling %s%s%s"), js (b, "classification_max") ? js (b, "classification_max") : "internal",
+                                 js (b, "class_max") ? _(", class ") : "", js (b, "class_max") ? js (b, "class_max") : "");
+      join (s, " · ", c);
+      g_free (c);
+    }
+  if (jd (b, "priority", &prio) && prio != 0)
+    {
+      char *p = g_strdup_printf (_("priority %.0f"), prio);
+      join (s, " · ", p);
+      g_free (p);
+    }
+  if (js (b, "contribution") && g_strcmp0 (js (b, "contribution"), "always") != 0)
+    {
+      char *c = g_strdup_printf (_("shares while %s"), js (b, "contribution"));
+      join (s, " · ", c);
+      g_free (c);
+    }
+  if (!jb (b, "allowed"))
+    join (s, " · ", _("not for this desk"));
+  return g_string_free (s, FALSE);
+}
+
+static void
+apply_inference (GsmMaluosNetworkView *self, JsonObject *inf, GString *summary)
+{
+  JsonArray *backends = inf && jb (inf, "available") ? ja (inf, "backends") : NULL;
+  JsonObject *counts = inf ? jo (inf, "counts") : NULL;
+  guint n = backends ? json_array_get_length (backends) : 0;
+
+  gboolean same = (n == self->inference_rows->len);
+  for (guint i = 0; same && i < n; i++)
+    same = g_strcmp0 (js (json_array_get_object_element (backends, i), "node"), ((NamedRow *) g_ptr_array_index (self->inference_rows, i))->name) == 0;
+  if (!same)
+    {
+      for (guint i = 0; i < self->inference_rows->len; i++)
+        adw_preferences_group_remove (ADW_PREFERENCES_GROUP (self->office_group), ((NamedRow *) g_ptr_array_index (self->inference_rows, i))->row);
+      g_ptr_array_set_size (self->inference_rows, 0);
+      for (guint i = 0; i < n; i++)
+        {
+          JsonObject *b = json_array_get_object_element (backends, i);
+          NamedRow *r = g_new0 (NamedRow, 1);
+          r->name = g_strdup (js (b, "node") ? js (b, "node") : "?");
+          r->row = action_row ("?", NULL);
+          gtk_widget_add_css_class (r->row, "property");
+          adw_preferences_group_add (ADW_PREFERENCES_GROUP (self->office_group), r->row);
+          g_ptr_array_add (self->inference_rows, r);
+        }
+    }
+  for (guint i = 0; i < n; i++)
+    {
+      JsonObject *b = json_array_get_object_element (backends, i);
+      NamedRow *r = (NamedRow *) g_ptr_array_index (self->inference_rows, i);
+      char *title = g_strdup_printf (_("GPU of %s (%s)"), js (b, "display_name") ? js (b, "display_name") : (js (b, "name") ? js (b, "name") : "?"), js (b, "kind") ? js (b, "kind") : "node");
+      char *sub = inference_backend_subtitle (b);
+      set_title (r->row, title);
+      set_subtitle (r->row, sub);
+      g_free (title);
+      g_free (sub);
+    }
+
+  if (!inf || !jb (inf, "available"))
+    {
+      const char *why = inf ? js (inf, "error") : NULL;
+      gtk_widget_set_visible (self->inference_row, why != NULL);
+      if (why)
+        set_subtitle (self->inference_row, why);
+      return;
+    }
+  double nb = 0, queued = 0, running = 0, allowed = 0;
+  if (counts)
+    {
+      jd (counts, "backends", &nb);
+      jd (counts, "queued", &queued);
+      jd (counts, "running", &running);
+      jd (counts, "allowed", &allowed);
+    }
+  gtk_widget_set_visible (self->inference_row, TRUE);
+  if (n == 0)
+    set_subtitle (self->inference_row, _("No node of the estate shares a GPU yet. A server shares always; a desktop or laptop when its owner turns sharing on (the GPUs tab)."));
+  else
+    {
+      char *t = g_strdup_printf (_("%.0f shared GPU%s (%.0f for this desk), %.0f queued and %.0f running across the estate.%s%s"), nb, nb == 1 ? "" : "s", allowed, queued, running,
+                                 jb (inf, "scheduler") ? _(" The office places calls from the live queue (scheduler).") : _(" Each gateway ranks the estate's rungs by its own estimate."),
+                                 jb (inf, "stale") ? _(" The office did not answer the last read: this is the previous snapshot.") : "");
+      set_subtitle (self->inference_row, t);
+      g_free (t);
+    }
+  g_string_append_printf (summary, ", inference %.0f backend%s (%.0f queued)", nb, nb == 1 ? "" : "s", queued);
 }
 
 /* ---- the state applied to the widgets */
@@ -552,6 +911,8 @@ apply_state (GsmMaluosNetworkView *self, JsonObject *root)
     gboolean have_estate = estate && jb (estate, "available");
     JsonObject *o = office ? jo (office, "office") : NULL;
     const char *name = o ? js (o, "name") : NULL;
+    JsonObject *eps = office ? jo (office, "endpoints") : NULL;
+    self->can_act = eps && jb (eps, "actions");    /* G5b: the office publishes its actions endpoint to a system manager's desk */
 
     if (office && jb (office, "enrolled") && have_estate)
       {
@@ -568,8 +929,10 @@ apply_state (GsmMaluosNetworkView *self, JsonObject *root)
         char *title = g_strdup_printf (_("Estate of %s"), name ? name : "the office");
         set_title (self->office_row, title);
         g_free (title);
-        char *t = g_strdup_printf (_("%.0f nodes, %.0f online, %.0f open alerts%s. Read-only: operator actions on a node come with the delegation envelope (slice 2)."),
-                                   nn, online, nalerts, jb (estate, "stale") ? _(" (cached: the office did not answer)") : "");
+        char *t = g_strdup_printf (_("%.0f nodes, %.0f online, %.0f open alerts%s. %s"),
+                                   nn, online, nalerts, jb (estate, "stale") ? _(" (cached: the office did not answer)") : "",
+                                   self->can_act ? _("A server's menu restarts, starts or stops an agent, applies updates or reboots it, through the office with your envelope; the node runs what its estate.yaml allows and the outcome reaches your inbox.")
+                                                 : _("Actions on a node need the office's actions endpoint (system managers)."));
         set_subtitle (self->office_row, t);
         g_free (t);
         {
@@ -592,6 +955,10 @@ apply_state (GsmMaluosNetworkView *self, JsonObject *root)
         gtk_widget_set_visible (self->alerts_row, TRUE);
         apply_estate_nodes (self, nodes);
         g_string_append_printf (summary, ", estate %.0f nodes (%.0f online, %.0f alert%s)", nn, online, nalerts, nalerts == 1 ? "" : "s");
+        apply_inference (self, jo (estate, "inference"), summary);
+        if (self->can_act)
+          g_string_append (summary, ", actions");
+        self_test_action (self);
       }
     else
       {
@@ -612,6 +979,7 @@ apply_state (GsmMaluosNetworkView *self, JsonObject *root)
           }
         gtk_widget_set_visible (self->alerts_row, FALSE);
         apply_estate_nodes (self, NULL);
+        apply_inference (self, estate ? jo (estate, "inference") : NULL, summary);
       }
   }
 
@@ -686,7 +1054,12 @@ gsm_maluos_network_view_dispose (GObject *object)
       g_ptr_array_free (self->backend_rows, TRUE);
       self->backend_rows = NULL;
     }
-  g_clear_pointer (&self->box, gtk_widget_unparent);
+  if (self->inference_rows)
+    {
+      g_ptr_array_free (self->inference_rows, TRUE);
+      self->inference_rows = NULL;
+    }
+  g_clear_pointer (&self->overlay, gtk_widget_unparent);
 
   G_OBJECT_CLASS (gsm_maluos_network_view_parent_class)->dispose (object);
 }
@@ -707,10 +1080,23 @@ gsm_maluos_network_view_init (GsmMaluosNetworkView *self)
   self->paired_rows = g_ptr_array_new_with_free_func (named_row_free);
   self->estate_rows = g_ptr_array_new_with_free_func (named_row_free);
   self->backend_rows = g_ptr_array_new_with_free_func (named_row_free);
+  self->inference_rows = g_ptr_array_new_with_free_func (named_row_free);
   self->session = gsm_maluos_session_get ();
 
+  self->overlay = adw_toast_overlay_new ();
+  gtk_widget_set_parent (self->overlay, GTK_WIDGET (self));
   self->box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
-  gtk_widget_set_parent (self->box, GTK_WIDGET (self));
+  adw_toast_overlay_set_child (ADW_TOAST_OVERLAY (self->overlay), self->box);
+
+  {   /* G5b: the node actions, "estate.act" with "NODE\tACTION" as the target */
+    GSimpleActionGroup *group = g_simple_action_group_new ();
+    GSimpleAction *act = g_simple_action_new ("act", G_VARIANT_TYPE_STRING);
+    g_signal_connect (act, "activate", G_CALLBACK (on_estate_act), self);
+    g_action_map_add_action (G_ACTION_MAP (group), G_ACTION (act));
+    gtk_widget_insert_action_group (GTK_WIDGET (self), "estate", G_ACTION_GROUP (group));
+    g_object_unref (act);
+    g_object_unref (group);
+  }
 
   self->banner = adw_banner_new (_("The MaluOS session service is not answering"));
   g_object_bind_property (self->session, "stale", self->banner, "revealed", G_BINDING_SYNC_CREATE);
@@ -760,6 +1146,9 @@ gsm_maluos_network_view_init (GsmMaluosNetworkView *self)
   self->alerts_row = action_row (_("Open alerts"), "—");
   gtk_widget_set_visible (self->alerts_row, FALSE);
   adw_preferences_group_add (ADW_PREFERENCES_GROUP (self->office_group), self->alerts_row);
+  self->inference_row = action_row (_("Shared GPUs"), "—");
+  gtk_widget_set_visible (self->inference_row, FALSE);
+  adw_preferences_group_add (ADW_PREFERENCES_GROUP (self->office_group), self->inference_row);
 
   self->state_id = g_signal_connect (self->session, "state", G_CALLBACK (on_state), self);
   if (gsm_maluos_session_get_state (self->session))
