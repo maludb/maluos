@@ -61,7 +61,7 @@ the VM by the commands in §3 step 1; the production subkey is never in it.
    gpg --export-secret-keys --armor "MaluOS Archive Automatic Signing Key <apt@maludb.org>" > dev-signing-key.asc
    tar czf maluos-dev-handoff.tgz -C ~ .config/maluos/publish.env .aws .config/gh .ssh/id_ed25519_github .ssh/id_ed25519_github.pub .ssh/config .gitconfig maludb-os-core/config/.env .claude/projects/-home-maludb/memory -C ~/handoff dev-signing-key.asc
    chmod 600 maluos-dev-handoff.tgz; shred -u dev-signing-key.asc
-   scp maluos-dev-handoff.tgz NEWHOST:
+   scp -P 2222 maluos-dev-handoff.tgz USER@NEWHOST:      # scp's port flag is the capital -P
    ```
 
    The production subkey, when wanted, goes separately:
