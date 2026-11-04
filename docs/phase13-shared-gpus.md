@@ -456,3 +456,49 @@ checks; the desktop image chain with its UEFI boot test launched 14:55 UTC,
   driven through the tab's path, completed through the mock office with
   the unit restarted on the node. The office loop's timeouts of the first
   run did not recur. G5b is boot-tested.
+
+**G1 and G2 on real hardware, 2026-11-04** (the first day on the GPU dev
+host, docs/dev-host-handoff.md §4 option 2: the host is itself a MaluOS
+26.04 server install, release 26.04.20261102, with a GeForce RTX 3060
+12 GB on nvidia-driver-580 via DKMS; the local development tree served on
+127.0.0.1:8081 became an apt source with the dev key, maluos-desk 0.9.0
+installed from it, the other packages already at the tree's versions):
+
+- G1: `maluctl gpu status --json` (firstboot 0.1.13, the reader byte-identical
+  to the tree's) on the card: vendor nvidia, model NVIDIA GeForce RTX 3060,
+  uuid, pci 01:00.0, driver 580.178.04, vram 12288 MB, compute 8.6,
+  temperature, power with its limit, `nvidia_smi: true`; chassis `desktop`
+  from hostnamectl on bare metal, contribution rule `opt-in`; the gateway's
+  `share status` agreed: off by the chassis rule until the owner opted in.
+  With qwen3:8b resident the reader showed 5487 MB used, 53 °C and 159 W
+  mid-generation, 45 °C and 41 W idle afterwards: every field is live.
+- G2: `maluctl gateway ollama install` (the pinned v0.40.6 tarball,
+  checksummed) and Ollama found the card (`inference compute … library=CUDA
+  compute=8.6`, 11.6 GiB usable); `ollama pull qwen3:8b` and `llama3.2:3b`
+  through the gateway; `share on`, `key issue --kind inference` and
+  `--kind node`, `expose` (0.0.0.0:11435, keys required: 401 without one,
+  `forbidden` for the node API with an inference key, the status with a
+  node key). Real completions: a cold call loaded the model and answered,
+  warm calls ran at roughly 55 tokens/s (835 output tokens in 15.3 s,
+  qwen3's thinking tokens included); the OpenAI face over the listener with
+  the inference key answered 200 with the node headers (route
+  ollama-local/qwen3:8b direct, job id, lane, served model, queue wait 0).
+  Four concurrent interactive calls on the capacity-1 lane: `maluctl
+  gateway queue` showed one running and three queued with their waits;
+  they completed in 20, 27, 36 and 43 s. The ledger carries every call
+  (`usage --since 10m --by model`); `/node/v1/queue` shows the lane with
+  `resident: qwen3:8b` and the per-class expected waits.
+- Not done on real hardware yet: `backend add URL --key` from another desk
+  and the queue positions a desk sees (the desktop image enrolled against
+  the mock office with this host as the estate backend, G5b's path, or
+  D7's `desk` machine); the GPUs tab's rendering of a real card (this host
+  has no desktop session; the fork is not installed here).
+- Two findings from the move itself, neither on the GPU: on an installed
+  node the estate report's fixed unit list counts the socket-activated
+  maluos-vault.service as down while it is idle (and maluos-estate.service
+  before enrolment), so tests/desk-local-test.sh fails two checks here and
+  a real office would grade such a node critical; and the desktop boot
+  test's idle-rule checks assume the session is past the ten-minute idle
+  threshold when they run, which held under TCG and not under KVM (three
+  FAILs at ~2 min after login; the mark came up at 600 s and the later
+  checks passed).
