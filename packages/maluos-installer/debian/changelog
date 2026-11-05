@@ -1,3 +1,26 @@
+maluos-installer (0.3.5) resolute; urgency=medium
+
+  * The First boot screen asks about the Business OS kernel on server media
+    (handbook reconciliation R5): a "Business OS" group with the box
+    "Provision the Business OS kernel on this server" and, while it is
+    ticked, the domain, the scheme (http or https), the first super-admin's
+    email and name, written to firstboot.components.maludb-os-core; a
+    domain and an email are required when ticked; a plan given with
+    --screens --plan prefills the group. The kernel ships off in
+    maluos-firstboot 0.1.14's firstboot.yaml, so a server installed from
+    the screens without ticking the box gets no kernel for maluos.local.
+  * The plan checks firstboot.components: a mapping or a bool per
+    component; when maludb-os-core is enabled its domain is required and
+    its scheme and admin_email checked. The medium's unattended server
+    plan asks for the kernel explicitly (maluos.local, http).
+  * tests/lib/screens_driver.py ticks the box and fills the fields
+    (business_os=, --business-os DOMAIN); the pty test does, so the saved
+    plan still equals the unattended plan section by section.
+  * VERSION in maluos_installer/__init__.py had stayed at 0.3.2 through
+    0.3.3 and 0.3.4; it follows the changelog again.
+
+ -- Edward Honour <ed@maludb.org>  Thu, 05 Nov 2026 09:00:00 +0000
+
 maluos-installer (0.3.4) resolute; urgency=medium
 
   * Phase 13 G1 on real hardware: on a machine with an NVIDIA card the engine

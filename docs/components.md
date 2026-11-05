@@ -123,9 +123,35 @@ bos-init with PostgreSQL, the engine and the MaluDB API local:
 7. the first super-admin (password generated unless configured), the first
    model registry row, the cron jobs, the kernel's Installer and JEV agents.
 
-Settings in firstboot.yaml under components.maludb-os-core: domain, scheme,
-admin_email, admin_name, admin_password, model_key, model_name,
+Settings in firstboot.yaml under components.maludb-os-core: enabled, domain,
+scheme, admin_email, admin_name, admin_password, model_key, model_name,
 model_provider_id, anthropic_api_key, openrouter_api_key, malumail_api_key.
+
+**Off by default** (maluos-firstboot 0.1.14, installer 0.3.5; the handbook's
+reconciliation R5, 2026-11-05). Every server image carries the package
+(image/profiles/server.pkgs: maluos-business-os), but the shipped conffile
+says `enabled: false`: a kernel for a domain nobody chose is not wanted on
+every server, and before this a server installed from the screens got one
+for maluos.local. The first-boot engine skips a disabled component before
+loading it (maluos_provision.run_components), so nothing of the kernel is
+provisioned: no databases, no secrets, no units enabled, no entry under
+`components` in /var/lib/maluos/firstboot/done. The package stays installed
+and idle. The kernel is turned on by one of:
+
+1. the installer's First boot screen on server media: the "Business OS"
+   group, the box "Provision the Business OS kernel on this server" and,
+   while it is ticked, the domain, the scheme (http or https), the first
+   super-admin's email and optional name; a domain and an email are
+   required; the answers go to the plan's
+   `firstboot.components.maludb-os-core` (docs/install-plan.md);
+2. an install plan with the same mapping (the medium's unattended server
+   plan asks for it, for maluos.local on http, so the boot test keeps its
+   kernel checks); a plan that enables the kernel must name the domain;
+3. before the first boot, editing /etc/maluos/firstboot.yaml (cloud-init's
+   write_files or a bootcmd: tests/qcow2-boot-test.sh does the latter for
+   the server image); after it, setting `enabled: true` with the domain and
+   running `sudo maluctl provision`, which is idempotent and runs the
+   component then.
 
 Status 2026-10-18: boot test PASS (44 checks) on the cloud image under
 QEMU/TCG: first boot provisions the kernel end to end (memory database,

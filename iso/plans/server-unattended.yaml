@@ -12,7 +12,13 @@ maluos-install:
     hostname: maluos
     user: {name: maluos, password: "$6$JiuKZtdHT5qsUZfT$XMdWgSWDGNbNCtLnJ7YVd3pr0SSI.zZmZs3T8mR9.7R0.frTG//sPI77goxj2/r7g.0f7K233qAJPYKTJoklL/", password_change_required: true}
     ssh: {server: true, password_auth: true}
-  firstboot: {tenant: maluos, admin: {principal: human:admin}}
+  firstboot:
+    tenant: maluos
+    admin: {principal: human:admin}
+    # The Business OS kernel ships off (firstboot.yaml); the medium's default server asks for it,
+    # for maluos.local on http, so the boot test keeps its kernel checks. The screens ask the same.
+    components:
+      maludb-os-core: {enabled: true, domain: maluos.local, scheme: http, admin_email: admin@maluos.local, admin_name: Administrator}
   bootloader: {cmdline: "console=tty1 console=ttyS0,115200"}
   telemetry: {send: false}
   finish: {action: reboot}

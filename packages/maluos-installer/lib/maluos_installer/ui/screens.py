@@ -442,6 +442,7 @@ class Components(Screen):
 class FirstBoot(Screen):
     name = "First boot"
     section = ("firstboot",)
+    BOS = "maludb-os-core"       # the Business OS kernel's component (docs/components.md); off unless asked for here or in the plan
 
     def build(self):
         fb = self.plan.setdefault("firstboot", {})
@@ -454,9 +455,49 @@ class FirstBoot(Screen):
         self.code = edit("One-time code: ", en.get("code", ""))
         self.ename = edit("Name at the office (default: the hostname): ", en.get("name", ""))
         self.cloud = Check("Keep cloud-init enabled (NoCloud and cloud data sources)", state=fb.get("cloud_init", self.app.variant == "server"))
-        return [text("The first boot provisions the memory database, the tenant, the administrator and the components "
-                     "(maluos-firstboot). An enrolment joins an office or an estate at that moment.", "title"), urwid.Divider(),
-                self.tenant, self.principal, urwid.Divider(), text("Enrolment:")] + eitems + [self.url, self.code, self.ename, urwid.Divider(), self.cloud]
+        lines = [text("The first boot provisions the memory database, the tenant, the administrator and the components "
+                      "(maluos-firstboot). An enrolment joins an office or an estate at that moment.", "title"), urwid.Divider(),
+                 self.tenant, self.principal, urwid.Divider(), text("Enrolment:")] + eitems + [self.url, self.code, self.ename, urwid.Divider(), self.cloud]
+        self.bos = None
+        if self.app.variant == "server":
+            lines += [urwid.Divider(), text("Business OS:")] + self._build_bos((fb.get("components") or {}).get(self.BOS))
+        return lines
+
+    # --- the Business OS group: a box, and the kernel's four settings while it is ticked -----------
+    def _build_bos(self, spec):
+        """The server image carries the kernel package; the component ships off and this group turns it on
+        (firstboot.components.maludb-os-core: enabled, domain, scheme, admin_email, admin_name)."""
+        spec = spec if isinstance(spec, dict) else ({"enabled": bool(spec)} if spec is not None else {})
+        self.bos = Check("Provision the Business OS kernel on this server", state=bool(spec.get("enabled", False)))
+        self.bos_domain = edit("Domain (names: <domain>, os.<domain>, app.<domain>): ", spec.get("domain", ""))
+        self.sgroup, sitems = radios([("http", "http (a LAN; no TLS proxy in front)"), ("https", "https (a TLS proxy terminates in front)")],
+                                     spec.get("scheme") or "http")
+        self.bos_email = edit("First super-admin's email: ", spec.get("admin_email", ""))
+        self.bos_name = edit("First super-admin's name (optional): ", spec.get("admin_name", ""))
+        self.bos_fields = [self.bos_domain, text("  Scheme:")] + sitems + [self.bos_email, self.bos_name,
+                           text("  (the super-admin's password is generated on the first boot and kept in "
+                                "/var/lib/maluos/secrets/business-os/admin-password)", "dim")]
+        self.bos_hint = text("  (off: the kernel package stays installed and idle; tick the box to ask for the domain, "
+                             "the scheme and the first super-admin. `sudo maluctl provision` after editing /etc/maluos/firstboot.yaml turns it on later.)", "dim")
+        self.bos_pile = urwid.Pile([])
+        self._toggle_bos(self.bos.state)
+        urwid.connect_signal(self.bos, "change", lambda w, state: self._toggle_bos(state))
+        return [self.bos, self.bos_pile]
+
+    def _toggle_bos(self, on):
+        opts = self.bos_pile.options()
+        shown = self.bos_fields if on else [self.bos_hint]
+        self.bos_pile.contents = [(w if not w.selectable() else urwid.AttrMap(w, None, focus_map="focus"), opts) for w in shown]
+        if on:
+            self.bos_pile.focus_position = 0
+
+    def _bos_raw(self):
+        if self.bos is None:
+            return None
+        if not self.bos.state:
+            return {"enabled": False}
+        return {"enabled": True, "domain": self.bos_domain.edit_text.strip().lower(), "scheme": chosen(self.sgroup) or "http",
+                "admin_email": self.bos_email.edit_text.strip(), "admin_name": self.bos_name.edit_text.strip()}
 
     def _raw(self):
         raw = {"tenant": self.tenant.edit_text.strip() or "maluos", "admin": {"principal": self.principal.edit_text.strip() or "human:admin"},
@@ -464,9 +505,24 @@ class FirstBoot(Screen):
         kind = chosen(self.egroup) or ""
         if kind:
             raw["enroll"] = {"kind": kind, "url": self.url.edit_text.strip(), "code": self.code.edit_text.strip(), "name": self.ename.edit_text.strip()}
+        comps = dict((self.plan.get("firstboot") or {}).get("components") or {})     # a plan's other components pass through
+        bos = self._bos_raw()
+        if bos is not None:
+            comps[self.BOS] = bos
+        if comps:
+            raw["components"] = comps
         return raw
 
     def validate(self):
+        errs = []
+        bos = self._bos_raw()
+        if bos and bos["enabled"]:
+            if not bos["domain"]:
+                errs.append("the Business OS kernel needs a domain (the office's name on the network, like office.example.com or maluos.local)")
+            if not bos["admin_email"]:
+                errs.append("the Business OS kernel needs the first super-admin's email (the first login)")
+        if errs:
+            return errs
         return self.errors_for({**self.plan, "firstboot": self._raw(), "version": 1})
 
     def apply(self):

@@ -112,6 +112,7 @@ an RTX x86 box is the MaluOS case.
 | E4 | Phase 9 rest: editions and entitlements (Professional, Enterprise) | terms confirmed 2026-11-03 (F5, F8); slice 1 (entitlements: maluos-pro, the contracts stub owning the `scheduler` flag, the esm suite) scheduled after D7 and G5b; price points needed before slice 5 (commerce) | L | D7, G5b; price points for slice 5 | Phase 13 absorbs fleet and scheduler; federation (D6) is Enterprise |
 | E5 | Phase 14+: journal to memory, quality judge | idea | L | D4 | |
 | E6 | arm64 builds | idea | M | nothing | PLAN.md framing decision |
+| E7 | The Business OS kernel off by default, asked for by the installer (the handbook's reconciliation R5): firstboot.yaml ships `maludb-os-core` with `enabled: false`; the First boot screen's "Business OS" group (the box, the domain, the scheme, the first super-admin's email and name) or the plan's `firstboot.components.maludb-os-core` turns it on; the medium's unattended server plan and the qcow2 boot test's seed ask for it so CI keeps the kernel checks | built 2026-11-05 (maluos-firstboot 0.1.14, maluos-installer 0.3.5; the plan test and the pty screens test pass; docs/phase11-slice3-screens.md, Status 2026-11-05); the image boot test on the dev host is the owner's before the merge | S | E1 slice 3 | a server installed from the screens without a plan got a kernel for maluos.local before this |
 
 ## F. Decisions waiting on the owner
 
