@@ -22,9 +22,14 @@ Every member reaches the others only over the overlay (`NAME.internal`,
 
 ## Step 0: the office
 
-1. Install maluos-server on **office**, with the Business OS kernel
-   (firstboot's `maludb-os-core` component; `docs/install.md` of the kernel
-   for the domain, the admin and the first sign-in).
+1. Install maluos-server on **office** from the ISO with an install plan
+   that gives the kernel its domain, scheme and admin under
+   `firstboot.components.maludb-os-core` (the installer's screens do not
+   ask them, and the medium's unattended plan installs a kernel for
+   `maluos.local`): the handbook's
+   [office runbook](https://github.com/maludb/maluos-docs/blob/main/10-office-on-proxmox.md)
+   and its `plans/office.yaml`. The kernel's own `docs/install.md` is the
+   hand install on plain Ubuntu 24.04 and does not apply on MaluOS.
 2. Apply the kernel's migrations up to db/191 (an image from
    26.04.20261029 or later carries them; `sudo -u postgres psql -d
    maludb_os -f /var/www/db/191_estate_inference.sql` by hand on an older
