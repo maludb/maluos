@@ -87,6 +87,14 @@ inside tmux (`tmux new -s maluos`, reattach with `tmux attach -t maluos`).
 curl -fsSL https://apt.maluos.com/bootstrap/install-maluos.sh | sudo bash
 ```
 
+## Installing MaluOS and the Business OS
+
+The operator's path, from the ISO to an office running the Business OS
+kernel and its applications, a GPU server, the estate and the desks, is
+the [handbook](https://github.com/maludb/maluos-docs). The documents under
+docs/ here are the engineering journal of each phase, not the install
+instructions.
+
 ## Releases
 
 Dated builds `26.04.YYYYMMDD`: `scripts/release.sh` tags, names, checksums and signs the artefacts and creates the GitHub Release; keys and hosting are in docs/release.md.
