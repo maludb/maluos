@@ -15,32 +15,26 @@ ACCEL=$([ -w /dev/kvm ] && echo kvm || echo tcg)
 mkdir -p "$WORK"; cd "$WORK"
 ss -ltn | grep -q ":$SSHPORT " && { echo "port $SSHPORT busy" >&2; exit 1; }
 [ -f testkey ] || ssh-keygen -q -t ed25519 -N '' -f testkey -C maluos-qcow2-test
-# The desktop image logs the test user straight into the MaluOS session, so the
-# shell extension and the session service run as a real user (Phase 12 slice 2).
-# The session must not idle-lock during the long server checks: GNOME disables
-# extensions on the lock screen. A dconf system database set before gdm starts.
-
 # The server image carries the Business OS kernel but its component ships off (firstboot.yaml
 # components.maludb-os-core enabled: false; the installer's First boot screen or the plan turns it
-# on). The boot test asks for it the way a plan would, before maluos-firstboot runs (After=cloud-config).
-BOS_SEED=""; BOS_SEED_ON=${BOS_SEED_ON:-1}
-case "$(basename "$IMG")" in *server*) [ "$BOS_SEED_ON" = 1 ] && BOS_SEED="bootcmd:
-  - [sh, -c, \"sed -i '/^  maludb-os-core:/,/^  [a-z]/ s/^    enabled: false/    enabled: true/' /etc/maluos/firstboot.yaml\"]
+# on). The boot test asks for it the way a plan would, before maluos-firstboot runs (After=cloud-config):
+# a bootcmd line, the first of the seed's bootcmd list (BOS_SEED_ON=0 leaves the component off).
+DESKTOP_SEED=""; BOOTCMD=""; BOS_SEED_ON=${BOS_SEED_ON:-1}
+case "$(basename "$IMG")" in *server*) [ "$BOS_SEED_ON" = 1 ] && BOOTCMD="  - [sh, -c, \"sed -i '/^  maludb-os-core:/,/^  [a-z]/ s/^    enabled: false/    enabled: true/' /etc/maluos/firstboot.yaml\"]
 ";; esac
-DESKTOP_SEED=""
-=======
-DESKTOP_SEED=""; BOOTCMD=""
-
+# The desktop image logs the test user straight into the MaluOS session, so the shell extension and the
+# session service run as a real user (Phase 12 slice 2). The session must not idle-lock during the long
+# server checks: GNOME disables extensions on the lock screen. A dconf system database set before gdm starts.
 case "$(basename "$IMG")" in *desktop*) DESKTOP_SEED="write_files:
   - path: /etc/gdm3/custom.conf
     content: |
       [daemon]
       AutomaticLoginEnable=true
       AutomaticLogin=maluos
-"; BOOTCMD="  - [sh, -c, \"mkdir -p /etc/dconf/profile /etc/dconf/db/local.d; printf 'user-db:user\\nsystem-db:local\\n' > /etc/dconf/profile/user; printf '[org/gnome/desktop/session]\\nidle-delay=uint32 0\\n[org/gnome/desktop/screensaver]\\nlock-enabled=false\\n' > /etc/dconf/db/local.d/00-boot-test; dconf update\"]
+"; BOOTCMD="$BOOTCMD  - [sh, -c, \"mkdir -p /etc/dconf/profile /etc/dconf/db/local.d; printf 'user-db:user\\nsystem-db:local\\n' > /etc/dconf/profile/user; printf '[org/gnome/desktop/session]\\nidle-delay=uint32 0\\n[org/gnome/desktop/screensaver]\\nlock-enabled=false\\n' > /etc/dconf/db/local.d/00-boot-test; dconf update\"]
 ";; esac
-# The Business OS's applications (the maluos-apps proposal, phase 1): the image's firstboot.yaml leaves the kernel component's
-# default, four applications cloned and built from github.com/maludb at first boot, which takes long under TCG and needs the
+# The Business OS's applications (the maluos-apps proposal, phase 1): with the kernel component on, its default installs
+# four applications cloned and built from github.com/maludb at first boot, which takes long under TCG and needs the
 # network. The seed sets apps.install: [] unless BOOT_TEST_APPS=1 (the dev host, under KVM): then the first boot installs the
 # four defaults, gets two hours more, and the checks below cover each application.
 BOOT_TEST_APPS=${BOOT_TEST_APPS:-0}
@@ -56,7 +50,8 @@ users:
     shell: /bin/bash
     ssh_authorized_keys:
       - $(cat testkey.pub)
-
+$DESKTOP_SEED${BOOTCMD:+bootcmd:
+$BOOTCMD}
 UD
 printf 'instance-id: maluos-test-%s\nlocal-hostname: maluos-test\n' "$(date +%s)" > meta-data
 cloud-localds seed.iso user-data meta-data
