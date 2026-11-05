@@ -380,10 +380,12 @@ bosdom=$(sudo -n python3 -c "import json;print(json.load(open('/var/lib/maluos/f
 echo "  bos domain: ${bosdom:-?}"
 # the office's own names (docs/phase13-estate-behind-a-proxy.md, part 2): under https at the proxy's address in a marked block,
 # never on loopback; the summary says where they went
+# (these lines run inside the VM: the scheme and the proxy address come from its own firstboot.yaml, not from this script's variables)
 bosscheme=$(sudo -n python3 -c "import json;print(json.load(open('/var/lib/maluos/firstboot/done'))['components']['maludb-os-core'].get('scheme',''))" 2>/dev/null)
-if [ "$bosscheme" = https ]; then
-grep -qP "^$PROXY_ADDR\tapp\.$bosdom$" /etc/hosts && grep -qP "^$PROXY_ADDR\tos\.$bosdom$" /etc/hosts && grep -qP "^$PROXY_ADDR\t$bosdom$" /etc/hosts && ! grep -qE "^(127\.0\.0\.1|::1).*[[:space:]](app|os|www)\.$bosdom([[:space:]]|$)" /etc/hosts && getent hosts app.$bosdom | grep -q "^$PROXY_ADDR " && echo "  ok   https: the office's names resolve to the proxy's address $PROXY_ADDR (the marked block), none on loopback" || { echo "  FAIL office names under https: $(grep -E "$bosdom|business-os names" /etc/hosts)"; fail=1; }
-sudo -n python3 -c "import json; h=json.load(open('/var/lib/maluos/firstboot/done'))['components']['maludb-os-core']['hosts']; assert h['mode']=='proxy $PROXY_ADDR' and h['address']=='$PROXY_ADDR', h" 2>/dev/null && echo "  ok   the summary records hosts: proxy $PROXY_ADDR" || { echo "  FAIL summary hosts: $(sudo -n python3 -c "import json; print(json.load(open('/var/lib/maluos/firstboot/done'))['components']['maludb-os-core'].get('hosts'))")"; fail=1; }
+proxyaddr=$(sudo -n python3 -c "import yaml;print((yaml.safe_load(open('/etc/maluos/firstboot.yaml'))['components']['maludb-os-core']).get('proxy_address',''))" 2>/dev/null)
+if [ "$bosscheme" = https ] && [ -n "$proxyaddr" ]; then
+grep -qP "^$proxyaddr\tapp\.$bosdom$" /etc/hosts && grep -qP "^$proxyaddr\tos\.$bosdom$" /etc/hosts && grep -qP "^$proxyaddr\t$bosdom$" /etc/hosts && ! grep -qE "^(127\.0\.0\.1|::1).*[[:space:]](app|os|www)\.$bosdom([[:space:]]|$)" /etc/hosts && getent hosts app.$bosdom | grep -q "^$proxyaddr " && echo "  ok   https: the office's names resolve to the proxy's address $proxyaddr (the marked block), none on loopback" || { echo "  FAIL office names under https ($proxyaddr): $(grep -E "$bosdom|business-os names" /etc/hosts)"; fail=1; }
+sudo -n python3 -c "import json; h=json.load(open('/var/lib/maluos/firstboot/done'))['components']['maludb-os-core']['hosts']; assert h['mode']=='proxy $proxyaddr' and h['address']=='$proxyaddr', h" 2>/dev/null && echo "  ok   the summary records hosts: proxy $proxyaddr" || { echo "  FAIL summary hosts: $(sudo -n python3 -c "import json; print(json.load(open('/var/lib/maluos/firstboot/done'))['components']['maludb-os-core'].get('hosts'))")"; fail=1; }
 else
 grep -qE "^127\.0\.0\.1 .*app\.$bosdom" /etc/hosts && ! grep -q 'business-os names begin' /etc/hosts && echo "  ok   http: the office's names on loopback, as before" || { echo "  FAIL office names under http: $(grep "$bosdom" /etc/hosts)"; fail=1; }
 fi
