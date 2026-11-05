@@ -361,8 +361,16 @@ the conffile's commented `proxy_address`.
   dev host before merging the branch.
 - The server image's UEFI boot test (build/logs/chain-d1c.sh: packages,
   the repository, the server rootfs and qcow2, the test with the https
-  seed and the hub round trip): the result is added here when the chain
-  ends.
+  seed and the hub round trip): **215 ok, 0 FAIL** on the second run
+  (23:43 UTC; log build/logs/chain-d1c.run2.log). The first run's two
+  failures were the new hosts checks' own text (the script's variable
+  does not reach the quoted heredoc the VM runs), with the right hosts
+  block and summary printed; the checks now read the VM's own
+  `proxy_address`. On the real overlay service the hub role released
+  (the interface gone, the mock without a hub) and taken back (the
+  interface remade, the fake spoke peered, the names back); under https
+  the four names resolve to 10.0.2.2 from the marked block and none on
+  loopback, the summary says `proxy 10.0.2.2`.
 
 The owner's three machines run the proof (docs/phase13-three-machine-proof.md,
 step 0a first).
