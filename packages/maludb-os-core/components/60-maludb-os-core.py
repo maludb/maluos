@@ -11,8 +11,18 @@ Configuration (firstboot.yaml -> components.maludb-os-core):
   admin_password            optional; generated and stored otherwise
   model_key, model_name, model_provider_id   the first model registry row
   anthropic_api_key, openrouter_api_key      optional runner keys
+  apps.install              the applications installed beside the kernel at first boot, in order (catalog keys;
+                            default [hr, projects, helpdesk, spaces]; [] installs none)
+  apps.ref                  key -> git tag or branch to clone (default: the repository's default branch)
+  apps.propose_agents       keys whose agents are proposed rather than hired
+The applications step (9) runs the kernel's own installer, bin/app_install.php apply, for each key
+from github.com/maludb/maludb-os-<key> (maluos-apps carries the host tools it needs), with a marker
+per application under /var/lib/maluos/business-os/apps so a re-run reconciles rather than repeats;
+a failing application is logged and the next continues. `maluctl app names` lists the DNS names.
 """
-import glob, json, os, secrets as pysecrets, shutil, socket, subprocess, time, urllib.request
+import glob, json, os, secrets as pysecrets, shutil, socket, subprocess, sys, time, urllib.request
+
+sys.path.insert(0, "/usr/lib/maluos")
 
 WWW = "/var/www"
 BOS = "/etc/business-os"
@@ -227,6 +237,22 @@ def provision(ctx):
             except Exception as e:
                 log(f"warning: {marker}: {str(e)[:200]}")
 
+    # ---- 9. the applications (the maluos-apps proposal, phase 1): the kernel's installer for each key, in order,
+    # HR first by default (the one application that writes the directory). Markers under STATE/apps; the installer's
+    # output beside them as <key>.log. The step waits for DNS and HTTPS to github.com first: a clone needs both.
+    import maludb_os_apps as A
+    try:
+        apps_cfg = A.apps_config(cfg.get("apps"))
+    except ValueError as e:
+        log(f"warning: {e}; no application installed"); apps_cfg = {"install": [], "ref": {}, "propose_agents": []}
+    apps = A.install_apps(apps_cfg, admin_email, domain, scheme, os.path.join(STATE, "apps"), www=WWW, log=log)
+    if apps_cfg["install"]:
+        log(f"applications: {len(apps['installed'])} installed ({', '.join(apps['installed']) or '-'}), "
+            f"{len(apps['failed'])} failed ({', '.join(apps['failed']) or '-'})")
+    names = A.office_names(domain)
+    log("names the office needs: " + " ".join(names))
+
     return {"domain": domain, "scheme": scheme, "urls": {"os": f"{scheme}://os.{domain}", "app": f"{scheme}://app.{domain}"},
             "database": DB, "memory_database": MEM_DB, "admin_email": admin_email,
-            "admin_password_file": pw_file if os.path.exists(pw_file) else None, "healthy": True}
+            "admin_password_file": pw_file if os.path.exists(pw_file) else None,
+            "apps": apps, "names": names, "healthy": True}

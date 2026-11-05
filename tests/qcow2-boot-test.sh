@@ -19,16 +19,23 @@ ss -ltn | grep -q ":$SSHPORT " && { echo "port $SSHPORT busy" >&2; exit 1; }
 # shell extension and the session service run as a real user (Phase 12 slice 2).
 # The session must not idle-lock during the long server checks: GNOME disables
 # extensions on the lock screen. A dconf system database set before gdm starts.
-DESKTOP_SEED=""
+DESKTOP_SEED=""; BOOTCMD=""
 case "$(basename "$IMG")" in *desktop*) DESKTOP_SEED="write_files:
   - path: /etc/gdm3/custom.conf
     content: |
       [daemon]
       AutomaticLoginEnable=true
       AutomaticLogin=maluos
-bootcmd:
-  - [sh, -c, \"mkdir -p /etc/dconf/profile /etc/dconf/db/local.d; printf 'user-db:user\\nsystem-db:local\\n' > /etc/dconf/profile/user; printf '[org/gnome/desktop/session]\\nidle-delay=uint32 0\\n[org/gnome/desktop/screensaver]\\nlock-enabled=false\\n' > /etc/dconf/db/local.d/00-boot-test; dconf update\"]
+"; BOOTCMD="  - [sh, -c, \"mkdir -p /etc/dconf/profile /etc/dconf/db/local.d; printf 'user-db:user\\nsystem-db:local\\n' > /etc/dconf/profile/user; printf '[org/gnome/desktop/session]\\nidle-delay=uint32 0\\n[org/gnome/desktop/screensaver]\\nlock-enabled=false\\n' > /etc/dconf/db/local.d/00-boot-test; dconf update\"]
 ";; esac
+# The Business OS's applications (the maluos-apps proposal, phase 1): the image's firstboot.yaml leaves the kernel component's
+# default, four applications cloned and built from github.com/maludb at first boot, which takes long under TCG and needs the
+# network. The seed sets apps.install: [] unless BOOT_TEST_APPS=1 (the dev host, under KVM): then the first boot installs the
+# four defaults, gets two hours more, and the checks below cover each application.
+BOOT_TEST_APPS=${BOOT_TEST_APPS:-0}
+if [ "$BOOT_TEST_APPS" = 1 ]; then FIRSTBOOT_TIMEOUT=${FIRSTBOOT_TIMEOUT:-9600}
+else BOOTCMD="$BOOTCMD  - [python3, -c, \"import os, yaml; p='/etc/maluos/firstboot.yaml'; c=(yaml.safe_load(open(p)) if os.path.exists(p) else None) or {}; k=c.setdefault('components', {}).setdefault('maludb-os-core', {}); k['apps']={'install': []}; open(p, 'w').write(yaml.safe_dump(c, sort_keys=False))\"]
+"; fi
 cat > user-data <<UD
 #cloud-config
 hostname: maluos-test
@@ -38,7 +45,8 @@ users:
     shell: /bin/bash
     ssh_authorized_keys:
       - $(cat testkey.pub)
-$DESKTOP_SEED
+$DESKTOP_SEED${BOOTCMD:+bootcmd:
+$BOOTCMD}
 UD
 printf 'instance-id: maluos-test-%s\nlocal-hostname: maluos-test\n' "$(date +%s)" > meta-data
 cloud-localds seed.iso user-data meta-data
@@ -363,6 +371,40 @@ curl -fsS --max-time 10 http://127.0.0.1:8815/health 2>/dev/null | grep -q '"ok"
 sudo -n -u postgres psql -Atd maludb_os -c "select count(*) from members where business_role='super_admin'" | grep -qE '^[1-9]' && echo "  ok   super-admin exists in maludb_os" || { echo "  FAIL super-admin"; fail=1; }
 sudo -n -u postgres psql -Atd maludb_os -c "select count(*) from pg_tables where schemaname='public'" | sed 's/^/  kernel tables: /'
 sudo -n test -s /var/lib/maluos/secrets/business-os/admin-password && echo "  ok   admin password stored" || echo "  warn no stored admin password"
+# --- the applications (the maluos-apps proposal, phase 1; docs/components.md): maluos-apps carries the host tools; the kernel
+# component installed components.maludb-os-core.apps.install at first boot. The seed sets install: [] unless BOOT_TEST_APPS=1
+# on the host (see the seed), so CI checks the tools, the plugin and the empty step; with the applications on, each one's
+# marker, code, kernel row, units and name, and `maluctl app names` with four names plus one per application.
+if installed maluos-apps; then
+echo "  ok   maluos-apps"
+for t in composer pdftotext unzip git; do command -v $t >/dev/null && echo "  ok   $t on the host (maluos-apps)" || { echo "  FAIL $t missing (maluos-apps)"; fail=1; }; done
+python3 -c 'import venv, ensurepip' 2>/dev/null && echo "  ok   python3-venv with ensurepip" || { echo "  FAIL python3 -m venv unusable"; fail=1; }
+else echo "  FAIL maluos-apps not installed"; fail=1; fi
+appsline=$(sudo -n python3 -c "import json; r=json.load(open('/var/lib/maluos/firstboot/done'))['components']['maludb-os-core']; a=r.get('apps') or {}; print(' '.join(a.get('installed') or []) + '|' + ' '.join(a.get('failed') or []) + '|' + ' '.join(r.get('names') or []))" 2>/dev/null)
+appsok=${appsline%%|*}; appsrest=${appsline#*|}; appsfail=${appsrest%%|*}; appsnames=${appsrest#*|}
+[ -n "$appsnames" ] && echo "  ok   the component's summary carries the office's names: $appsnames" || { echo "  FAIL no names in the component's summary"; fail=1; }
+sudo -n maluctl status | grep -q "^names:       $bosdom " && echo "  ok   maluctl status prints the names" || { echo "  FAIL names line missing from maluctl status"; sudo -n maluctl status | tail -4; fail=1; }
+[ "$(maluctl app names | head -1)" = "$bosdom" ] && [ "$(maluctl app names | wc -l)" -ge 4 ] && echo "  ok   maluctl app names: $(maluctl app names | tr '\n' ' ')" || { echo "  FAIL maluctl app names: $(maluctl app names 2>&1 | head -3)"; fail=1; }
+maluctl app names --json | python3 -c "import json,sys; d=json.load(sys.stdin); assert d['domain']=='$bosdom' and d['names'][:4]==['$bosdom','www.$bosdom','app.$bosdom','os.$bosdom'], d" 2>/dev/null && echo "  ok   maluctl app names --json: the domain and the four kernel names first" || { echo "  FAIL app names --json"; fail=1; }
+appswant=$(sudo -n python3 -c "import yaml; c=yaml.safe_load(open('/etc/maluos/firstboot.yaml')); a=(c['components']['maludb-os-core'].get('apps') or {}); i=a.get('install'); print(' '.join(i) if i is not None else 'hr projects helpdesk spaces')" 2>/dev/null)
+if [ -z "$appswant" ]; then
+  [ -z "$appsok$appsfail" ] && [ "$(maluctl app names | wc -l)" = 4 ] && echo "  ok   apps.install is empty (the test seed): the step installed nothing, four names" || { echo "  FAIL apps step with install: []: installed='$appsok' failed='$appsfail' names=$(maluctl app names | wc -l)"; fail=1; }
+  echo "  (the applications are not installed on this boot: BOOT_TEST_APPS=1 keeps the image's default, hr projects helpdesk spaces, and checks them)"
+else
+  [ -z "$appsfail" ] && echo "  ok   no application failed at first boot" || { echo "  FAIL applications failed: $appsfail"; for k in $appsfail; do sudo -n tail -6 /var/lib/maluos/business-os/apps/$k.log; done; fail=1; }
+  for k in $appswant; do
+    echo "$appsok" | tr ' ' '\n' | grep -qx "$k" && sudo -n test -f /var/lib/maluos/business-os/apps/$k && echo "  ok   $k in apps.installed, with its marker" || { echo "  FAIL $k not in apps.installed or no marker"; fail=1; }
+    sudo -n test -f /srv/apps/$k/maludb-os.json && echo "  ok   /srv/apps/$k holds the application" || { echo "  FAIL /srv/apps/$k"; fail=1; }
+    sudo -n -u postgres psql -Atd maludb_os -c "select status from applications where app_key='$k' and status<>'retired'" | grep -qx active && echo "  ok   application $k active in the kernel" || { echo "  FAIL application $k not active: $(sudo -n -u postgres psql -Atd maludb_os -c "select app_key||' '||status from applications where app_key='$k'" 2>&1)"; fail=1; }
+    for u in $(sudo -n python3 -c "import json, os; print(' '.join(os.path.basename(s) for s in json.load(open('/srv/apps/$k/maludb-os.json')).get('services') or []))" 2>/dev/null); do
+      systemctl is-active --quiet "$u" && echo "  ok   $u active" || { echo "  FAIL $u: $(systemctl is-active $u)"; sudo -n journalctl -u "$u" --no-pager | tail -4; fail=1; }
+    done
+    label=$(sudo -n python3 -c "import json; m=json.load(open('/srv/apps/$k/maludb-os.json')); print((m.get('vhost') or {}).get('label') or '$k')" 2>/dev/null)
+    maluctl app names | grep -qx "$label.$bosdom" && echo "  ok   maluctl app names lists $label.$bosdom" || { echo "  FAIL $label.$bosdom missing from maluctl app names"; fail=1; }
+    code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 -H "Host: $label.$bosdom" http://127.0.0.1/); [ "$code" != 000 ] && [ "$code" -lt 500 ] && echo "  ok   $label.$bosdom answers through Apache ($code)" || { echo "  FAIL $label.$bosdom via Apache: HTTP $code"; fail=1; }
+  done
+  appsn=$(( 4 + $(echo $appswant | wc -w) )); [ "$(maluctl app names | wc -l)" = "$appsn" ] && echo "  ok   maluctl app names lists $appsn names" || { echo "  FAIL maluctl app names: expected $appsn names, got $(maluctl app names | wc -l)"; fail=1; }
+fi
 # desk enrolment, the office half (kernel db/187; docs/desk-enrolment.md): the endpoints through Apache's allow-list on the
 # person face, a code minted for the super-admin, the whole exchange a MaluOS desk makes, and the presence job in the crontab
 code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -H "Host: app.$bosdom" -H 'Content-Type: application/json' -X POST http://127.0.0.1/api/v1/desks/enroll -d '{"surface":1,"code":"ZZZZ-ZZZZ"}')
