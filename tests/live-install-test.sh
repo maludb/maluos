@@ -200,6 +200,7 @@ if [ "$APPLE" = 1 ]; then   # the apple-t2 component on a machine that says it i
   root python3 -c 'import json,sys; j=json.load(open("/var/log/maluos-install/journal.json")); sys.exit(0 if j["steps"]["configure"]["subs"]["apple"]["state"]=="ok" else 1)' && ok "journal: the apple sub-step ran" || bad "journal apple sub-step"
   ls /lib/firmware/brcm/ | grep -q 'apple' && ok "Apple Wi-Fi firmware present" || echo "  info no Apple firmware (expected: no macOS EFI partition in this VM)"
 fi
+root grep -q 'maluos-nvidia' /var/log/maluos-install/plan.yaml && bad "the plan lists maluos-nvidia in a VM without a card" || ok "no maluos-nvidia in the plan (no NVIDIA card: the installer adds it only on one)"
 # fstab, swap
 grep -qE '^UUID=\S+\s+/\s' /etc/fstab && ! grep -qE '^/dev/' /etc/fstab && ok "fstab by UUID" || bad "fstab: $(grep -v '^#' /etc/fstab | head -4 | tr '\n' ';')"
 grep -q '^/swap.img' /etc/fstab && swapon --show --noheadings | grep -q '/swap.img' && ok "swap file /swap.img in fstab and active ($(swapon --show=SIZE --noheadings | head -1))" || bad "swap file"

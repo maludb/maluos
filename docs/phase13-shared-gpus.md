@@ -249,7 +249,10 @@ whose deadline fired while the first paint held the main loop under TCG):
   gnome-system-monitor in seeds/desktop.seed.
 - The `nvidia` component (seeds/nvidia.seed, docs/components.md): the
   signed modules for the generic kernel, driver 595 with 580 as the
-  alternative, nvidia-smi, nvtop; off the medium.
+  alternative, nvidia-smi, nvtop; off the medium. Since 2026-11-04 the
+  installer adds it itself on a machine with an NVIDIA card (installer
+  0.3.4: from the medium's pool when it carries the driver, else from the
+  network; left out with a warning when the network is down).
 - Tests: tests/gpu-test.py (the reader's pure parts, the plugin, the share
   resolution), tests/system-monitor-local-test.sh (the self-test under Xvfb
   against tests/lib/fake_session.py: two GPUs, no GPU, no session), both in

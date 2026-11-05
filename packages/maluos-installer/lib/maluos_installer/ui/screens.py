@@ -392,25 +392,40 @@ class Components(Screen):
         wanted = set(comps.get("install") or [])
         removed = set(comps.get("remove") or [])
         self.boxes = []
-        lines = [text("What the installed system carries. The components in the image are already there; "
-                      "the others are installed from the medium's repository before the first boot.", "title"), urwid.Divider()]
+        lines = [text("What the installed system carries. The components in the image are already there; the others are "
+                      "installed before the first boot, from the medium's repository or from the network when the medium lacks them.", "title"),
+                 urwid.Divider()]
         if not self.catalog:
             lines.append(text("  the medium carries no catalogue; the image installs as it is"))
         t2 = bool((self.app.facts.get("apple") or {}).get("t2"))
+        nvidia = self.app.facts.get("gpu") == "nvidia"
         for c in self.catalog:
-            state = (c["name"] in wanted) or (c.get("in_image") and c["name"] not in removed) \
-                or (t2 and c["name"] == "maluos-apple-t2" and c["name"] not in removed)
-            where = "in the image" if c.get("in_image") else (f"{c.get('size_mb', 0)} MB from the medium" if c.get("offline", True) else "not on this medium: needs the network, after the install")
-            box = Check(f"{c['name']}  ({where})", state=bool(state) and (c.get("offline", True) or bool(c.get("in_image"))))
-            box.component = c
+            derived = (t2 and c["name"] == "maluos-apple-t2") or (nvidia and c["name"] == "maluos-nvidia")   # what the engine adds itself
+            state = (c["name"] in wanted) or (c.get("in_image") and c["name"] not in removed) or (derived and c["name"] not in removed)
+            if c.get("in_image"):
+                where, can = "in the image", True
+            elif c.get("offline", True):
+                where, can = f"{c.get('size_mb', 0)} MB from the medium", True
+            elif self.online():
+                where, can = "from the network", True
+            else:
+                where, can = "not on this medium and the network is down: after the install", False
+            box = Check(f"{c['name']}  ({where})", state=bool(state) and can)
+            box.component, box.can = c, can
             self.boxes.append(box)
             lines.append(box)
             lines.append(text(f"      {c.get('title', '')}: {c.get('description', '')}"[:400], "dim"))
         return lines
 
+    def online(self):
+        """The network, probed once and kept in the facts (the engine's check shares the dict)."""
+        if "online" not in self.app.facts:
+            self.app.facts["online"] = disksmod.online()
+        return self.app.facts["online"]
+
     def validate(self):
-        bad = [b.component["name"] for b in self.boxes if b.state and not b.component.get("in_image") and b.component.get("offline") is False]
-        return [f"{', '.join(bad)}: not on this medium; install it on the installed system with apt and the network"] if bad else []
+        bad = [b.component["name"] for b in self.boxes if b.state and not b.can]
+        return [f"{', '.join(bad)}: not on this medium and the network is down; install it on the installed system with apt"] if bad else []
 
     def apply(self):
         install, remove = [], []

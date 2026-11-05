@@ -167,8 +167,11 @@ branch with 580 as the alternative for a card the newer branch dropped,
 nvidia-smi (what `maluctl gpu status`, the session's host state and the
 System Monitor's GPUs tab read) and nvtop as a recommend. Ollama brings its
 own CUDA runtime, so no toolkit. No first-boot module: the driver loads at
-the next boot. Not on the install medium (the pool would grow by ~400 MB for
-every medium): the installer offers it from the network and
+the next boot. The installer adds the component itself on a machine with an
+NVIDIA card (maluos-installer 0.3.4; `components.install`, derived like the
+Apple one, `remove` refuses it): from the medium's extra pool when the medium
+carries the driver, else from the network before the first boot, and when
+the network is down it is left out with a warning and
 `sudo apt install maluos-nvidia` adds it later. A DGX Spark is arm64 and is
 not a MaluOS device (the local LLM server runs there); an RTX card in an x86
 box is the MaluOS case. A host without the driver, or with an AMD or Intel

@@ -213,6 +213,20 @@ def virtual():
     return v if v and v != "none" else "none"
 
 
+def online(host="apt.maluos.com", port=443, timeout=3.0):
+    """Whether the network reaches the MaluOS archive (one TCP connect): decides a component the medium
+    does not carry (the NVIDIA driver). MALUOS_INSTALL_ONLINE=0|1 forces the answer (tests, an isolated site)."""
+    forced = os.environ.get("MALUOS_INSTALL_ONLINE")
+    if forced in ("0", "1"):
+        return forced == "1"
+    import socket
+    try:
+        socket.create_connection((host, port), timeout=timeout).close()
+        return True
+    except OSError:
+        return False
+
+
 def dmi(name):
     try:
         return open(f"/sys/class/dmi/id/{name}").read().strip()

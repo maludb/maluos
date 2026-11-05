@@ -111,11 +111,15 @@ with an impossible layout (the disk too small for the sizes) fails in
 The metapackages the target carries beyond its image, from
 docs/components.md. The ones in the image are already there; a name not
 in the image is installed from the on-media repository in the target
-(`apt-get install` against the cdrom source) before first boot.
+(`apt-get install` against the cdrom source) before first boot. A component
+whose Ubuntu packages the medium does not carry (the catalogue's
+`offline: false`, the NVIDIA driver) is installed from the network instead,
+against every source the target has; when the network is down the check
+refuses it (asked for) or leaves it out with a warning (derived).
 
 | Key | Type | Default | Notes |
 |---|---|---|---|
-| `install` | list of string | empty | *asked* from the media's catalogue (`/maluos/catalog.yaml`: name, description from debian/descriptions, size, in-image yes/no); on an Intel Mac with the T2 chip the engine adds `maluos-apple-t2` itself when the medium carries it (*derived*; name it under `remove` to refuse) |
+| `install` | list of string | empty | *asked* from the media's catalogue (`/maluos/catalog.yaml`: name, description from debian/descriptions, size, in-image yes/no, offline yes/no); on an Intel Mac with the T2 chip the engine adds `maluos-apple-t2` itself when the medium carries it, and on a machine with an NVIDIA card `maluos-nvidia` (from the medium or the network) (*derived*; name it under `remove` to refuse) |
 | `remove` | list of string | empty | a metapackage of the image to drop (its packages are autoremoved) |
 
 ## `firstboot`

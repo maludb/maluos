@@ -1,3 +1,17 @@
+maluos-installer (0.3.4) resolute; urgency=medium
+
+  * Phase 13 G1 on real hardware: on a machine with an NVIDIA card the engine
+    adds the maluos-nvidia component itself (the driver, nvidia-smi), as it
+    adds the Apple one on a T2 Mac; the Components screen ticks it.
+  * A component the medium does not carry the Ubuntu packages for (the
+    catalogue's offline: false) installs from the network before the first
+    boot when the network is up, instead of being refused; when it is down,
+    an asked-for one is refused as before and a derived one left out with
+    a warning. disks.online() probes apt.maluos.com once per run;
+    MALUOS_INSTALL_ONLINE=0|1 forces the answer.
+
+ -- Edward Honour <ed@maludb.org>  Wed, 04 Nov 2026 22:30:00 +0000
+
 maluos-installer (0.3.3) resolute; urgency=medium
 
   * lintian overrides for what the medium does on purpose: the cdrom apt

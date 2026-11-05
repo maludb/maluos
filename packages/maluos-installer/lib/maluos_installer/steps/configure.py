@@ -7,6 +7,11 @@ grub, initrd, machine-id.
 The Apple T2 round: on a T2 Mac the apple-t2 component is added when the medium
 carries it, the kernel gets the options t2linux documents, the initrd is rebuilt
 with the bridge driver, and the Mac's Wi-Fi and Bluetooth firmware is imported.
+
+Shared GPUs (Phase 13, G1): on a machine with an NVIDIA card the nvidia component
+(the driver, nvidia-smi) is added the same way. A component the medium does not
+carry the Ubuntu packages for (catalogue `offline: false`) is installed from the
+network when it is up, else refused (asked for) or left out (derived).
 """
 import glob, json, os, re, shlex, uuid
 
@@ -36,9 +41,11 @@ def check(ctx):
                 if c not in names:
                     errs.append(f"component {c!r} is not on this medium (catalogue: {', '.join(sorted(names))})")
             for c in comps["install"]:
-                entry = next((e for e in cat if e["name"] == c), None)
-                if entry is not None and entry.get("offline") is False and not entry.get("in_image"):
-                    errs.append(f"component {c} needs the network: this medium does not carry its Ubuntu packages (leave it out; `apt install {c}` on the installed system)")
+                if from_network(cat, c):
+                    if online(ctx):
+                        ctx.info(f"component {c} is not on this medium: its Ubuntu packages come from the network")
+                    else:
+                        errs.append(f"component {c} needs the network, which is down: this medium does not carry its Ubuntu packages (leave it out; `apt install {c}` on the installed system)")
     ap = ctx.facts.get("apple") or {}
     if ap.get("t2"):
         entry = next((c for c in (cat or []) if c["name"] == APPLE_COMPONENT), None)
@@ -52,6 +59,22 @@ def check(ctx):
         elif APPLE_COMPONENT not in comps["install"] and not entry.get("in_image"):
             comps["install"].append(APPLE_COMPONENT)
             ctx.info(f"Apple {ap.get('model')} with the T2 chip: the {APPLE_COMPONENT} component is added (keyboard, trackpad, Touch Bar, audio, firmware import)")
+    if ctx.facts.get("gpu") == "nvidia":
+        entry = next((c for c in (cat or []) if c["name"] == NVIDIA_COMPONENT), None)
+        if entry is None:
+            ctx.warn(f"an NVIDIA GPU, but this medium has no {NVIDIA_COMPONENT} component: the card is read through sysfs with fewer numbers "
+                     f"and cannot serve inference (`sudo apt install {NVIDIA_COMPONENT}` on the installed system)")
+        elif NVIDIA_COMPONENT in comps["remove"]:
+            ctx.warn(f"an NVIDIA GPU: the plan removes {NVIDIA_COMPONENT}; the card is read through sysfs with fewer numbers and cannot serve inference")
+        elif entry.get("in_image") or NVIDIA_COMPONENT in comps["install"]:
+            pass
+        elif from_network(cat, NVIDIA_COMPONENT) and not online(ctx):
+            ctx.warn(f"an NVIDIA GPU: this medium does not carry the driver and the network is down, so {NVIDIA_COMPONENT} is not added "
+                     f"(`sudo apt install {NVIDIA_COMPONENT}` once the installed system is online)")
+        else:
+            comps["install"].append(NVIDIA_COMPONENT)
+            ctx.info(f"an NVIDIA GPU: the {NVIDIA_COMPONENT} component is added (the driver, nvidia-smi; "
+                     f"{'from the network' if from_network(cat, NVIDIA_COMPONENT) else 'from the medium'})")
     net = ctx.plan["network"]
     if net["mode"] == "static" and net["interface"]:
         if not any(n == net["interface"] for n, _, _ in disksmod.wired_interfaces()):
@@ -68,7 +91,21 @@ def summary(ctx):
 
 
 APPLE_COMPONENT = "maluos-apple-t2"
+NVIDIA_COMPONENT = "maluos-nvidia"
 T2_KERNEL_OPTIONS = "intel_iommu=on iommu=pt pm_async=off"   # what t2linux documents for every T2 Mac
+
+
+def from_network(cat, name):
+    """True when the catalogue says the medium does not carry the component's Ubuntu packages (offline: false, not in the image)."""
+    entry = next((e for e in (cat or []) if e["name"] == name), None)
+    return entry is not None and entry.get("offline") is False and not entry.get("in_image")
+
+
+def online(ctx):
+    """The network, probed once per run and kept in the facts (the screens share the dict)."""
+    if "online" not in ctx.facts:
+        ctx.facts["online"] = disksmod.online()
+    return ctx.facts["online"]
 
 
 def apple_t2(ctx):
@@ -271,10 +308,19 @@ def sub_components(ctx):
         return
     if ctx.plan["source"]["repository"] == "none":
         raise RuntimeError("components need the on-media repository (source.repository media)")
+    cat = catalog(ctx)
+    net = [c for c in comps["install"] if from_network(cat, c)]        # the medium lacks their Ubuntu packages: the network
+    media = [c for c in comps["install"] if c not in net]
     ctx.run(["apt-get", "-q"] + APT_MEDIA_ONLY + ["update"], chroot=True, timeout=600)
-    if comps["install"]:
-        ctx.run(["apt-get", "-q", "-y"] + APT_MEDIA_ONLY + ["install"] + comps["install"], chroot=True, timeout=3600,
+    if media:
+        ctx.run(["apt-get", "-q", "-y"] + APT_MEDIA_ONLY + ["install"] + media, chroot=True, timeout=3600,
                 env={"DEBIAN_FRONTEND": "noninteractive"})
+    if net:
+        # every source the target has (the image's Ubuntu archive, apt.maluos.com, the on-media repository); DNS through
+        # the bound /run (the target's resolv.conf points at systemd-resolved's stub, which the live medium runs too)
+        ctx.info(f"from the network: {', '.join(net)}")
+        ctx.run(["apt-get", "-q", "update"], chroot=True, timeout=600)
+        ctx.run(["apt-get", "-q", "-y", "install"] + net, chroot=True, timeout=3600, env={"DEBIAN_FRONTEND": "noninteractive"})
     if comps["remove"]:
         ctx.run(["apt-get", "-q", "-y"] + APT_MEDIA_ONLY + ["purge"] + comps["remove"], chroot=True, timeout=1800)
         ctx.run(["apt-get", "-q", "-y"] + APT_MEDIA_ONLY + ["autoremove", "--purge"], chroot=True, timeout=1800)

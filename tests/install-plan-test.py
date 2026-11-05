@@ -423,5 +423,110 @@ class FreeSpace(unittest.TestCase):
         self.assertEqual(doc["layout"]["target"], "free")
 
 
+# --- Phase 13 G1: the nvidia component on a box with an NVIDIA card, and a component from the network ---
+CATALOG = """components:
+  - name: maluos-nvidia
+    title: "NVIDIA"
+    in_image: false
+    offline: %s
+    size_mb: 0
+  - name: maluos-api
+    title: "API"
+    in_image: false
+    offline: true
+    size_mb: 3
+"""
+
+
+class Nvidia(unittest.TestCase):
+    def ctx(self, gpu="nvidia", offline="true", plan=MINIMAL, catalog=True, sink=None):
+        from maluos_installer.steps import configure as C
+        d = tempfile.mkdtemp()
+        os.makedirs(os.path.join(d, "media/maluos"))
+        if catalog:
+            with open(os.path.join(d, "media/maluos/catalog.yaml"), "w") as f:
+                f.write(CATALOG % offline)
+        facts = {"disks": [], "gpu": gpu, "virtual": "none", "apple": {"mac": False, "model": "", "t2": False, "bce": False}}
+        ctx = engine.Context(load(plan), facts, media=os.path.join(d, "media"), run_dir=d, dry_run=True, sink=sink)
+        return C, ctx
+
+    def check(self, **k):
+        C, ctx = self.ctx(**k)
+        errs = C.check(ctx)
+        return errs, ctx
+
+    def test_added_from_the_medium(self):
+        errs, ctx = self.check()
+        self.assertEqual(errs, [])
+        self.assertEqual(ctx.plan["components"]["install"], ["maluos-nvidia"])
+        self.assertEqual(ctx.warnings, [])
+
+    def test_added_from_the_network(self):
+        os.environ["MALUOS_INSTALL_ONLINE"] = "1"
+        try:
+            errs, ctx = self.check(offline="false")
+        finally:
+            del os.environ["MALUOS_INSTALL_ONLINE"]
+        self.assertEqual(errs, [])
+        self.assertEqual(ctx.plan["components"]["install"], ["maluos-nvidia"])
+        self.assertTrue(ctx.facts["online"])
+
+    def test_left_out_when_the_network_is_down(self):
+        os.environ["MALUOS_INSTALL_ONLINE"] = "0"
+        try:
+            errs, ctx = self.check(offline="false")
+        finally:
+            del os.environ["MALUOS_INSTALL_ONLINE"]
+        self.assertEqual(errs, [])
+        self.assertEqual(ctx.plan["components"]["install"], [])
+        self.assertTrue(any("network is down" in w for w in ctx.warnings), ctx.warnings)
+
+    def test_asked_for_needs_the_network(self):
+        plan = MINIMAL + "  components: {install: [maluos-nvidia]}\n"
+        os.environ["MALUOS_INSTALL_ONLINE"] = "0"
+        try:
+            errs, _ = self.check(gpu="none", offline="false", plan=plan)
+        finally:
+            del os.environ["MALUOS_INSTALL_ONLINE"]
+        self.assertTrue(errs and "needs the network, which is down" in errs[0], errs)
+
+    def test_not_on_a_box_without_the_card(self):
+        for gpu in ("none", "qemu", "amd", "intel"):
+            errs, ctx = self.check(gpu=gpu)
+            self.assertEqual((errs, ctx.plan["components"]["install"], ctx.warnings), ([], [], []), gpu)
+
+    def test_refused_by_remove(self):
+        errs, ctx = self.check(plan=MINIMAL + "  components: {remove: [maluos-nvidia]}\n")
+        self.assertEqual(ctx.plan["components"]["install"], [])
+        self.assertTrue(any("removes maluos-nvidia" in w for w in ctx.warnings), ctx.warnings)
+
+    def test_medium_without_the_component(self):
+        errs, ctx = self.check(catalog=False)
+        self.assertEqual(ctx.plan["components"]["install"], [])
+        self.assertTrue(any("no maluos-nvidia component" in w for w in ctx.warnings), ctx.warnings)
+
+    def test_sub_components_splits_media_and_network(self):
+        events = []
+        plan = MINIMAL + "  components: {install: [maluos-api, maluos-nvidia]}\n"
+        C, ctx = self.ctx(offline="false", plan=plan, sink=events.append)
+        C.sub_components(ctx)
+        runs = [e["message"] for e in events if e["message"].startswith("would run:")]
+        media = [r for r in runs if "maluos-iso.sources" in r and " install " in r]
+        net = [r for r in runs if "maluos-iso.sources" not in r and " install " in r]
+        self.assertEqual(len(media), 1); self.assertTrue(media[0].endswith("install maluos-api"), media[0])
+        self.assertEqual(len(net), 1); self.assertTrue(net[0].endswith("install maluos-nvidia"), net[0])
+        self.assertLess(runs.index(media[0]), runs.index(net[0]))
+
+    def test_online_override(self):
+        from maluos_installer import disks as D
+        for v, want in (("0", False), ("1", True)):
+            os.environ["MALUOS_INSTALL_ONLINE"] = v
+            try:
+                self.assertEqual(D.online(), want)
+            finally:
+                del os.environ["MALUOS_INSTALL_ONLINE"]
+        self.assertFalse(D.online(host="127.0.0.1", port=9, timeout=0.5))   # discard: nothing listens
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)
