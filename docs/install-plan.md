@@ -133,7 +133,7 @@ written; the conffile's documented defaults stand for the rest.
 | `tenant` | string | `maluos` | *asked* |
 | `admin.principal` | string | `human:admin` | *asked* |
 | `components.<name>` | mapping or bool | the conffile's defaults: every component installed is on except the Business OS kernel | `enabled` and the component's own keys pass through into firstboot.yaml's `components.<name>` (docs/components.md); `true`/`false` is `{enabled: …}` |
-| `components.maludb-os-core` | mapping | `{enabled: false}` since maluos-firstboot 0.1.14 (reconciliation R5 of the handbook): the server image carries the kernel package, but no kernel is provisioned unless asked for | *asked* on server media (the First boot screen's "Business OS" group, installer 0.3.5): `enabled`, `domain` (required when enabled: the names `<domain>`, `os.<domain>`, `app.<domain>`), `scheme` (`http` on a LAN, `https` behind a TLS proxy), `admin_email` (required by the screen; the kernel defaults to `admin@<domain>`), `admin_name`; `admin_password` and the model and runner keys pass through for an unattended plan |
+| `components.maludb-os-core` | mapping | `{enabled: false}` since maluos-firstboot 0.1.14 (reconciliation R5 of the handbook): the server image carries the kernel package, but no kernel is provisioned unless asked for | *asked* on server media (the First boot screen's "Business OS" group, installer 0.3.5): `enabled`, `domain` (required when enabled: the names `<domain>`, `os.<domain>`, `app.<domain>`), `scheme` (`http` on a LAN, `https` behind a TLS proxy), `proxy_address` (https only: the proxy's address as the office sees it, an address or a host name, like `192.168.100.1`; the office's names go to it in /etc/hosts, never to loopback, where nothing serves https; absent under https: no line is written and the first-boot summary says so; docs/phase13-estate-behind-a-proxy.md), `admin_email` (required by the screen; the kernel defaults to `admin@<domain>`), `admin_name`; `admin_password` and the model and runner keys pass through for an unattended plan |
 | `enroll.kind` | `office` \| `estate` | none | *asked* (the owner's answer 3): `office` runs `maluctl office enroll` on the first boot (desks); `estate` enrols the node with Phase 13 slice 1 |
 | `enroll.url` | string | | the office's or the estate's address |
 | `enroll.code` | string | | the one-time code; `file:` + a path on the media for an unattended plan |
@@ -236,6 +236,7 @@ maluos-install:
         enabled: true
         domain: example.com
         scheme: https
+        proxy_address: 192.168.100.1       # the TLS proxy as the office sees it: the office reaches its own names through it
         admin_email: admin@example.com
         apps: {install: [hr, projects, helpdesk, spaces, doccloud], propose_agents: [doccloud]}
   telemetry: {send: false}

@@ -1,3 +1,18 @@
+maluos-estate (0.7.0) resolute; urgency=medium
+
+  * The estate behind a proxy (docs/phase13-estate-behind-a-proxy.md): the
+    hub is whichever member the others reach on one UDP port, and the role
+    is a setting of the running estate: `maluctl estate overlay hub
+    HOST:PORT | off` (POST /api/v1/estate/overlay/hub) takes, moves or
+    releases it without a leave; the overlay service follows a moved hub
+    (addresses pruned to the one given, a demoted hub's listen port given
+    up, `since` in the state); `overlay status` and the report give a
+    verdict from the handshakes when the UDP port does not reach the hub;
+    `join --hub` and `overlay hub` warn on an endpoint host that does not
+    resolve; the mock office serves overlay/hub.
+
+ -- Edward Honour <ed@maludb.org>  Thu, 05 Nov 2026 21:18:33 +0000
+
 maluos-estate (0.6.0) resolute; urgency=medium
 
   * Slice 4b, the mock office: endpoints.memory_mcp and /mcp/memory with a

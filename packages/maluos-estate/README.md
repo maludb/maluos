@@ -33,5 +33,8 @@ compartment and the ledger names the host.
 The overlay: `join` (and the desk's `office enroll`) makes an X25519 key, keeps
 the private half in the vault (`estate-overlay-key`, beside the token), sends
 the public half, and the office answers with the host's address, name and hub.
-`join --hub HOST:PORT` on the coordinator's host makes it the hub (udp 51820,
-forwarding on the interface only). `--no-overlay` opts a host out.
+`join --hub HOST:PORT` makes this host the hub (udp 51820, forwarding on the
+interface only): whichever member the others reach on one UDP port, the
+coordinator's host or not; `maluctl estate overlay hub HOST:PORT | off` moves
+the role later (docs/phase13-estate-behind-a-proxy.md), and `overlay status`
+says when the port does not reach the hub. `--no-overlay` opts a host out.

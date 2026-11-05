@@ -74,7 +74,7 @@ def drive(term, disk, key, login="maluos", password="maluos", fullname="MaluOS T
           password_auth=True, change_required=True, sudo=False, screen_timeout=300, business_os=None):
     """Answer the nine screens so the plan equals the medium's unattended plan (plus the key and the disk).
     With sudo=True the driver first starts the installer from a shell prompt on the terminal.
-    business_os={"domain", "scheme", "admin_email", "admin_name"} ticks the First boot screen's Business OS
+    business_os={"domain", "scheme", "proxy_address", "admin_email", "admin_name"} ticks the First boot screen's Business OS
     box (server media) and fills its fields; None leaves the kernel off, as the screen and firstboot.yaml ship."""
     if sudo:
         term.send(ENTER); term.settle(1.0)
@@ -110,6 +110,8 @@ def drive(term, disk, key, login="maluos", password="maluos", fullname="MaluOS T
             term.send(DOWN); term.send(SPACE); term.send(DOWN)
         else:
             term.send(DOWN); term.send(DOWN)
+        term.type(business_os.get("proxy_address", ""))                        # the proxy's address (https), blank otherwise
+        term.send(DOWN)
         term.type(business_os["admin_email"])
         term.send(DOWN); term.type(business_os.get("admin_name", ""))
     term.settle(); term.send(ENTER)

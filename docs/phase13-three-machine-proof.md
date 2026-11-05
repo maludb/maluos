@@ -6,19 +6,43 @@ runbook runs the proof of docs/phase13-estate.md ("The proof: three
 machines") on real hosts, as far as the slices built so far reach: slices
 1, 1b, 2 and 3. It is the owner's to run; nothing in it needs this
 repository, only the released images and apt.maluos.com. Written
-2026-10-29 with slice 3; the result goes into the Status of each slice's
-document.
+2026-10-29 with slice 3; amended 2026-11-05 for an office behind a reverse
+proxy (docs/phase13-estate-behind-a-proxy.md: the hub wherever the UDP
+port is, `proxy_address` for the office's names); the result goes into
+the Status of each slice's document.
 
 ## The three machines
 
 | Machine | What it is | Image | Needs |
 |---|---|---|---|
-| **office** | the coordinator: the Business OS kernel, the estate's hub | maluos-server (the `maludb-os-core` component on) | a stable name or address the two others can reach on UDP 51820 (a DNS name is enough; a static IP is not required); the kernel at `https://app.<domain>` or `http://office:8080` |
-| **gpu** | the inference node: a GPU, Ollama, the gateway sharing it | maluos-server | any network the hub is reachable from: NAT, DHCP, a dynamic address are all fine (the spoke dials out and keeps the tunnel alive) |
+| **office** | the coordinator: the Business OS kernel; the estate's hub when it has the UDP port, a spoke otherwise | maluos-server (the `maludb-os-core` component on) | reachable over HTTPS by the two others (through a reverse proxy is the common case: `https://app.<domain>`; or `http://office:8080` on one LAN); under https, `proxy_address` in its plan so the office reaches its own names; the hub's UDP port only if the office is the hub (step 0) |
+| **gpu** | the inference node: a GPU, Ollama, the gateway sharing it; the estate's hub when it is the member with a reachable UDP port | maluos-server | as a spoke, any network the hub is reachable from: NAT, DHCP, a dynamic address are all fine (the spoke dials out and keeps the tunnel alive); as the hub, one UDP port (51820) the office and the desk reach |
 | **desk** | a person's desktop | maluos-desktop | the same: anywhere the hub is reachable from |
 
 Every member reaches the others only over the overlay (`NAME.internal`,
-100.100.0.0/16): no LAN names, no port forwarding, no TLS of its own.
+100.100.0.0/16): no LAN names, no TLS of its own, and one UDP port in the
+whole estate, at the hub.
+
+### Step 0a: where the hub is
+
+Decide this before any join (docs/phase13-estate-behind-a-proxy.md,
+decision 3; the handbook's
+[22-estate-behind-a-proxy.md](https://github.com/maludb/maluos-docs/blob/main/22-estate-behind-a-proxy.md)
+and [30-reverse-proxy.md](https://github.com/maludb/maluos-docs/blob/main/30-reverse-proxy.md)):
+
+- **The office has the port** (a server on a public address, or the
+  router in front of its proxy forwards UDP 51820 to the office VM, or the
+  proxy host's nginx has the `stream` block of the design note): the
+  office is the hub. Its endpoint is a public name that resolves to the
+  forwarder, `vpn.<domain>:51820`.
+- **The office has no port** (a VM behind a proxy that forwards HTTPS
+  only, nothing else to be had): the member that has one is the hub, the
+  GPU server in this proof, and the office joins as a spoke.
+
+The role moves without a leave: `sudo maluctl estate overlay hub off` on
+the member that holds it, `sudo maluctl estate overlay hub HOST:PORT` on
+the one that should. An office that joined as the hub on an address
+nobody reaches recovers that way.
 
 ## Step 0: the office
 
@@ -38,18 +62,29 @@ Every member reaches the others only over the overlay (`NAME.internal`,
 
 ## Step 1: the hub (slice 1 + 1b)
 
-On the office page, mint a **node code** of kind `server`. On **office**:
+On the office page, mint a **node code** of kind `server`. On **office**,
+as the hub (step 0a, the office has the port):
 
 ```
-sudo maluctl estate join https://app.example.com --code CODE --name office --hub office.example.com:51820
+sudo maluctl estate join https://app.example.com --code CODE --name office --hub vpn.example.com:51820
 maluctl estate status            # joined, the heartbeat ok
 maluctl estate overlay status    # interface estate up, 100.100.0.1/16 as office.internal, hub listening on udp 51820
 maluctl estate inference         # the facts the office's own gateway reports (none shared unless it has a GPU), the key stored
 ```
 
+or as a spoke (the GPU host will be the hub):
+
+```
+sudo maluctl estate join https://app.example.com --code CODE --name office
+maluctl estate overlay status    # a key was sent; no hub has joined the estate yet (the service waits)
+```
+
 Expect: Settings → Desks lists the node online with its report; the
-overlay paragraph names the hub and its endpoint; the join printed
-`inference: key host:office/estate-inference-key`.
+overlay paragraph names the hub and its endpoint (or "the hub has not
+joined yet"); the join printed `inference: key host:office/estate-inference-key`.
+Under https the join only works when the office reaches `app.example.com`
+through its proxy: `proxy_address` in the plan did that at first boot
+(`getent hosts app.example.com` shows the proxy's address, not loopback).
 
 ## Step 2: the GPU node (slices 1, 1b, 3)
 
@@ -57,16 +92,24 @@ Mint a node code of kind `inference`. On **gpu**:
 
 ```
 sudo maluctl gateway ollama install && sudo maluctl gateway ollama pull qwen3:8b      # or whatever the GPU holds
-sudo maluctl estate join https://app.example.com --code CODE --name gpu-1 --kind inference
-maluctl estate overlay status                   # a spoke: 100.100.0.2/16 as gpu-1.internal, the hub's last handshake recent
-sudo maluctl gateway expose --bind overlay      # the node API and the faces on 100.100.0.2:11435 only
+sudo maluctl estate join https://app.example.com --code CODE --name gpu-1 --kind inference                    # the office is the hub
+sudo maluctl estate join https://app.example.com --code CODE --name gpu-1 --kind inference --hub gpu.example.com:51820   # or: this host is the hub
+maluctl estate overlay status                   # a spoke: 100.100.0.2/16 as gpu-1.internal, the hub's last handshake recent;
+                                                # or the hub: 100.100.0.1/16, listening on udp 51820, the office peered
+sudo maluctl gateway expose --bind overlay      # the node API and the faces on the overlay address only
 maluctl gateway share                           # on by the chassis rule (a server); contribution always
 maluctl estate inference                        # facts: share on, the models; backends: none yet (nobody else shares); peers: office
 ```
 
 Expect at the office: Settings → Desks → Shared inference lists gpu-1
 published (shared, an overlay address, online) with its models and wait.
-`ping office.internal` from **gpu** answers through the tunnel.
+**`ping office.internal` from gpu answers through the tunnel**: that is the
+done-criterion of the proxy round with the office behind nginx. When it
+does not, `maluctl estate overlay status` on the spoke says so within two
+minutes ("no handshake with the hub at …: UDP 51820 must reach the hub")
+and names what to check; on the hub it asks whether the port is forwarded
+to it. (With the GPU host as the hub the addresses are the other way
+round: the hub is `.0.1`, the office a spoke.)
 
 ## Step 3: the desk (slices 1b, 2, 3)
 
@@ -75,7 +118,7 @@ Mint a **desk code** for the person. On **desk**, signed in as them:
 ```
 sudo maluctl office enroll https://app.example.com --code CODE --name "Ed's desk"
 maluctl office status                           # enrolled, the key, the heartbeat
-maluctl estate overlay status                   # a spoke: 100.100.0.3/16 as ed-s-desk.internal
+maluctl estate overlay status                   # a spoke: 100.100.0.3/16 as ed-s-desk.internal, the hub's last handshake recent
 maluctl office inference --refresh              # backends: gpu-1 at 100.100.0.2:11435 with its models and wait; peers: office, gpu-1
 maluctl gateway estate                          # the rung estate:gpu-1, healthy (paired with the desk's own inference key)
 maluctl gateway chat "Say hello" --model qwen3:8b --prefer estate      # served by gpu-1 over the overlay

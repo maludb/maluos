@@ -8,13 +8,18 @@ A desk does not enrol twice: its desk row is its node record.
 
   sudo maluctl estate join URL --code CODE [--name NAME] [--kind server|inference|desk] [--hub HOST:PORT] [--no-overlay] [--allow-actions a,b] [--force]
                                             --kind desk runs `maluctl office enroll` (the desk's enrolment is its node record)
-                                            --hub: this host is the estate's hub (the coordinator's own host; one UDP port forwarded to it)
+                                            --hub: this host is the estate's hub (any member with one UDP port reachable by the others;
+                                            `maluctl estate overlay hub` moves the role later)
   maluctl estate status [--json]            the enrolment and the last heartbeat; on a desk, its desk enrolment
   maluctl estate report [--json]            what the next report carries (readable without the office)
   maluctl estate heartbeat [--presence online|offline] [--report] [--json]     one heartbeat now (root or maluos-estate)
   maluctl estate nodes [--json] [ID]        the estate as this node (or, on a desk, its owner) may see it
-  maluctl estate overlay status|peers [--json]   the estate's network on this host (slice 1b): the interface, the hub, the peers
+  maluctl estate overlay status|peers [--json]   the estate's network on this host (slice 1b): the interface, the hub, the peers,
+                                            and whether the one UDP port the overlay needs reaches the hub (the handshakes)
   sudo maluctl estate overlay up|down|rotate|refresh   by hand (join and leave do it); rotate makes a new key
+  sudo maluctl estate overlay hub HOST:PORT | off     this node takes the hub role (or changes its endpoint): the hub is whichever
+                                            member the others reach on one UDP port, the coordinator's host or not
+                                            (docs/phase13-estate-behind-a-proxy.md); off releases it, another member may take it
   sudo maluctl estate leave                 retire the node: the office is told, the units stopped, the secrets removed
   maluctl estate agents [--capability X] [--json]   the estate's agent directory (Phase 13 slice 2), as this node may see it
   maluctl estate tasks ID [--json]          a task's record with its provenance
@@ -139,6 +144,11 @@ def join(a):
         os.execv(sys.executable, [sys.executable, MALUCTL, "office", "enroll", url, "--code", code] + (["--name", name] if name else []) + (["--no-overlay"] if no_overlay else []) + a)
     if hub and not re.fullmatch(r"[A-Za-z0-9.-]+:\d{1,5}", hub):
         sys.exit(f"--hub takes HOST:PORT, the hub's endpoint as the spokes dial it (not {hub!r})")
+    if hub:
+        from maluos_estate import overlay as OV
+        note = OV.resolve_note(hub.rpartition(":")[0])
+        if "does not resolve" in note:
+            print(f"  warn: --hub {hub}: {note.strip(' ()')}; the spokes dial this endpoint, so it must resolve for them (docs/phase13-estate-behind-a-proxy.md)", file=sys.stderr)
     if kind not in C.KINDS:
         sys.exit(f"--kind must be server, inference or desk (not {kind!r})")
     old = C.read_conf()
@@ -566,6 +576,9 @@ def overlay_cmd(a):
             hs = p.get("last_handshake")
             age = f"handshake {int(time.time()) - hs} s ago" if hs else "no handshake yet"
             print(f"  peer  {p.get('name') or '?':<24} {p.get('address') or '-':<15} {age}" + (f"  rx {p.get('rx')} tx {p.get('tx')}" if p.get("rx") is not None else ""))
+        verdict = OV.reachability(st)
+        if verdict:
+            print(f"warn:       {verdict}")
         return 0
     if sub == "refresh":
         OV.hint(); print("asked maluos-overlay to refresh now"); return 0
@@ -582,6 +595,43 @@ def overlay_cmd(a):
             st_, ans = 0, {"error": str(e)[:120]}
         d = OV.reconcile(kind, conf, tok, priv, ans if st_ == 200 else None)
         print(f"{OV.IFACE}: " + (f"{d['address']}/{d['prefix']} {d['role']}, {len(d['peers'] or [])} peer(s)" if d else "not configured (no hub yet, or no overlay for this host)")); return 0
+    if sub == "hub":
+        # docs/phase13-estate-behind-a-proxy.md, decision 2: the hub endpoint is a setting of the running estate
+        if kind != "node":
+            sys.exit("a desk is never the hub: the hub is a server or inference node the others reach on one UDP port")
+        ep = a.pop(0) if a and not a[0].startswith("-") else sys.exit("maluctl estate overlay hub HOST:PORT | off")
+        if ep != "off" and not re.fullmatch(r"[A-Za-z0-9.-]+:\d{1,5}", ep):
+            sys.exit(f"the hub's endpoint is HOST:PORT, as the spokes dial it (not {ep!r}); `off` releases the role")
+        if not (conf.get("secrets") or {}).get("overlay"):
+            sys.exit("this host joined with --no-overlay (no overlay key): leave and join again with one before it can be the hub")
+        tok = C.token(conf)
+        st_, r = C.overlay_hub(conf, tok, None if ep == "off" else ep)
+        if st_ == 404:
+            sys.exit("the office does not take the hub as a setting (a kernel before 2026-11-05): leave and join again with --hub, or update the office")
+        if st_ != 200:
+            sys.exit(f"the office refused ({st_} {r.get('error') or ''}): {r.get('message') or r}")
+        conf["overlay"] = r.get("overlay") or {"role": "spoke", "address": None, "hub": None}
+        C.write_conf(conf)
+        if ep == "off":
+            OV.down()                 # the hub's interface goes; the service makes a spoke's when a member takes the hub
+            print("released: the estate has no hub until a member takes the role (sudo maluctl estate overlay hub HOST:PORT there); "
+                  "this host keeps its membership and its key, on an ordinary address once a hub exists")
+            return 0
+        note = OV.resolve_note(ep.rpartition(":")[0])
+        if "does not resolve" in note:
+            print(f"  warn: {note.strip(' ()')}; the spokes dial this endpoint", file=sys.stderr)
+        if NO_UNIT:
+            priv = OV.key_for(kind, conf)
+            try:
+                st2, ans = OV.fetch(kind, conf, tok)
+            except Exception:
+                st2, ans = 0, None
+            OV.reconcile(kind, conf, tok, priv, ans if st2 == 200 else None)
+        else:
+            unit("enable", OVERLAY_UNIT); unit("restart", OVERLAY_UNIT)
+        print(f"this host is the hub at {ep}: " + overlay_line(conf))
+        print("  the other members re-peer on their next heartbeat (overlay_changed); their `maluctl estate overlay status` shows the handshake")
+        return 0
     if sub == "rotate":
         priv, pub = OV.genkey()
         user = C.USER if kind == "node" else (conf.get("owner") or {}).get("login")
@@ -602,7 +652,7 @@ def overlay_cmd(a):
         else:
             unit("kill", OVERLAY_UNIT)
         print(f"rotated: the office has the new key; the tunnel re-keys on the service's refresh ({OVERLAY_UNIT})"); return 0
-    sys.exit(f"maluctl estate overlay: status|peers|up|down|rotate|refresh (not {sub!r})")
+    sys.exit(f"maluctl estate overlay: status|peers|up|down|rotate|refresh|hub (not {sub!r})")
 
 
 def _viewer():

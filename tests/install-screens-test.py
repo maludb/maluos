@@ -4,7 +4,7 @@
 does on the serial console (the First boot screen's Business OS box ticked and filled as the unattended
 plan asks for the kernel), and the saved plan is compared with the medium's unattended plan.
 
-  python3 tests/install-screens-test.py [--keep]
+  python3 tests/install-screens-test.py [--keep] [--https]     --https: the kernel for https with a proxy address typed
 """
 import fcntl, os, pty, struct, subprocess, sys, tempfile, termios, time
 
@@ -45,6 +45,9 @@ def main(argv):
     rc = 0
     unattended = yaml.safe_load(open(os.path.join(ROOT, "iso/plans/server-unattended.yaml")))["maluos-install"]
     bos = (unattended["firstboot"].get("components") or {}).get("maludb-os-core")     # the kernel, asked for as the plan does
+    if "--https" in argv and bos:                                                     # the office behind a proxy: https and the proxy's address typed
+        bos = {**bos, "scheme": "https", "proxy_address": "192.168.100.1"}
+        unattended["firstboot"]["components"]["maludb-os-core"] = bos
     try:
         D.drive(term, "sda", KEY, screen_timeout=60, business_os=bos)
         term.expect(r"maluos-install: the plan is saved at", timeout=60)
@@ -83,8 +86,8 @@ def main(argv):
                 print(f"  ok   {section} matches the unattended plan")
     if rc == 0:
         got = saved["firstboot"].get("components", {}).get("maludb-os-core") or {}
-        if bos and got.get("enabled") is True and got.get("domain") == bos["domain"] and got.get("admin_email") == bos["admin_email"]:
-            print(f"  ok   the Business OS box ticked: the kernel for {got['domain']} ({got.get('scheme')}), {got['admin_email']}")
+        if bos and got.get("enabled") is True and got.get("domain") == bos["domain"] and got.get("admin_email") == bos["admin_email"] and got.get("proxy_address") == bos.get("proxy_address"):
+            print(f"  ok   the Business OS box ticked: the kernel for {got['domain']} ({got.get('scheme')}" + (f", proxy {got['proxy_address']}" if got.get("proxy_address") else "") + f"), {got['admin_email']}")
         else:
             print(f"FAIL: the Business OS group did not reach the plan: {got}"); rc = 1
     if rc == 0:

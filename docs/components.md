@@ -111,7 +111,14 @@ constraints admit it), Node 22, Python 3.14 (every requirement has wheels).
 First-boot module 60-maludb-os-core, a native port of maludb-os-docker's
 bos-init with PostgreSQL, the engine and the MaluDB API local:
 
-1. loopback names for <domain>, www, os and app so the kernel's own URLs resolve;
+1. the kernel's own names (<domain>, www, os, app) so its URLs resolve on
+   this host: on loopback under http (Apache answers there); under https
+   at `proxy_address` (the proxy as the office sees it) in a marked block
+   of /etc/hosts and off every loopback line, since nothing on the office
+   serves https on loopback, or no line at all when no address is given,
+   which the summary (`hosts.mode: none`) says (2026-11-05,
+   docs/phase13-estate-behind-a-proxy.md, part 2); the applications'
+   names join the block after step 8;
 2. the kernel's activity memory: database maludb_os_memory, role and schema
    maludb_os_mem, memory schema enabled, a MaluDB API token minted for it;
 3. the kernel database maludb_os and every migration in order, with a
@@ -141,8 +148,10 @@ it is a couple of minutes.
    `[]` installs none), the kernel's own installer, `bin/app_install.php
    apply https://github.com/maludb/maludb-os-<key>.git --by <admin_email>
    --domain <domain> --scheme <scheme> --grant-standing-departments`, plus
-   `--hire-agents` unless the key is in `apps.propose_agents` and `--ref`
-   when `apps.ref` names one, as root from /var/www, in the listed order.
+   `--hire-agents` unless the key is in `apps.propose_agents`, `--ref`
+   when `apps.ref` names one, and `--proxy-address` under https when the
+   component has one (the application's name goes to the proxy in
+   /etc/hosts, not to loopback), as root from /var/www, in the listed order.
    A marker per application under /var/lib/maluos/business-os/apps (the
    installer's output beside it as `<key>.log`) means a re-run reconciles
    rather than repeats; a failing application is logged and the next
@@ -153,7 +162,7 @@ it is a couple of minutes.
    The host tools the builds need come from the metapackage maluos-apps.
 
 Settings in firstboot.yaml under components.maludb-os-core: domain, scheme,
-admin_email, admin_name, admin_password, model_key, model_name,
+proxy_address (https only), admin_email, admin_name, admin_password, model_key, model_name,
 model_provider_id, anthropic_api_key, openrouter_api_key, malumail_api_key,
 and `apps` with `install`, `ref` (key to git tag or branch) and
 `propose_agents` (the conffile's commented block shows the defaults).

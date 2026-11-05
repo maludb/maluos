@@ -9,8 +9,10 @@ landed here.
 
 Every member of the estate (server, inference, desk) sends its WireGuard
 public key at join or enroll and receives an address in the estate's
-private range and a name (`NAME.internal`). The hub is the coordinator's
-own host, joined with `--hub HOST:PORT`; spokes keep one tunnel to it and
+private range and a name (`NAME.internal`). The hub is the member the
+others can reach on one UDP port (the coordinator's own host unless it
+sits behind a proxy that forwards HTTPS only), taken with `--hub HOST:PORT`
+at join or `POST overlay/hub` later; spokes keep one tunnel to it and
 reach each other through it. The kernel allocates, keeps the public keys
 and publishes the hub, the peers and the names; the private keys never
 leave the members' vaults.
@@ -44,6 +46,36 @@ leave the members' vaults.
 
 Settings → Desks for an operator shows the overlay (range, hub, members)
 and each node's address. Apache: the `overlay` rewrite lines.
+
+## The hub endpoint as a setting (2026-11-05)
+
+From the first end-to-end test on real hosts (maluos
+docs/phase13-estate-behind-a-proxy.md): the office is commonly a VM behind
+a reverse proxy that forwards HTTPS and nothing else, so the coordinator's
+host is not always the member the others can reach on UDP. The hub is now
+whichever member has a reachable UDP port, and the role moves without a
+leave:
+
+- `POST /api/v1/estate/overlay/hub` (node token): `{"endpoint": "host:port"}`
+  makes the node the hub, or changes the endpoint when it is the hub
+  already (409 `hub_exists` while another member holds the role, 409
+  `no_key` for a member without an overlay key, 400 `invalid`);
+  `{"endpoint": null}` releases the role (409 `not_hub` from any other
+  member): the estate has no hub until one is claimed, the former hub
+  moves to an ordinary address so the next can take the range's first.
+  A desk token is refused (401). `maluctl estate overlay hub HOST:PORT | off`
+  drives it; `--hub` at join is unchanged.
+- `overlay_claim_hub()` and `overlay_release_hub()` in
+  app/features/estate/overlay.php; every move bumps the version, so the
+  members hear `overlay_changed` and re-peer.
+- bin/app_install.php takes `--proxy-address <addr>`: under https behind a
+  proxy an application's name that does not resolve, or resolves to
+  loopback, is written to that address in /etc/hosts (the loopback line
+  an earlier run left loses the name), and the sign-on proof dials it.
+  MaluOS's first boot passes `components.maludb-os-core.proxy_address`.
+
+The proof grew the "hub as a setting" section (moved, released, taken by
+the GPU host, back; a keyless member refused).
 
 ## Proof
 

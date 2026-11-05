@@ -3,7 +3,8 @@ declare(strict_types=1);
 /**
  * Proof of the overlay, the kernel half of Phase 13 slice 1b (db/189; maluos docs/phase13-slice1b-overlay.md): the
  * hub's join, the spokes' addresses, the desks' place, the peers and names each member is given, rotation,
- * overlay_changed on heartbeats, leaving and the address quarantine, a hub that leaves.
+ * overlay_changed on heartbeats, the hub endpoint as a setting (moved, released, taken by another member), leaving and
+ * the address quarantine, a hub that leaves.
  *
  *   BOS_INTERNAL_URL=http://127.0.0.1:8089 php bin/test_estate_overlay.php
  *
@@ -125,6 +126,34 @@ $ok($st === 200 && $j['overlay']['address'] === '100.100.0.5', 'a keyless node t
 [$st, $j, $e] = $call('POST', '/api/v1/estate/overlay/key.php', $deskTok, ['overlay_public_key' => $wg('desk2')]);
 $ok($st === 200 && desk_row($pdo, $desk)['overlay_public_key'] === $wg('desk2'), 'a desk rotates with its desk token');
 
+echo "== the hub as a setting (maluos docs/phase13-estate-behind-a-proxy.md): moved, released, taken by another member\n";
+[$st, $j, $e] = $call('POST', '/api/v1/estate/overlay/hub.php', $gpuTok, ['endpoint' => 'gpu.example.com:51820']);
+$ok($st === 409 && $e === 'hub_exists', "a spoke cannot take the hub while another member holds it ({$st} {$e})");
+[$st, $j, $e] = $call('POST', '/api/v1/estate/overlay/hub.php', $hubTok, ['endpoint' => 'vpn.example.com:51821']);
+$ok($st === 200 && $j['hub']['endpoint'] === 'vpn.example.com:51821' && $j['hub']['id'] === $hub && $j['overlay']['role'] === 'hub' && $j['overlay']['address'] === '100.100.0.1', 'the hub changes its endpoint (a forward at the proxy): still the hub at 100.100.0.1');
+$ok($call('GET', '/api/v1/estate/overlay.php', $gpuTok)[1]['hub']['endpoint'] === 'vpn.example.com:51821' && $call('POST', '/api/v1/estate/heartbeat.php', $gpuTok, ['presence' => 'online'])[1]['overlay_changed'] === true, 'a spoke is given the new endpoint and hears of the change');
+$ok($call('POST', '/api/v1/estate/overlay/hub.php', $hubTok, ['endpoint' => 'nope'])[0] === 400 && $call('POST', '/api/v1/estate/overlay/hub.php', $hubTok, [])[0] === 400, 'a bad endpoint, or none, is 400');
+$ok($call('POST', '/api/v1/estate/overlay/hub.php', $gpuTok, ['endpoint' => null])[0] === 409, 'a spoke cannot release a role it does not hold (409 not_hub)');
+$ok($call('POST', '/api/v1/estate/overlay/hub.php', $deskTok, ['endpoint' => 'x:1'])[0] === 401, 'a desk token is refused: a desk is never the hub');
+[$st, $j, $e] = $call('POST', '/api/v1/estate/join.php', null, $join($mk(), 'keyless2', 'server'));
+$keyless2Tok = (string) ($j['token'] ?? '');
+$ok($st === 201 && $call('POST', '/api/v1/estate/overlay/hub.php', $keyless2Tok, ['endpoint' => 'k.example.com:51820'])[2] === 'no_key', 'a member that joined without an overlay key cannot be the hub (409 no_key)');
+[$st, $j, $e] = $call('POST', '/api/v1/estate/overlay/hub.php', $hubTok, ['endpoint' => null]);
+$ok($st === 200 && $j['hub'] === null && $j['overlay'] === null && overlay_hub($pdo) === null && overlay_settings($pdo)['hub_endpoint'] === null, 'the hub releases the role: the estate has no hub');
+$r = node_row($pdo, $hub);
+$ok($r['overlay_address'] !== null && (string) $r['overlay_address'] !== '100.100.0.1' && $r['overlay_address_freed_at'] === null, 'the former hub keeps its membership on an ordinary address (' . $r['overlay_address'] . ')');
+$ok($call('GET', '/api/v1/estate/me.php', $gpuTok)[1]['overlay'] === null && $call('GET', '/api/v1/desks/me.php', $deskTok)[1]['overlay'] === null, 'the spokes have no place while the estate has no hub');
+[$st, $j, $e] = $call('POST', '/api/v1/estate/overlay/hub.php', $gpuTok, ['endpoint' => 'gpu.example.com:51820']);
+$ok($st === 200 && $j['overlay']['role'] === 'hub' && $j['overlay']['address'] === '100.100.0.1' && $j['overlay']['listen_port'] === 51820 && overlay_hub($pdo)['id'] === $gpu, 'the GPU host takes the hub: role hub, 100.100.0.1, its own endpoint');
+[$st, $j, $e] = $call('GET', '/api/v1/estate/overlay.php', $hubTok);
+$ok($st === 200 && $j['self']['role'] === 'spoke' && $j['hub']['endpoint'] === 'gpu.example.com:51820' && count($j['peers']) === 1 && $j['peers'][0]['address'] === '100.100.0.1', 'the former hub is a spoke of the GPU host now');
+$ok($call('GET', '/api/v1/desks/overlay.php', $deskTok)[1]['hub']['endpoint'] === 'gpu.example.com:51820', 'and so is the desk');
+// back as it was, so the sections below hold: the GPU host releases, the office takes the hub again
+$call('POST', '/api/v1/estate/overlay/hub.php', $gpuTok, ['endpoint' => null]);
+[$st, $j, $e] = $call('POST', '/api/v1/estate/overlay/hub.php', $hubTok, ['endpoint' => 'vpn.example.com:51820']);
+$ok($st === 200 && overlay_hub($pdo)['id'] === $hub && $j['overlay']['address'] === '100.100.0.1' && (string) node_row($pdo, $gpu)['overlay_address'] === '100.100.0.3', 'and back: the office is the hub at 100.100.0.1, the GPU host at 100.100.0.3 again');
+$ok($call('POST', '/api/v1/estate/heartbeat.php', $gpuTok, ['presence' => 'online'])[1]['overlay_changed'] === true, 'every move bumped the version: the members refresh');
+
 echo "== settings\n";
 $s = present_estate_for_settings($pdo);
 $gpuRow = null; foreach ($s['nodes'] as $n) { if ($n['id'] === $gpu) { $gpuRow = $n; } }
@@ -161,7 +190,7 @@ $ok($j['overlay']['hub']['public_key'] === $wg('hub-b'), 'the spokes see the new
 $ok((int) overlay_settings($pdo)['version'] > $v0 + 10, 'the version moved with every change');
 
 // ---- cleanup: everything freed, the hub unset ----
-foreach ([$gpuTok, $nokeyTok, $laterTok, $reuseTok, $hub2Tok] as $t) { $call('POST', '/api/v1/estate/leave.php', $t); }
+foreach ([$gpuTok, $nokeyTok, $laterTok, $reuseTok, $hub2Tok, $keyless2Tok] as $t) { $call('POST', '/api/v1/estate/leave.php', $t); }
 desk_retire($pdo, $desk);
 $releaseSmoke();
 $ok(overlay_hub($pdo) === null && count(overlay_members($pdo)) === 0, 'cleanup: no hub, no live member, the SMOKE addresses released');

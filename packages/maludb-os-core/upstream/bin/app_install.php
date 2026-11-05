@@ -17,8 +17,11 @@ declare(strict_types=1);
  *          default applications' rule; otherwise they are proposed)   --grant-standing-departments (every standing
  *          department gets the application's member role at write — K4)   --no-restart (never restart maludb-os-actions-mcp)
  *
+ *          --proxy-address <addr> (the proxy's address as this host sees it: under https the name goes to it in /etc/hosts
+ *          instead of loopback, and the sign-on proof dials it; MaluOS passes components.maludb-os-core.proxy_address)
+ *
  * What stays the owner's: DNS for <label>.<domain>, TLS, and any grant not named here. A name that does not resolve
- * yet gets a loopback line in /etc/hosts, and the plan says so.
+ * yet gets a line in /etc/hosts (loopback, or --proxy-address), and the plan says so.
  *
  * deploy/ files are templates: {{DOMAIN}}, {{APP_DIR}}, {{APP_KEY}} and any env key ({{APP_INTERNAL_PORT}},
  * {{MCP_RECORDS_PORT}} …) are filled in; a file with no placeholders is installed as it is, with a note.
@@ -45,7 +48,8 @@ for ($i = 3, $n = count($argvAll); $i < $n; $i++) {
 }
 if (!in_array($mode, ['plan', 'apply'], true) || $source === '') {
     fwrite(STDERR, "Usage: php bin/app_install.php plan|apply <repository dir or git URL> [--by <email>] [--domain <domain>] [--scheme http|https]\n"
-        . "       [--tenant <db prefix>] [--ref <tag>] [--hire-agents] [--grant-standing-departments] [--no-restart] [--rotate-db-passwords]\n");
+        . "       [--tenant <db prefix>] [--ref <tag>] [--hire-agents] [--grant-standing-departments] [--no-restart] [--rotate-db-passwords]\n"
+        . "       [--proxy-address <addr>]  (https behind a proxy: the name points at the proxy, not loopback)\n");
     exit(1);
 }
 $APPLY = $mode === 'apply';
@@ -207,6 +211,9 @@ if ($domain === '') {
 }
 if ($domain === '') { stop('domain', 'no business domain: --domain <domain> (APP_HOST is not set in the kernel\'s config/.env).'); }
 $scheme = (string) ($opts['scheme'] ?? 'http');
+// The proxy's address as this host sees it (https behind a reverse proxy): a name that must be written into /etc/hosts
+// goes to it, never to loopback, where nothing serves https; the sign-on proof dials it too.
+$proxyAddress = isset($opts['proxy-address']) && is_string($opts['proxy-address']) && preg_match('/^[A-Za-z0-9.:-]{1,253}$/', trim($opts['proxy-address'])) === 1 ? trim($opts['proxy-address']) : null;
 if (!in_array($scheme, ['http', 'https'], true)) { stop('scheme', '--scheme is http or https, not ' . json_encode($scheme) . '.'); }
 $tenant = preg_replace('/[^a-z0-9_]/', '', strtolower((string) ($opts['tenant'] ?? explode('.', $domain)[0])));
 
@@ -498,12 +505,33 @@ if ($vhostSrc === null) {
         }
     }
 }
-[$c] = q('getent hosts ' . escapeshellarg($fqdn));
-if ($c === 0) {
-    say('dns', 'done', "{$fqdn} resolves");
+[$c, $o] = q('getent hosts ' . escapeshellarg($fqdn));
+$resolved = $c === 0 ? (string) (preg_split('/\s+/', trim($o))[0] ?? '') : '';
+$loopback = in_array($resolved, ['127.0.0.1', '::1'], true);
+if ($c === 0 && !($proxyAddress !== null && $loopback)) {
+    say('dns', 'done', "{$fqdn} resolves" . ($resolved !== '' ? " ({$resolved})" : ''));
 } else {
-    say('dns', 'todo', "{$fqdn} does not resolve yet — a loopback line goes in /etc/hosts until the owner's DNS exists");
-    sh('printf "127.0.0.1\t%s\n" ' . escapeshellarg($fqdn) . ' >> /etc/hosts');
+    $target = $proxyAddress ?? '127.0.0.1';
+    $why = $c === 0 ? "{$fqdn} resolves to loopback, which serves nothing under https behind the proxy" : "{$fqdn} does not resolve yet";
+    say('dns', 'todo', "{$why} — a line to {$target} goes in /etc/hosts" . ($proxyAddress === null ? " until the owner's DNS exists" : ' (--proxy-address)'));
+    if ($proxyAddress !== null && $loopback) {
+        // the loopback line an earlier run (or a hand) wrote: the name leaves it, the line goes when it names nothing else
+        $strip = <<<'PYTHON'
+import sys
+n = sys.argv[1]; p = "/etc/hosts"; out = []
+for l in open(p).read().split("\n"):
+    f = l.split("#", 1)[0].split()
+    if f and f[0] in ("127.0.0.1", "::1") and n in f[1:]:
+        keep = [x for x in f[1:] if x != n]
+        if not keep:
+            continue
+        l = f[0] + "\t" + " ".join(keep)
+    out.append(l)
+open(p, "w").write("\n".join(out))
+PYTHON;
+        sh('python3 -c ' . escapeshellarg($strip) . ' ' . escapeshellarg($fqdn), true);
+    }
+    sh('printf "%s\t%s\n" ' . escapeshellarg($target) . ' ' . escapeshellarg($fqdn) . ' >> /etc/hosts');
 }
 
 // ---- 7. services -------------------------------------------------------------------------------------------------
@@ -864,7 +892,7 @@ if ($appId > 0 && $APPLY) {
         $ch = curl_init($launch);
         $jar = tempnam(sys_get_temp_dir(), 'sso');
         curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 8, CURLOPT_COOKIEJAR => $jar, CURLOPT_FOLLOWLOCATION => false,
-            CURLOPT_RESOLVE => [$fqdn . ':80:127.0.0.1', $fqdn . ':443:127.0.0.1']]);
+            CURLOPT_RESOLVE => [$fqdn . ':80:' . ($proxyAddress ?? '127.0.0.1'), $fqdn . ':443:' . ($proxyAddress ?? '127.0.0.1')]]);
         curl_exec($ch);
         $first = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
         curl_setopt($ch, CURLOPT_COOKIEJAR, tempnam(sys_get_temp_dir(), 'sso'));

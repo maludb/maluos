@@ -296,7 +296,7 @@ BOS = "maludb-os-core"
 def component_errors(comps):
     """firstboot.components: a mapping (enabled and the component's own keys) or a bool per component, passed
     through to firstboot.yaml. The Business OS kernel ships off (reconciliation R5); a plan that turns it on
-    names the domain, and its scheme and email are checked when given."""
+    names the domain, and its scheme, proxy_address and email are checked when given."""
     errs = []
     if not isinstance(comps, dict):
         return [f"firstboot.components must be a mapping of component name to its settings, got {comps!r}"]
@@ -315,6 +315,9 @@ def component_errors(comps):
             errs.append(f"{where}.domain {domain!r} is not a domain name")
         if spec.get("scheme") not in (None, "", "http", "https"):
             errs.append(f"{where}.scheme must be http or https, got {spec.get('scheme')!r}")
+        proxy = spec.get("proxy_address")
+        if proxy not in (None, "") and not re.match(r"^([0-9.]{7,15}|[0-9A-Fa-f:]{2,39}|[A-Za-z0-9]([A-Za-z0-9-]{0,62}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,62}[A-Za-z0-9])?)*)$", str(proxy)):
+            errs.append(f"{where}.proxy_address {proxy!r} is neither an address nor a host name (the proxy as the office sees it, like 192.168.100.1)")
         email = spec.get("admin_email") or ""
         if email and not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", str(email)):
             errs.append(f"{where}.admin_email {email!r} is not an email address")

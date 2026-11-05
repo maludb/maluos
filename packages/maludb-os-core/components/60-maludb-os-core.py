@@ -7,6 +7,9 @@ local. Runs after 50-maludb-api. Idempotent; every step checks its state.
 Configuration (firstboot.yaml -> components.maludb-os-core):
   domain: maluos.local      names: <domain>, os.<domain>, app.<domain>
   scheme: http              http on a LAN; https when a TLS proxy sits in front
+  proxy_address             https only: the proxy's address as this host sees it (192.168.100.1); the office's names
+                            go to it in /etc/hosts, never to loopback, where nothing serves https; absent: no line is
+                            written and the summary says so (docs/phase13-estate-behind-a-proxy.md, part 2)
   admin_email, admin_name   the first super-admin (default admin@<domain>)
   admin_password            optional; generated and stored otherwise
   model_key, model_name, model_provider_id   the first model registry row
@@ -74,13 +77,39 @@ def provision(ctx):
             raise RuntimeError(f"{' '.join(cmd[:3])} failed: {(r.stderr or r.stdout)[-400:]}")
         return r.stdout
 
-    # ---- 1. loopback names, so the kernel's own URLs resolve on this host
+    # ---- 1. the kernel's own names, so its URLs resolve on this host: under http on loopback (Apache answers there);
+    # under https at the proxy's address (components.maludb-os-core.proxy_address), never on loopback, where nothing
+    # serves https, or nowhere when no address is given (docs/phase13-estate-behind-a-proxy.md, part 2)
+    import maludb_os_apps as A
     names = [domain, f"www.{domain}", f"os.{domain}", f"app.{domain}"]
-    hosts = open("/etc/hosts").read()
-    missing = [n for n in names if f" {n}" not in hosts and f"\t{n}" not in hosts]
-    if missing:
-        with open("/etc/hosts", "a") as fh:
-            fh.write("127.0.0.1 " + " ".join(missing) + "\n")
+    proxy_address, proxy_why = (A.resolve_address(cfg.get("proxy_address")) if scheme == "https" else (None, "http"))
+    if scheme == "https" and cfg.get("proxy_address") and proxy_address is None:
+        log(f"warning: proxy_address: {proxy_why}; the office's names are left to DNS")
+    elif scheme == "https" and proxy_address and str(cfg.get("proxy_address")).strip() != proxy_address:
+        log(f"proxy_address {cfg.get('proxy_address')} resolves to {proxy_address}")
+
+    def point_names(all_names):
+        """/etc/hosts for the office's names (the four, then the applications' once installed)."""
+        text = open("/etc/hosts").read()
+        if scheme == "https":
+            new, changed = A.office_hosts(text, all_names, proxy_address)
+            how = f"proxy {proxy_address}" if proxy_address else "none"
+        else:
+            new, changed = A.office_hosts(text, [], None)                  # a stale block from an https run goes
+            missing = [n for n in all_names if f" {n}" not in new and f"\t{n}" not in new]
+            if missing:
+                new = new + "127.0.0.1 " + " ".join(missing) + "\n"; changed = True
+            how = "loopback"
+        if changed:
+            with open("/etc/hosts", "w") as fh:
+                fh.write(new)
+        return how
+    hosts_mode = point_names(names)
+    hosts_note = {"loopback": "the kernel's names on loopback (http)",
+                  "none": "https without proxy_address: no /etc/hosts line for the office's names; set components.maludb-os-core.proxy_address "
+                          "(the proxy's address as this host sees it) or give the names to this host's DNS, else the office cannot reach its own URLs"}.get(
+                      hosts_mode, f"the kernel's names at the proxy's address {proxy_address} (https)")
+    log("hosts: " + hosts_note)
 
     # ---- 2. the kernel's activity memory: its own MaluDB database, role and schema
     mem_pw = secret("mem_password", 24)
@@ -240,19 +269,21 @@ def provision(ctx):
     # ---- 9. the applications (the maluos-apps proposal, phase 1): the kernel's installer for each key, in order,
     # HR first by default (the one application that writes the directory). Markers under STATE/apps; the installer's
     # output beside them as <key>.log. The step waits for DNS and HTTPS to github.com first: a clone needs both.
-    import maludb_os_apps as A
     try:
         apps_cfg = A.apps_config(cfg.get("apps"))
     except ValueError as e:
         log(f"warning: {e}; no application installed"); apps_cfg = {"install": [], "ref": {}, "propose_agents": []}
-    apps = A.install_apps(apps_cfg, admin_email, domain, scheme, os.path.join(STATE, "apps"), www=WWW, log=log)
+    apps = A.install_apps(apps_cfg, admin_email, domain, scheme, os.path.join(STATE, "apps"), www=WWW, log=log, proxy_address=proxy_address)
     if apps_cfg["install"]:
         log(f"applications: {len(apps['installed'])} installed ({', '.join(apps['installed']) or '-'}), "
             f"{len(apps['failed'])} failed ({', '.join(apps['failed']) or '-'})")
     names = A.office_names(domain)
     log("names the office needs: " + " ".join(names))
+    if scheme == "https" and names != [domain, f"www.{domain}", f"app.{domain}", f"os.{domain}"]:
+        point_names(names)                     # the applications' names join the block (and leave any loopback line the installer wrote)
 
     return {"domain": domain, "scheme": scheme, "urls": {"os": f"{scheme}://os.{domain}", "app": f"{scheme}://app.{domain}"},
             "database": DB, "memory_database": MEM_DB, "admin_email": admin_email,
             "admin_password_file": pw_file if os.path.exists(pw_file) else None,
-            "apps": apps, "names": names, "healthy": True}
+            "apps": apps, "names": names, "healthy": True,
+            "proxy_address": proxy_address, "hosts": {"mode": hosts_mode, "address": proxy_address if hosts_mode.startswith("proxy") else ("127.0.0.1" if hosts_mode == "loopback" else None), "note": hosts_note}}

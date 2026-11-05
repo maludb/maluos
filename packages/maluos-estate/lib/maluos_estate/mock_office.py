@@ -592,6 +592,31 @@ class Office:
                 self.overlay["hub_key"] = key
             self.overlay["version"] += 1
 
+    def ov_claim_hub(self, member, ep):
+        """POST /api/v1/estate/overlay/hub {endpoint}: the member takes the hub role or, as the hub, changes the endpoint."""
+        import re as _re
+        if not isinstance(ep, str) or not _re.fullmatch(r"[A-Za-z0-9.-]+:\d{1,5}", ep):
+            return (400, "invalid", "endpoint is host:port, the hub as the spokes dial it")
+        if not member.get("overlay_key"):
+            return (409, "no_key", "this node joined without an overlay key (--no-overlay); it cannot be the hub")
+        cur = self.ov_hub()
+        if cur and cur["id"] != member["id"]:
+            return (409, "hub_exists", "another member is the hub; it releases the role (maluctl estate overlay hub off) or is retired first")
+        self.overlay["hub_endpoint"] = ep
+        self.ov_allocate(member, member["overlay_key"], hub=True)
+        member["overlay_seen"] = self.overlay["version"]
+        return None
+
+    def ov_release_hub(self, member):
+        """POST /api/v1/estate/overlay/hub {endpoint: null}: the hub gives the role up and moves to an ordinary address."""
+        if self.overlay["hub"] != member["id"]:
+            return (409, "not_hub", "this node is not the hub; nothing to release")
+        self.overlay["hub"], self.overlay["hub_key"], self.overlay["hub_endpoint"] = None, None, None
+        member["overlay_address"] = None
+        self.ov_allocate(member, member["overlay_key"])
+        member["overlay_seen"] = self.overlay["version"]
+        return None
+
     def ov_public(self):
         return {**self.overlay, "members": self.ov_members()}
 
@@ -1493,6 +1518,24 @@ class Handler(BaseHTTPRequestHandler):
                 o.inf_forget(node); o.mem_forget(node)
                 o.node_tokens = {t: n for t, n in o.node_tokens.items() if n != node["id"]}
             return self.send(200, {"ok": True, "surface": SURFACE, "node": {"id": node["id"], "status": "retired"}})
+        if p == "/api/v1/estate/overlay/hub":
+            # docs/phase13-estate-behind-a-proxy.md, decision 2: the hub endpoint as a setting (a node token; a desk is never the hub)
+            auth = self.headers.get("Authorization") or ""
+            tok = auth[7:].strip() if auth.lower().startswith("bearer ") else ""
+            if tok.startswith("desk_"):
+                return self.err(401, "unauthorized", "a node token is needed: a desk is never the hub")
+            node, e = self.node_from_bearer()
+            if e:
+                return self.err(*e)
+            if "endpoint" not in b:
+                return self.err(400, "invalid", "endpoint is host:port, or null to release the hub role")
+            with o.lock:
+                e = o.ov_release_hub(node) if b["endpoint"] is None else o.ov_claim_hub(node, b["endpoint"])
+                if e:
+                    return self.err(*e)
+                hub = o.ov_hub()
+                return self.send(200, {"ok": True, "surface": SURFACE, "overlay": o.ov_block(node),
+                                       "hub": {"endpoint": hub["endpoint"], "address": hub["address"], "name": o.ov_label(hub["name"]) + ".internal", "id": hub["id"]} if hub else None})
         if p == "/api/v1/estate/overlay/key":
             auth = self.headers.get("Authorization") or ""
             tok = auth[7:].strip() if auth.lower().startswith("bearer ") else ""

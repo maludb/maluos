@@ -51,15 +51,79 @@ def apps_config(apps):
     return {"install": ordered, "ref": ref, "propose_agents": [str(k).strip().lower() for k in propose]}
 
 
-def install_command(key, admin_email, domain, scheme, ref=None, hire=True, source=GIT_SOURCE):
-    """The installer's command line for one application (run as root from /var/www)."""
+def install_command(key, admin_email, domain, scheme, ref=None, hire=True, source=GIT_SOURCE, proxy_address=None):
+    """The installer's command line for one application (run as root from /var/www). `proxy_address` (https behind a
+    proxy) tells the installer where the application's name goes in /etc/hosts when it does not resolve: the proxy,
+    never loopback (an installer before 2026-11-05 ignores the option; office_hosts() fixes the line afterwards)."""
     cmd = ["php", "bin/app_install.php", "apply", repo_url(key, source), "--by", admin_email, "--domain", domain,
            "--scheme", scheme, "--grant-standing-departments"]
     if hire:
         cmd.append("--hire-agents")
     if ref:
         cmd += ["--ref", ref]
+    if proxy_address:
+        cmd += ["--proxy-address", proxy_address]
     return cmd
+
+
+# -- the office's names in /etc/hosts (docs/phase13-estate-behind-a-proxy.md, part 2)
+HOSTS_BEGIN, HOSTS_END = "# maluos business-os names begin", "# maluos business-os names end"
+LOOPBACK = ("127.0.0.1", "::1")
+
+
+def office_hosts(text, names, address):
+    """The /etc/hosts text with the office's names pointed where the office can reach them. Under https behind a proxy
+    the names go to `address` (the proxy's address as the office sees it) in a marked block, one line per name, and leave
+    every loopback line (first boot under http, the kernel's installer, a hand): nothing on the office serves https on
+    loopback. `address` None writes no block and still takes the names off loopback (https without a proxy_address: the
+    office is left to DNS). With no names the call only removes a stale block (the http path keeps its loopback lines).
+    Returns (new_text, changed); the rest of the file is kept as it is."""
+    lines = text.split("\n")
+    if HOSTS_BEGIN in lines and HOSTS_END in lines and lines.index(HOSTS_BEGIN) < lines.index(HOSTS_END):
+        i, j = lines.index(HOSTS_BEGIN), lines.index(HOSTS_END)
+        lines = lines[:i] + lines[j + 1:]
+    wanted = [n for n in names if n]
+    if wanted:
+        kept = []
+        for l in lines:
+            fields = l.split("#", 1)[0].split()
+            if fields and fields[0] in LOOPBACK and any(n in fields[1:] for n in wanted):
+                rest = [x for x in fields[1:] if x not in wanted]
+                if not rest:
+                    continue
+                l = fields[0] + "\t" + " ".join(rest)
+            kept.append(l)
+        lines = kept
+    while lines and lines[-1] == "":
+        lines.pop()
+    if address and wanted:
+        lines += [HOSTS_BEGIN] + [f"{address}\t{n}" for n in wanted] + [HOSTS_END]
+    new = "\n".join(lines) + "\n"
+    return new, new != text
+
+
+def resolve_address(value, resolver=None):
+    """`proxy_address` as given (an IPv4 or IPv6 literal is taken as it is; a host name is resolved once) -> the address
+    string, or None with a reason. The resolver is socket.getaddrinfo unless a test passes one."""
+    import ipaddress, socket
+    if value is None or str(value).strip() == "":
+        return None, "absent"
+    v = str(value).strip()
+    try:
+        return str(ipaddress.ip_address(v)), None
+    except ValueError:
+        pass
+    if not re.match(r"^[A-Za-z0-9]([A-Za-z0-9-]{0,62}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,62}[A-Za-z0-9])?)*$", v):
+        return None, f"{v!r} is neither an address nor a host name"
+    try:
+        infos = (resolver or socket.getaddrinfo)(v, None)
+        for fam_first in (socket.AF_INET, socket.AF_INET6):
+            for info in infos:
+                if info[0] == fam_first:
+                    return info[4][0], None
+        return None, f"{v} resolves to nothing usable"
+    except OSError as e:
+        return None, f"{v} does not resolve ({e})"
 
 
 def wait_for_network(host="github.com", port=443, timeout=120, sleep=time.sleep):
@@ -78,7 +142,7 @@ def wait_for_network(host="github.com", port=443, timeout=120, sleep=time.sleep)
 
 
 def install_apps(cfg, admin_email, domain, scheme, state_dir, www=WWW, run=subprocess.run, log=print,
-                 wait=wait_for_network, timeout=APP_TIMEOUT, source=GIT_SOURCE):
+                 wait=wait_for_network, timeout=APP_TIMEOUT, source=GIT_SOURCE, proxy_address=None):
     """Install the applications cfg (apps_config's shape) names, in order, with the kernel's installer: a
     marker file per key under state_dir records a completed install, so a re-run (maluctl provision
     --force) reconciles from the markers and only installs what is missing; a failing application is
@@ -101,7 +165,7 @@ def install_apps(cfg, admin_email, domain, scheme, state_dir, www=WWW, run=subpr
         if key not in pending:
             continue
         hire = key not in cfg["propose_agents"]
-        cmd = install_command(key, admin_email, domain, scheme, ref=cfg["ref"].get(key), hire=hire, source=source)
+        cmd = install_command(key, admin_email, domain, scheme, ref=cfg["ref"].get(key), hire=hire, source=source, proxy_address=proxy_address)
         logf = os.path.join(state_dir, key + ".log")
         log(f"application {key}: {' '.join(cmd)}")
         try:

@@ -28,6 +28,7 @@ sudo maluctl office enroll https://app.example.com --code 5K2T-77QA             
 maluctl estate overlay status                   # the interface, the address, the hub's last handshake, the peers
 maluctl estate overlay peers [--json]           # who is reachable, by name and address
 sudo maluctl estate overlay up|down             # by hand; join and leave do it
+sudo maluctl estate overlay hub HOST:PORT | off # this node takes the hub role (or moves its endpoint) / releases it (2026-11-05)
 sudo maluctl estate join … --no-overlay         # a node that must stay off the estate network
 sudo maluctl gateway expose --bind overlay      # the GPU box: the node API on the overlay address only
 ```
@@ -46,9 +47,16 @@ sudo maluctl gateway expose --bind overlay      # the GPU box: the node API on t
 
 ## Decisions
 
-1. **WireGuard, hub and spoke, the coordinator's host as the hub.** The
-   hub is the one machine an estate already has to make reachable (its
-   office URL); it gains one UDP port (51820 by default) forwarded to it.
+1. **WireGuard, hub and spoke, the coordinator's host as the hub.**
+   *Amended 2026-11-05 (docs/phase13-estate-behind-a-proxy.md): the hub is
+   whichever member the others reach on one UDP port, the coordinator's
+   host when it has the port (directly, or through a forward at its
+   router or its proxy's stream module) and another server node when it
+   does not; the role is a setting of the running estate (`maluctl estate
+   overlay hub HOST:PORT | off`), not a constant of a join; a desk is
+   never the hub.* As first written: the hub is the one machine an estate
+   already has to make reachable (its office URL); it gains one UDP port
+   (51820 by default) forwarded to it.
    Every spoke keeps one tunnel to the hub with a 25-second keepalive,
    so a desk behind a home router or on a phone's hotspot stays
    reachable without any address of its own; traffic between two spokes
@@ -335,3 +343,13 @@ Where the build departs from the text above, and why:
    node rows carry `overlay.address`, `maluctl estate nodes` and
    `maluctl office estate` pass it through; the Network tab's rows stay
    as G5 left them until the directory (G4) uses the names.
+
+**2026-11-05, the estate behind a proxy** (docs/phase13-estate-behind-a-proxy.md):
+the first end-to-end test on real hosts found the office behind a reverse
+proxy that forwards HTTPS only, so the hub cannot always be the
+coordinator's host and the endpoint cannot be fixed at the join. Decision 1
+is amended as marked above; the hub role is a setting (`POST
+/api/v1/estate/overlay/hub`, `maluctl estate overlay hub`), the reconciler
+handles a moved hub (addresses pruned, the listen port given up), and
+`overlay status` and the report give a verdict from the handshakes when the
+UDP port does not reach the hub. maluos-estate 0.7.0, kernel 8600c3d.

@@ -38,9 +38,16 @@ case "$(basename "$IMG")" in *desktop*) DESKTOP_SEED="write_files:
 # network. The seed sets apps.install: [] unless BOOT_TEST_APPS=1 (the dev host, under KVM): then the first boot installs the
 # four defaults, gets two hours more, and the checks below cover each application.
 BOOT_TEST_APPS=${BOOT_TEST_APPS:-0}
-if [ "$BOOT_TEST_APPS" = 1 ]; then FIRSTBOOT_TIMEOUT=${FIRSTBOOT_TIMEOUT:-9600}
-else BOOTCMD="$BOOTCMD  - [python3, -c, \"import os, yaml; p='/etc/maluos/firstboot.yaml'; c=(yaml.safe_load(open(p)) if os.path.exists(p) else None) or {}; k=c.setdefault('components', {}).setdefault('maludb-os-core', {}); k['apps']={'install': []}; open(p, 'w').write(yaml.safe_dump(c, sort_keys=False))\"]
-"; fi
+[ "$BOOT_TEST_APPS" = 1 ] && FIRSTBOOT_TIMEOUT=${FIRSTBOOT_TIMEOUT:-9600}
+# The office behind a proxy (docs/phase13-estate-behind-a-proxy.md, part 2): the server seed asks for scheme https with
+# proxy_address 10.0.2.2 (QEMU's user-network gateway stands in for the proxy as the VM sees it), so first boot writes the
+# kernel's names to it in /etc/hosts and never to loopback; the checks below read the file. BOOT_TEST_PROXY=0 keeps http.
+BOOT_TEST_PROXY=${BOOT_TEST_PROXY:-1}; PROXY_ADDR=10.0.2.2
+SEEDPY="import os, yaml; p='/etc/maluos/firstboot.yaml'; c=(yaml.safe_load(open(p)) if os.path.exists(p) else None) or {}; k=c.setdefault('components', {}).setdefault('maludb-os-core', {})"
+[ "$BOOT_TEST_APPS" = 1 ] || SEEDPY="$SEEDPY; k['apps']={'install': []}"
+case "$(basename "$IMG")" in *server*) [ "$BOOT_TEST_PROXY" = 1 ] && SEEDPY="$SEEDPY; k['scheme']='https'; k['proxy_address']='$PROXY_ADDR'";; esac
+BOOTCMD="$BOOTCMD  - [python3, -c, \"$SEEDPY; open(p, 'w').write(yaml.safe_dump(c, sort_keys=False))\"]
+"
 cat > user-data <<UD
 #cloud-config
 hostname: maluos-test
@@ -271,6 +278,11 @@ sudo -n wg show estate 2>/dev/null | grep -q "peer: $FAKEPUB" && sudo -n wg show
 grep -qP '^100\.100\.0\.1\tsrv-node\.internal$' /etc/hosts && grep -qP '^100\.100\.0\.2\tfake\.internal$' /etc/hosts && getent hosts fake.internal | grep -q 100.100.0.2 && echo "  ok   the names: srv-node.internal and fake.internal resolve (the hosts block)" || { echo "  FAIL hosts block: $(grep -A3 'overlay begin' /etc/hosts)"; fail=1; }
 maluctl estate overlay status | grep -q 'interface:  estate  up  100.100.0.1/16  srv-node.internal  (hub)' && maluctl estate overlay peers | grep -q 'peer  fake' && echo "  ok   maluctl estate overlay status and peers" || { echo "  FAIL overlay status: $(maluctl estate overlay status 2>&1 | head -4)"; fail=1; }
 sudo -n -u maluos-estate maluctl estate report --json 2>/dev/null | python3 -c "import json,sys; r=json.load(sys.stdin); o=r['overlay']; assert o['configured'] and o['role']=='hub' and o['address']=='100.100.0.1' and o['peers'][0]['name']=='fake', o; print('  ok   the report carries the overlay (configured, hub, the peer)')" || { echo "  FAIL report overlay"; fail=1; }
+# the hub endpoint as a setting (docs/phase13-estate-behind-a-proxy.md, decision 2): released (the interface goes, the office has no hub), taken back (the service remakes it, the fake spoke peered, the names back)
+sudo -n maluctl estate overlay hub off | grep -q 'released: the estate has no hub' && ! ip link show estate >/dev/null 2>&1 && curl -fsS --max-time 5 http://127.0.0.1:18082/mock/overlay | python3 -c "import json,sys; o=json.load(sys.stdin); assert o['hub'] is None and o['hub_endpoint'] is None, o" && echo "  ok   maluctl estate overlay hub off: the role released at the office, the interface down" || { echo "  FAIL overlay hub off: $(sudo -n maluctl estate overlay hub off 2>&1 | tail -2); $(ip -br link show estate 2>&1); $(curl -s http://127.0.0.1:18082/mock/overlay | head -c 200)"; fail=1; }
+sudo -n maluctl estate overlay hub 127.0.0.1:51820 | grep -q 'this host is the hub at 127.0.0.1:51820' || { echo "  FAIL overlay hub claim: $(sudo -n maluctl estate overlay hub 127.0.0.1:51820 2>&1 | tail -2)"; fail=1; }
+for i in $(seq 1 30); do ip -br addr show estate 2>/dev/null | grep -q '100.100.0.1/16' && sudo -n wg show estate 2>/dev/null | grep -q "peer: $FAKEPUB" && grep -q 'fake.internal' /etc/hosts && break; sleep 2; done
+ip -br addr show estate 2>/dev/null | grep -q '100.100.0.1/16' && sudo -n wg show estate | grep -q 'listening port: 51820' && sudo -n wg show estate | grep -q "peer: $FAKEPUB" && grep -qP '^100\.100\.0\.2\tfake\.internal$' /etc/hosts && maluctl estate overlay status | grep -q 'srv-node.internal  (hub)' && echo "  ok   maluctl estate overlay hub HOST:PORT: the hub again; the service remade the interface, the fake spoke peered, the names back" || { echo "  FAIL overlay hub claim: $(ip -br addr show estate 2>&1); $(sudo -n wg show estate 2>&1 | head -4); $(sudo -n journalctl -u maluos-overlay --no-pager | tail -4)"; fail=1; }
 OVKEY=$(sudo -n maluctl gateway key issue --name ov-test --kind node 2>/dev/null)
 sudo -n maluctl gateway expose --bind overlay --port 11436 >/dev/null 2>&1 && sudo -n maluctl gateway reload >/dev/null 2>&1
 for i in $(seq 1 20); do curl -fsS --max-time 2 -H "Authorization: Bearer $OVKEY" http://100.100.0.1:11436/node/v1/health >/dev/null 2>&1 && break; sleep 1; done
@@ -366,6 +378,15 @@ if installed maluos-business-os && bos_on; then
 for p in maluos-business-os maludb-os-core; do dpkg-query -W -f='${Status}' $p 2>/dev/null | grep -q 'install ok installed' && echo "  ok   $p" || { echo "  FAIL $p"; fail=1; }; done
 bosdom=$(sudo -n python3 -c "import json;print(json.load(open('/var/lib/maluos/firstboot/done'))['components']['maludb-os-core'].get('domain',''))" 2>/dev/null)
 echo "  bos domain: ${bosdom:-?}"
+# the office's own names (docs/phase13-estate-behind-a-proxy.md, part 2): under https at the proxy's address in a marked block,
+# never on loopback; the summary says where they went
+bosscheme=$(sudo -n python3 -c "import json;print(json.load(open('/var/lib/maluos/firstboot/done'))['components']['maludb-os-core'].get('scheme',''))" 2>/dev/null)
+if [ "$bosscheme" = https ]; then
+grep -qP "^$PROXY_ADDR\tapp\.$bosdom$" /etc/hosts && grep -qP "^$PROXY_ADDR\tos\.$bosdom$" /etc/hosts && grep -qP "^$PROXY_ADDR\t$bosdom$" /etc/hosts && ! grep -qE "^(127\.0\.0\.1|::1).*[[:space:]](app|os|www)\.$bosdom([[:space:]]|$)" /etc/hosts && getent hosts app.$bosdom | grep -q "^$PROXY_ADDR " && echo "  ok   https: the office's names resolve to the proxy's address $PROXY_ADDR (the marked block), none on loopback" || { echo "  FAIL office names under https: $(grep -E "$bosdom|business-os names" /etc/hosts)"; fail=1; }
+sudo -n python3 -c "import json; h=json.load(open('/var/lib/maluos/firstboot/done'))['components']['maludb-os-core']['hosts']; assert h['mode']=='proxy $PROXY_ADDR' and h['address']=='$PROXY_ADDR', h" 2>/dev/null && echo "  ok   the summary records hosts: proxy $PROXY_ADDR" || { echo "  FAIL summary hosts: $(sudo -n python3 -c "import json; print(json.load(open('/var/lib/maluos/firstboot/done'))['components']['maludb-os-core'].get('hosts'))")"; fail=1; }
+else
+grep -qE "^127\.0\.0\.1 .*app\.$bosdom" /etc/hosts && ! grep -q 'business-os names begin' /etc/hosts && echo "  ok   http: the office's names on loopback, as before" || { echo "  FAIL office names under http: $(grep "$bosdom" /etc/hosts)"; fail=1; }
+fi
 for u in apache2 maludb-os-web maludb-os-records-mcp maludb-os-activity-mcp maludb-os-actions-mcp maludb-os-memory-mcp maludb-os-agent-runner maludb-os-activity-ingest.timer; do
   systemctl is-active --quiet $u && echo "  ok   $u active" || { echo "  FAIL $u: $(systemctl is-active $u)"; sudo -n journalctl -u $u --no-pager | tail -5; fail=1; }
 done

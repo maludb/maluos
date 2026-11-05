@@ -3,7 +3,8 @@
 block of firstboot.yaml normalised, the installer's command line, the install loop against a fake runner
 (markers, a failure that does not stop the next, a re-run that reconciles from the markers, the order),
 the office's DNS names from a fixture of two manifests, the domain from the first-boot state or the
-kernel's config, and `maluctl app names` through the plugin.
+kernel's config, `maluctl app names` through the plugin, and the office's names in /etc/hosts under https
+behind a proxy (the marked block at proxy_address, loopback lines cleared; nothing without an address).
 
   python3 tests/apps-test.py
 """
@@ -67,6 +68,62 @@ class Command(unittest.TestCase):
     def test_proposed(self):
         cmd = A.install_command("doccloud", "a@b.c", "b.c", "http", hire=False)
         self.assertNotIn("--hire-agents", cmd); self.assertNotIn("--ref", cmd); self.assertIn("--grant-standing-departments", cmd)
+        self.assertNotIn("--proxy-address", cmd)
+
+    def test_proxy_address_passed(self):
+        cmd = A.install_command("hr", "a@b.c", "b.c", "https", proxy_address="192.168.100.1")
+        self.assertEqual(cmd[-2:], ["--proxy-address", "192.168.100.1"])
+
+
+HOSTS = ("127.0.0.1\tlocalhost\n127.0.0.1 example.com www.example.com os.example.com app.example.com\n"
+         "127.0.0.1\thr.example.com\n::1 ip6-localhost ip6-loopback\n10.0.0.5 nas  # the NAS\n")
+NAMES = ["example.com", "www.example.com", "app.example.com", "os.example.com", "hr.example.com"]
+
+
+class Hosts(unittest.TestCase):
+    """The office's names in /etc/hosts (docs/phase13-estate-behind-a-proxy.md, part 2): under https at the proxy's
+    address in a marked block and off every loopback line; without an address, no line at all; under http untouched."""
+
+    def test_proxy_block_replaces_loopback(self):
+        new, changed = A.office_hosts(HOSTS, NAMES, "192.168.100.1")
+        self.assertTrue(changed)
+        self.assertEqual(new, "127.0.0.1\tlocalhost\n::1 ip6-localhost ip6-loopback\n10.0.0.5 nas  # the NAS\n"
+                              + A.HOSTS_BEGIN + "\n" + "".join(f"192.168.100.1\t{n}\n" for n in NAMES) + A.HOSTS_END + "\n")
+        self.assertEqual(A.office_hosts(new, NAMES, "192.168.100.1"), (new, False), "idempotent")
+
+    def test_block_follows_the_names_and_the_address(self):
+        new, _ = A.office_hosts(HOSTS, NAMES[:4], "192.168.100.1")
+        new2, changed = A.office_hosts(new, NAMES, "192.168.100.2")           # the applications' names join; the proxy moved
+        self.assertTrue(changed); self.assertEqual(new2.count(A.HOSTS_BEGIN), 1)
+        self.assertIn("192.168.100.2\thr.example.com\n", new2); self.assertNotIn("192.168.100.1", new2)
+
+    def test_no_address_writes_nothing_and_clears_loopback(self):
+        new, changed = A.office_hosts(HOSTS, NAMES, None)
+        self.assertTrue(changed)
+        self.assertEqual(new, "127.0.0.1\tlocalhost\n::1 ip6-localhost ip6-loopback\n10.0.0.5 nas  # the NAS\n")
+        self.assertNotIn(A.HOSTS_BEGIN, new)
+
+    def test_a_shared_loopback_line_keeps_its_other_names(self):
+        new, _ = A.office_hosts("127.0.0.1 localhost app.example.com printer\n", ["app.example.com"], "192.168.100.1")
+        self.assertTrue(new.startswith("127.0.0.1\tlocalhost printer\n"))
+
+    def test_http_keeps_loopback_and_drops_a_stale_block(self):
+        with_block, _ = A.office_hosts(HOSTS, NAMES, "192.168.100.1")
+        new, changed = A.office_hosts(with_block, [], None)
+        self.assertTrue(changed); self.assertNotIn(A.HOSTS_BEGIN, new); self.assertNotIn("192.168.100.1", new)
+        self.assertEqual(A.office_hosts(HOSTS, [], None), (HOSTS, False), "the http file is left alone")
+
+    def test_resolve_address(self):
+        self.assertEqual(A.resolve_address("192.168.100.1"), ("192.168.100.1", None))
+        self.assertEqual(A.resolve_address(" fd00::1 "), ("fd00::1", None))
+        self.assertEqual(A.resolve_address(None), (None, "absent")); self.assertEqual(A.resolve_address("  "), (None, "absent"))
+        self.assertIsNone(A.resolve_address("bad host")[0])
+        import socket
+        fake = lambda host, port: [(socket.AF_INET6, 0, 0, "", ("fd00::9", 0, 0, 0)), (socket.AF_INET, 0, 0, "", ("192.168.100.1", 0))]
+        self.assertEqual(A.resolve_address("proxy.lan", resolver=fake), ("192.168.100.1", None), "IPv4 first")
+        def fail(host, port):
+            raise OSError("no such host")
+        self.assertIsNone(A.resolve_address("proxy.lan", resolver=fail)[0])
 
 
 class FakeRun:

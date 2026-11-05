@@ -466,15 +466,19 @@ class FirstBoot(Screen):
     # --- the Business OS group: a box, and the kernel's four settings while it is ticked -----------
     def _build_bos(self, spec):
         """The server image carries the kernel package; the component ships off and this group turns it on
-        (firstboot.components.maludb-os-core: enabled, domain, scheme, admin_email, admin_name)."""
+        (firstboot.components.maludb-os-core: enabled, domain, scheme, proxy_address, admin_email, admin_name)."""
         spec = spec if isinstance(spec, dict) else ({"enabled": bool(spec)} if spec is not None else {})
         self.bos = Check("Provision the Business OS kernel on this server", state=bool(spec.get("enabled", False)))
         self.bos_domain = edit("Domain (names: <domain>, os.<domain>, app.<domain>): ", spec.get("domain", ""))
         self.sgroup, sitems = radios([("http", "http (a LAN; no TLS proxy in front)"), ("https", "https (a TLS proxy terminates in front)")],
                                      spec.get("scheme") or "http")
+        self.bos_proxy = edit("Proxy address, https only (the proxy as this server sees it, like 192.168.100.1): ", spec.get("proxy_address", ""))
         self.bos_email = edit("First super-admin's email: ", spec.get("admin_email", ""))
         self.bos_name = edit("First super-admin's name (optional): ", spec.get("admin_name", ""))
-        self.bos_fields = [self.bos_domain, text("  Scheme:")] + sitems + [self.bos_email, self.bos_name,
+        self.bos_fields = [self.bos_domain, text("  Scheme:")] + sitems + [self.bos_proxy,
+                           text("  (https: the office's names go to the proxy's address in /etc/hosts, never to loopback, where nothing "
+                                "serves https; blank: no line, and the office cannot reach its own names until DNS does it)", "dim"),
+                           self.bos_email, self.bos_name,
                            text("  (the super-admin's password is generated on the first boot and kept in "
                                 "/var/lib/maluos/secrets/business-os/admin-password)", "dim")]
         self.bos_hint = text("  (off: the kernel package stays installed and idle; tick the box to ask for the domain, "
@@ -496,8 +500,11 @@ class FirstBoot(Screen):
             return None
         if not self.bos.state:
             return {"enabled": False}
-        return {"enabled": True, "domain": self.bos_domain.edit_text.strip().lower(), "scheme": chosen(self.sgroup) or "http",
-                "admin_email": self.bos_email.edit_text.strip(), "admin_name": self.bos_name.edit_text.strip()}
+        raw = {"enabled": True, "domain": self.bos_domain.edit_text.strip().lower(), "scheme": chosen(self.sgroup) or "http",
+               "admin_email": self.bos_email.edit_text.strip(), "admin_name": self.bos_name.edit_text.strip()}
+        if self.bos_proxy.edit_text.strip():
+            raw["proxy_address"] = self.bos_proxy.edit_text.strip()
+        return raw
 
     def _raw(self):
         raw = {"tenant": self.tenant.edit_text.strip() or "maluos", "admin": {"principal": self.principal.edit_text.strip() or "human:admin"},

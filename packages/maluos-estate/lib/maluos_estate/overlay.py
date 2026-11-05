@@ -142,15 +142,33 @@ def iface_exists():
     return subprocess.run(["ip", "link", "show", IFACE], capture_output=True).returncode == 0
 
 
-def apply(d, priv):
-    """Make the interface match `d`; idempotent. Returns the peers configured."""
+def addresses():
+    """The IPv4 addresses on the interface (address/prefix), live; none in a dry run."""
+    if DRY:
+        return set()
+    out = set()
+    for line in sh(["ip", "-4", "-o", "addr", "show", "dev", IFACE], check=False).splitlines():
+        f = line.split()
+        if "inet" in f:
+            out.add(f[f.index("inet") + 1])
+    return out
+
+
+def apply(d, priv, was_hub=False):
+    """Make the interface match `d`; idempotent. Returns the peers configured. `was_hub`: this host held the hub role at
+    the last reconciliation (the hub moved, docs/phase13-estate-behind-a-proxy.md): its listen port is let go."""
     if not iface_exists():
         sh(["ip", "link", "add", IFACE, "type", "wireguard"])
     args = ["wg", "set", IFACE, "private-key", "/dev/stdin"]
     if d["role"] == "hub":
         args += ["listen-port", str(d["listen_port"])]
+    elif was_hub:
+        args += ["listen-port", "0"]                     # a spoke needs no fixed port; the hub's is given up
     sh(args, input=priv + "\n")
-    sh(["ip", "-4", "addr", "replace", f"{d['address']}/{d['prefix']}", "dev", IFACE])
+    want_addr = f"{d['address']}/{d['prefix']}"
+    sh(["ip", "-4", "addr", "replace", want_addr, "dev", IFACE])
+    for a in addresses() - {want_addr}:
+        sh(["ip", "-4", "addr", "del", a, "dev", IFACE], check=False)      # the hub's .0.1 when the role moved, a changed address
     sh(["ip", "link", "set", IFACE, "up"])
     want = {}
     if d["role"] == "hub":
@@ -247,6 +265,57 @@ def status():
     return st
 
 
+GRACE_S, STALE_S = 90, 180
+
+
+def reachability(st, now=None):
+    """What the handshakes say about the one thing the overlay needs from the network, one UDP port reaching the hub
+    (docs/phase13-estate-behind-a-proxy.md): None while there is nothing to say, else a sentence for `overlay status`
+    and the report. A spoke: no handshake with the hub GRACE_S after the tunnel came up, or none for STALE_S. The hub:
+    spokes peered and none of them has completed a handshake."""
+    if not st or not st.get("configured"):
+        return None
+    now = now or time.time()
+    try:
+        since = time.mktime(time.strptime(st.get("since") or st.get("ts"), "%Y-%m-%dT%H:%M:%SZ")) - time.timezone
+    except (TypeError, ValueError):
+        since = now
+    up_for = now - since
+    peers = st.get("peers") or []
+    fresh = [p for p in peers if p.get("last_handshake") and now - p["last_handshake"] < STALE_S]
+    if st.get("role") == "spoke":
+        hub = st.get("hub") or {}
+        ep = hub.get("endpoint") or "?"
+        host, _, port = ep.rpartition(":")
+        if fresh:
+            return None
+        if up_for < GRACE_S and not any(p.get("last_handshake") for p in peers):
+            return None
+        where = resolve_note(host)
+        return (f"no handshake with the hub at {ep}" + (f" for {int(now - max(p['last_handshake'] for p in peers if p.get('last_handshake')))} s" if any(p.get("last_handshake") for p in peers) else f" since the tunnel came up {int(up_for)} s ago")
+                + f"{where}: UDP {port or LISTEN_PORT} must reach the hub from here (a forward on its router, or its proxy's stream module; docs/phase13-estate-behind-a-proxy.md)")
+    if st.get("role") == "hub" and peers and not fresh and up_for >= GRACE_S:
+        return (f"{len(peers)} spoke(s) peered, none has completed a handshake" + (f" in the last {STALE_S} s" if any(p.get("last_handshake") for p in peers) else "")
+                + f": is UDP {st.get('listen_port') or LISTEN_PORT} forwarded to this host (the router, or the proxy's stream module)? docs/phase13-estate-behind-a-proxy.md")
+    return None
+
+
+def resolve_note(host):
+    """' (HOST resolves to A)' or ' (HOST does not resolve)' for an endpoint's host; '' for an address literal."""
+    import ipaddress, socket
+    if not host:
+        return ""
+    try:
+        ipaddress.ip_address(host); return ""
+    except ValueError:
+        pass
+    try:
+        a = sorted({i[4][0] for i in socket.getaddrinfo(host, None)})
+        return f" ({host} resolves to {', '.join(a[:2])})"
+    except OSError:
+        return f" ({host} does not resolve)"
+
+
 def hint():
     """A heartbeat said overlay_changed: ask the service to refresh now (any user; the directory is 1777)."""
     try:
@@ -270,8 +339,10 @@ def reconcile(kind, conf, tok, priv, answer=None):
                      "configured": False, "reason": "no hub yet" if (conf.get("overlay") or {}).get("address") else "no overlay for this host",
                      "peers": [], "names": [], "version": (answer or {}).get("version")})
         return None
-    had = bool(read_state() and (read_state() or {}).get("configured"))
-    want = apply(d, priv)
+    prev = read_state() or {}
+    had = bool(prev.get("configured"))
+    want = apply(d, priv, was_hub=had and prev.get("role") == "hub" and d["role"] != "hub")
+    since = prev.get("since") if had and prev.get("role") == d["role"] and prev.get("address") == d["address"] else C.utc()
     peers = [p for p in (d["peers"] or []) if p.get("public_key") in want]
     if d["role"] == "spoke":
         peers = [{"name": (d["hub"] or {}).get("name") or "hub", "address": (d["hub"] or {}).get("address"), "public_key": (d["hub"] or {}).get("public_key"), "endpoint": (d["hub"] or {}).get("endpoint")}]
@@ -279,7 +350,7 @@ def reconcile(kind, conf, tok, priv, answer=None):
     for p in peers:
         h = hs.get(p.get("public_key"))
         p["last_handshake"] = h[0] if h and h[0] else None
-    write_state({"ts": C.utc(), "role": d["role"], "address": d["address"], "prefix": d["prefix"], "name": d["name"], "listen_port": d["listen_port"],
+    write_state({"ts": C.utc(), "since": since, "role": d["role"], "address": d["address"], "prefix": d["prefix"], "name": d["name"], "listen_port": d["listen_port"],
                  "hub": d["hub"], "configured": True, "peers": peers, "names": d["names"], "version": d.get("version"), "interface": IFACE})
     if not had:
         gateway_reload()      # a gateway exposed with --bind overlay can bind now

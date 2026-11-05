@@ -227,6 +227,12 @@ def overlay_key(conf, tok, public_key, timeout=15):
     return http("POST", conf["url"].rstrip("/") + "/api/v1/estate/overlay/key", {"surface": SURFACE, "overlay_public_key": public_key}, token=tok, timeout=timeout)
 
 
+def overlay_hub(conf, tok, endpoint, timeout=15):
+    """POST .../estate/overlay/hub: this node takes the hub role with `endpoint` (host:port, as the spokes dial it) or, as the
+    hub already, changes it; None releases the role (docs/phase13-estate-behind-a-proxy.md, decision 2)."""
+    return http("POST", conf["url"].rstrip("/") + "/api/v1/estate/overlay/hub", {"surface": SURFACE, "endpoint": endpoint}, token=tok, timeout=timeout)
+
+
 def overlay_hint():
     """A heartbeat answer said overlay_changed: ask maluos-overlay to refresh now."""
     from maluos_estate import overlay as OV

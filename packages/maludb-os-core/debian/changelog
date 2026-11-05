@@ -1,3 +1,19 @@
+maludb-os-core (2026.11.05maluos1) resolute; urgency=medium
+
+  * Vendored at 8600c3d (branch estate/hub-and-proxy-address, the owner's to
+    merge): POST /api/v1/estate/overlay/hub (the hub endpoint as a setting:
+    claimed, moved, released), bin/app_install.php --proxy-address.
+  * The office's names under https (docs/phase13-estate-behind-a-proxy.md,
+    part 2): components.maludb-os-core.proxy_address, the proxy's address as
+    the office sees it; the component writes the four kernel names and every
+    installed application's name to it in a marked block of /etc/hosts and
+    takes them off every loopback line, where nothing serves https, or
+    writes no line and says so in the summary (hosts.mode) when the address
+    is absent; http keeps the names on loopback as before. The installer is
+    given --proxy-address. maludb_os_apps.office_hosts(), resolve_address().
+
+ -- Edward Honour <ed@maludb.org>  Thu, 05 Nov 2026 21:18:33 +0000
+
 maludb-os-core (2026.11.01maluos2) resolute; urgency=medium
 
   * The applications as a first-boot step (the maluos-apps proposal, phase 1):

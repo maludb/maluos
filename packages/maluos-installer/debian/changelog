@@ -1,3 +1,12 @@
+maluos-installer (0.3.6) resolute; urgency=medium
+
+  * The First boot screen's Business OS group asks for the proxy address
+    (https only: the proxy as the office sees it) beside the domain and the
+    scheme; the plan checks components.maludb-os-core.proxy_address is an
+    address or a host name (docs/phase13-estate-behind-a-proxy.md, part 2).
+
+ -- Edward Honour <ed@maludb.org>  Thu, 05 Nov 2026 21:18:33 +0000
+
 maluos-installer (0.3.5) resolute; urgency=medium
 
   * The First boot screen asks about the Business OS kernel on server media

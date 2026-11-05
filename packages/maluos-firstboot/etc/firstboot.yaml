@@ -66,6 +66,8 @@ components:
     enabled: false
     domain: maluos.local
     scheme: http
+    # proxy_address: 192.168.100.1    # https only: the proxy's address as this host sees it; the office's names go to
+    #                                 # it in /etc/hosts (never loopback, where nothing serves https); absent: no line
     admin_email: admin@maluos.local
     admin_name: Administrator
     # admin_password: change-me

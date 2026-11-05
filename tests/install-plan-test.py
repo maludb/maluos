@@ -103,7 +103,11 @@ class Schema(unittest.TestCase):
         self.assertIs(p["firstboot"]["components"]["maluos-gateway"], False)
         load(MINIMAL + "  firstboot: {components: {maludb-os-core: {enabled: false}}}\n")      # off needs nothing else
         load(MINIMAL + "  firstboot: {components: {maludb-os-core: {domain: x.local}}}\n")      # not enabled: the conffile's off stands
+        p = load(MINIMAL + "  firstboot: {components: {maludb-os-core: {enabled: true, domain: x.local, scheme: https, proxy_address: 192.168.100.1}}}\n")
+        self.assertEqual(p["firstboot"]["components"]["maludb-os-core"]["proxy_address"], "192.168.100.1")
+        load(MINIMAL + "  firstboot: {components: {maludb-os-core: {enabled: true, domain: x.local, scheme: https, proxy_address: proxy.lan}}}\n")
         for bad, msg in (("{enabled: true}", "domain is required"),
+                         ("{enabled: true, domain: x.local, scheme: https, proxy_address: 'not an address'}", "neither an address nor a host name"),
                          ("true", "domain is required"),
                          ("{enabled: true, domain: 'not a domain'}", "not a domain name"),
                          ("{enabled: true, domain: x.local, scheme: ftp}", "scheme must be http or https"),

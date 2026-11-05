@@ -1,3 +1,10 @@
+maluos-firstboot (0.1.16) resolute; urgency=medium
+
+  * The conffile documents components.maludb-os-core.proxy_address (https
+    only: where the office's names go in /etc/hosts; never loopback).
+
+ -- Edward Honour <ed@maludb.org>  Thu, 05 Nov 2026 21:18:33 +0000
+
 maluos-firstboot (0.1.15) resolute; urgency=medium
 
   * firstboot.yaml documents components.maludb-os-core.apps (install, ref,

@@ -203,7 +203,8 @@ def overlay():
         return None
     peers = [{"name": p.get("name"), "address": p.get("address"), "last_handshake": p.get("last_handshake")} for p in st.get("peers") or []]
     return {"configured": bool(st.get("configured")), "role": st.get("role"), "address": st.get("address"), "name": st.get("name"),
-            "hub": (st.get("hub") or {}).get("endpoint"), "peers": peers, "names": len(st.get("names") or []), "ts": st.get("ts"), "reason": st.get("reason")}
+            "hub": (st.get("hub") or {}).get("endpoint"), "peers": peers, "names": len(st.get("names") or []), "ts": st.get("ts"), "reason": st.get("reason"),
+            "warning": OV.reachability(st)}      # the one UDP port not reaching the hub (docs/phase13-estate-behind-a-proxy.md)
 
 
 def report():
@@ -260,4 +261,6 @@ def summary(rep):
     o = rep.get("overlay")
     if o:
         lines.append(f"overlay:  {o.get('address') or '-'} {o.get('name') or ''} {o.get('role') or ''}" + (f" hub {o['hub']}" if o.get("hub") else "") + f"  {len(o.get('peers') or [])} peer(s)" if o.get("configured") else f"overlay:  not configured ({o.get('reason') or '?'})")
+        if o.get("warning"):
+            lines.append(f"          warn: {o['warning']}")
     return "\n".join(lines)

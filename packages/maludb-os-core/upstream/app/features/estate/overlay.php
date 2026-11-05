@@ -5,8 +5,9 @@ declare(strict_types=1);
  * The overlay: the estate's own WireGuard network, the kernel half of Phase 13 slice 1b (maluos:
  * docs/phase13-slice1b-overlay.md; db/189). Every member (server, inference, desk) sends its WireGuard public
  * key at join or enroll and receives an address in the estate's range and a name (NAME.internal); the hub is the
- * coordinator's host, joined with --hub ENDPOINT; spokes keep one tunnel to the hub and reach each other through
- * it. The kernel allocates, keeps the public keys, and publishes the hub, the peers and the names; a version
+ * member every other member can reach on one UDP port (the coordinator's host, a GPU server, or the office behind a
+ * forward at its proxy), taken at join with --hub ENDPOINT or later with POST overlay/hub (maluos
+ * docs/phase13-estate-behind-a-proxy.md); spokes keep one tunnel to the hub and reach each other through it. The kernel allocates, keeps the public keys, and publishes the hub, the peers and the names; a version
  * bumped on every change tells heartbeating members to refresh at once (overlay_changed).
  */
 require_once dirname(__DIR__, 2) . '/features/estate/desks.php';
@@ -113,6 +114,49 @@ function overlay_set_hub(PDO $pdo, int $locationId, string $endpoint): bool
     $h = overlay_hub($pdo);
     if ($h !== null && $h['id'] !== $locationId) { return false; }
     $pdo->prepare('UPDATE estate_overlay SET hub_location_id = :id, hub_endpoint = :e, updated_at = now() WHERE id = 1')->execute(['id' => $locationId, 'e' => $endpoint]);
+    return true;
+}
+
+/**
+ * The hub endpoint as a setting of the running estate (maluos docs/phase13-estate-behind-a-proxy.md, decision 2): the
+ * member $locationId takes the hub role with $endpoint, or, as the hub already, changes its endpoint. The hub is
+ * whichever member can be reached on one UDP port: the coordinator's host, a GPU server, or the office behind a
+ * forward at its proxy. It takes the range's first address; a spoke's former address is simply dropped.
+ * @return ?string an error code: invalid_endpoint, no_key (the member joined without an overlay key), hub_exists
+ */
+function overlay_claim_hub(PDO $pdo, int $locationId, string $endpoint): ?string
+{
+    if (!overlay_valid_endpoint($endpoint)) { return 'invalid_endpoint'; }
+    $st = $pdo->prepare('SELECT overlay_public_key FROM locations WHERE id = :id');
+    $st->execute(['id' => $locationId]);
+    $key = $st->fetchColumn();
+    if (!overlay_valid_key(is_string($key) ? $key : null)) { return 'no_key'; }
+    if (!overlay_set_hub($pdo, $locationId, $endpoint)) { return 'hub_exists'; }
+    overlay_allocate($pdo, $locationId, (string) $key, true);
+    overlay_mark_seen($pdo, $locationId);
+    return null;
+}
+
+/**
+ * The hub releases the role: the estate has no hub until a member claims one (every spoke's `overlay` is null
+ * meanwhile, as after a hub's leave). The member keeps its membership and key and moves to an ordinary address, so
+ * the next hub can take the range's first. False when $locationId is not the hub.
+ */
+function overlay_release_hub(PDO $pdo, int $locationId): bool
+{
+    $s = overlay_settings($pdo);
+    if ((int) ($s['hub_location_id'] ?? 0) !== $locationId) { return false; }
+    $pdo->exec('UPDATE estate_overlay SET hub_location_id = NULL, hub_endpoint = NULL, hub_public_key = NULL, updated_at = now() WHERE id = 1');
+    $st = $pdo->prepare('SELECT overlay_public_key FROM locations WHERE id = :id');
+    $st->execute(['id' => $locationId]);
+    $key = $st->fetchColumn();
+    $pdo->prepare('UPDATE locations SET overlay_address = NULL, updated_at = now() WHERE id = :id')->execute(['id' => $locationId]);
+    if (overlay_valid_key(is_string($key) ? $key : null)) {
+        overlay_allocate($pdo, $locationId, (string) $key, false);      // bumps the version
+    } else {
+        overlay_bump($pdo);
+    }
+    overlay_mark_seen($pdo, $locationId);
     return true;
 }
 
