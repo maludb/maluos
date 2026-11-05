@@ -8,6 +8,7 @@ tests/install-screens-test.py (a pty on the build host) and tests/live-install-t
 (the QEMU serial console, through the autologin shell).
 
   screens_driver.py --serial SOCKET --log FILE --disk vda --key FILE [--password maluos] [--sudo] [--no-change] [--telemetry] [--echo]
+                    [--business-os DOMAIN]   tick the Business OS box on the First boot screen (server media), http, admin@DOMAIN
 """
 import os, re, select, socket, sys, time
 
@@ -70,9 +71,11 @@ class Terminal:
 
 
 def drive(term, disk, key, login="maluos", password="maluos", fullname="MaluOS Test", telemetry=False,
-          password_auth=True, change_required=True, sudo=False, screen_timeout=300):
+          password_auth=True, change_required=True, sudo=False, screen_timeout=300, business_os=None):
     """Answer the nine screens so the plan equals the medium's unattended plan (plus the key and the disk).
-    With sudo=True the driver first starts the installer from a shell prompt on the terminal."""
+    With sudo=True the driver first starts the installer from a shell prompt on the terminal.
+    business_os={"domain", "scheme", "admin_email", "admin_name"} ticks the First boot screen's Business OS
+    box (server media) and fills its fields; None leaves the kernel off, as the screen and firstboot.yaml ship."""
     if sudo:
         term.send(ENTER); term.settle(1.0)
         term.expect(r"\$ ", timeout=screen_timeout)
@@ -97,7 +100,19 @@ def drive(term, disk, key, login="maluos", password="maluos", fullname="MaluOS T
         term.send(SPACE)                          # "The password must be changed at the first login"
     term.settle(); term.send(ENTER)
     term.expect(r"Components \(6/9\)", timeout=60); term.settle(); term.send(ENTER)
-    term.expect(r"First boot \(7/9\)", timeout=60); term.settle(); term.send(ENTER)
+    term.expect(r"First boot \(7/9\)", timeout=60); term.settle()
+    if business_os:
+        # tenant, principal, the three enrolment radios, address, code, name, the cloud-init box: then the Business OS box
+        term.send(DOWN * 9); term.send(SPACE)
+        term.send(DOWN); term.type(business_os["domain"])                       # the fields appear under the ticked box
+        term.send(DOWN)                                                         # the scheme: http is on
+        if business_os.get("scheme", "http") == "https":
+            term.send(DOWN); term.send(SPACE); term.send(DOWN)
+        else:
+            term.send(DOWN); term.send(DOWN)
+        term.type(business_os["admin_email"])
+        term.send(DOWN); term.type(business_os.get("admin_name", ""))
+    term.settle(); term.send(ENTER)
     term.expect(r"Help improve MaluOS \(8/9\)", timeout=60); term.settle()
     if not telemetry:
         term.send(DOWN); term.send(SPACE)
@@ -106,7 +121,7 @@ def drive(term, disk, key, login="maluos", password="maluos", fullname="MaluOS T
 
 
 def main(argv):
-    opts = {"--serial": None, "--log": None, "--disk": "vda", "--key": None, "--password": "maluos", "--login": "maluos"}
+    opts = {"--serial": None, "--log": None, "--disk": "vda", "--key": None, "--password": "maluos", "--login": "maluos", "--business-os": None}
     flags = set()
     it = iter(argv)
     for a in it:
@@ -130,8 +145,9 @@ def main(argv):
     log = open(opts["--log"], "ab", buffering=0) if opts["--log"] else None
     term = Terminal(s.fileno(), s.sendall, log=log, echo="--echo" in flags)
     try:
+        bos = {"domain": opts["--business-os"], "scheme": "http", "admin_email": f"admin@{opts['--business-os']}", "admin_name": "Administrator"} if opts["--business-os"] else None
         drive(term, opts["--disk"], key, login=opts["--login"], password=opts["--password"], telemetry="--telemetry" in flags,
-              change_required="--no-change" not in flags, sudo="--sudo" in flags, screen_timeout=900)
+              change_required="--no-change" not in flags, sudo="--sudo" in flags, screen_timeout=900, business_os=bos)
         print("driver: the screens are answered; the install is running", flush=True)
         term.expect(r"Installation complete", timeout=5400); term.settle(1.0); term.send(ENTER)
         term.expect(r"maluos-install: finished \((reboot|poweroff|none|shell)\)", timeout=120)

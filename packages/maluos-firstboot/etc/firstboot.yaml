@@ -52,12 +52,18 @@ components:
     # tcp: {enabled: true, host: overlay, port: 11437}
   maludb-api:
     enabled: true
-  # The Business OS kernel (package maludb-os-core). Names: <domain>, os.<domain>,
-  # app.<domain>, one per application later. Use http on a LAN, https behind a
-  # TLS proxy. The first super-admin's password is generated unless given and
-  # kept in /var/lib/maluos/secrets/business-os/admin-password.
+  # The Business OS kernel (package maludb-os-core). Off by default: the server
+  # image carries the package, but a kernel for a domain nobody chose is not
+  # wanted on every server. The installer's First boot screen (the "Business
+  # OS" group) or the install plan (firstboot.components.maludb-os-core) turns
+  # it on with the domain, the scheme and the first super-admin; so does
+  # editing this file before the first boot, or `sudo maluctl provision`
+  # after it. Names: <domain>, os.<domain>, app.<domain>, one per application
+  # later. Use http on a LAN, https behind a TLS proxy. The first super-admin's
+  # password is generated unless given and kept in
+  # /var/lib/maluos/secrets/business-os/admin-password.
   maludb-os-core:
-    enabled: true
+    enabled: false
     domain: maluos.local
     scheme: http
     admin_email: admin@maluos.local

@@ -281,11 +281,43 @@ def semantic_errors(plan):
         errs.append("firstboot.enroll.url is required with firstboot.enroll.kind")
     if fb["enroll"]["kind"] and not fb["enroll"]["code"]:
         errs.append("firstboot.enroll.code is required with firstboot.enroll.kind")
+    errs += component_errors(fb["components"] or {})
     img = plan["source"]["image"]
     if "://" in img:
         errs.append("source.image from a URL is not supported yet (the key is reserved)")
     elif "/" in img:
         errs.append("source.image is a name under /maluos/images/, not a path")
+    return errs
+
+
+BOS = "maludb-os-core"
+
+
+def component_errors(comps):
+    """firstboot.components: a mapping (enabled and the component's own keys) or a bool per component, passed
+    through to firstboot.yaml. The Business OS kernel ships off (reconciliation R5); a plan that turns it on
+    names the domain, and its scheme and email are checked when given."""
+    errs = []
+    if not isinstance(comps, dict):
+        return [f"firstboot.components must be a mapping of component name to its settings, got {comps!r}"]
+    for name, spec in comps.items():
+        if not isinstance(spec, (dict, bool)):
+            errs.append(f"firstboot.components.{name} must be a mapping (enabled, the component's keys) or true/false, got {spec!r}")
+    spec = comps.get(BOS)
+    if spec is True:
+        spec = {"enabled": True}
+    if isinstance(spec, dict) and spec.get("enabled") is True:
+        where = f"firstboot.components.{BOS}"
+        domain = spec.get("domain") or ""
+        if not domain:
+            errs.append(f"{where}.domain is required when the kernel is enabled (the names <domain>, os.<domain> and app.<domain> are made from it)")
+        elif not re.match(r"^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?)*$", str(domain).lower()):
+            errs.append(f"{where}.domain {domain!r} is not a domain name")
+        if spec.get("scheme") not in (None, "", "http", "https"):
+            errs.append(f"{where}.scheme must be http or https, got {spec.get('scheme')!r}")
+        email = spec.get("admin_email") or ""
+        if email and not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", str(email)):
+            errs.append(f"{where}.admin_email {email!r} is not an email address")
     return errs
 
 

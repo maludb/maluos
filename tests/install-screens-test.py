@@ -1,7 +1,8 @@
 #!/usr/bin/python3
 """The installer's screens driven in a pty (Phase 11 slice 3), no root, no VM: the wizard runs with
 --no-hardware and a staged medium, the driver answers the nine screens as tests/lib/screens_driver.py
-does on the serial console, and the saved plan is compared with the medium's unattended plan.
+does on the serial console (the First boot screen's Business OS box ticked and filled as the unattended
+plan asks for the kernel), and the saved plan is compared with the medium's unattended plan.
 
   python3 tests/install-screens-test.py [--keep]
 """
@@ -42,8 +43,10 @@ def main(argv):
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
     term = D.Terminal(fd, lambda b: os.write(fd, b), log=log, echo=True)
     rc = 0
+    unattended = yaml.safe_load(open(os.path.join(ROOT, "iso/plans/server-unattended.yaml")))["maluos-install"]
+    bos = (unattended["firstboot"].get("components") or {}).get("maludb-os-core")     # the kernel, asked for as the plan does
     try:
-        D.drive(term, "sda", KEY, screen_timeout=60)
+        D.drive(term, "sda", KEY, screen_timeout=60, business_os=bos)
         term.expect(r"maluos-install: the plan is saved at", timeout=60)
     except (TimeoutError, EOFError) as e:
         print(f"FAIL: {e}"); rc = 1
@@ -56,7 +59,7 @@ def main(argv):
         print("FAIL: no plan was saved"); rc = 1
     if rc == 0:
         saved = yaml.safe_load(open(out))["maluos-install"]
-        expected = yaml.safe_load(open(os.path.join(ROOT, "iso/plans/server-unattended.yaml")))["maluos-install"]
+        expected = unattended
         expected["storage"]["disk"] = "/dev/sda"
         expected["identity"]["user"]["ssh_keys"] = [KEY]
         expected["identity"]["user"]["fullname"] = "MaluOS Test"
@@ -78,6 +81,12 @@ def main(argv):
                 print(f"FAIL: section {section} differs:\n   screens:    {saved.get(section)}\n   unattended: {exp[section]}"); rc = 1
             else:
                 print(f"  ok   {section} matches the unattended plan")
+    if rc == 0:
+        got = saved["firstboot"].get("components", {}).get("maludb-os-core") or {}
+        if bos and got.get("enabled") is True and got.get("domain") == bos["domain"] and got.get("admin_email") == bos["admin_email"]:
+            print(f"  ok   the Business OS box ticked: the kernel for {got['domain']} ({got.get('scheme')}), {got['admin_email']}")
+        else:
+            print(f"FAIL: the Business OS group did not reach the plan: {got}"); rc = 1
     if rc == 0:
         print("PASS: the screens build the medium's unattended plan")
     else:

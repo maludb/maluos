@@ -1,12 +1,5 @@
 maluos-firstboot (0.1.14) resolute; urgency=medium
 
-  * firstboot.yaml documents components.maludb-os-core.apps (install, ref,
-    propose_agents), the applications the kernel's component installs at
-    first boot (the maluos-apps proposal, phase 1); `maluctl status` prints
-    a component's apps line (installed, failed) and the names it reports.
-
- -- Edward Honour <ed@maludb.org>  Thu, 05 Nov 2026 12:00:00 +0000
-
 maluos-firstboot (0.1.13) resolute; urgency=medium
 
   * Phase 13 slice 4: firstboot.yaml documents the maluos-memory component

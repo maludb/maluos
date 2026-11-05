@@ -105,6 +105,22 @@ the decisions above:
 | the pty test | PASS: the nine screens driven, the plan equal to the unattended plan, the hash verified |
 | server BIOS, the screens on the serial console | PASS, 45 ok / 0 FAIL on the re-verification: the driver started `sudo maluos-install` from the autologin shell, answered the nine screens with the typed disk confirmation, pressed Install; the install finished in about ten minutes under the progress screen and Enter on the done screen rebooted; the disk booted, first boot provisioned, and the plan the engine left in /var/log/maluos-install/ has the answers typed. The one check that failed looked for the unattended plan's serial console on the kernel command line, which the screens do not ask for (no bootloader screen); the check now expects the defaults in the screens round. |
 
+Status 2026-11-05 (installer 0.3.5, the handbook's reconciliation R5): the
+First boot screen on server media has a "Business OS" group: the box
+"Provision the Business OS kernel on this server" and, while it is ticked,
+the domain, the scheme (http or https), the first super-admin's email and
+optional name, written to `firstboot.components.maludb-os-core` (`enabled`,
+`domain`, `scheme`, `admin_email`, `admin_name`); a domain and an email are
+required when ticked; a plan given with `--screens --plan` prefills the
+group; desktop media do not show it. The kernel's component ships off in
+maluos-firstboot 0.1.14's firstboot.yaml, so a server installed from the
+screens without ticking the box no longer gets a kernel for maluos.local.
+The driver ticks the box and fills the fields (`business_os=`,
+`--business-os DOMAIN`), the medium's unattended server plan asks for the
+kernel explicitly, and the pty test passes with the saved plan equal to it
+section by section; the plan test covers the new checks (40 tests). The
+image boot test on the dev host is the owner's to run before the merge.
+
 The screens ask nothing about the bootloader, so an install from the screens
 gets grub's defaults (no serial console, timeout 3 on the server); the
 unattended plan adds `console=ttyS0` for headless servers. A bootloader

@@ -92,6 +92,27 @@ class Schema(unittest.TestCase):
             load(MINIMAL + "  network: {wifi: {ssid: home, password: x}}\n")
         self.assertIn("not supported yet", str(cm.exception))
 
+    def test_firstboot_components(self):
+        """firstboot.components passes through (a mapping or a bool per component); the Business OS kernel
+        ships off and a plan that turns it on names the domain (reconciliation R5)."""
+        p = load(MINIMAL)
+        self.assertEqual(p["firstboot"]["components"], {})
+        bos = "{enabled: true, domain: office.example.com, scheme: https, admin_email: ed@example.com, admin_name: Ed}"
+        p = load(MINIMAL + "  firstboot: {components: {maludb-os-core: " + bos + ", maluos-gateway: false}}\n")
+        self.assertEqual(p["firstboot"]["components"]["maludb-os-core"]["domain"], "office.example.com")
+        self.assertIs(p["firstboot"]["components"]["maluos-gateway"], False)
+        load(MINIMAL + "  firstboot: {components: {maludb-os-core: {enabled: false}}}\n")      # off needs nothing else
+        load(MINIMAL + "  firstboot: {components: {maludb-os-core: {domain: x.local}}}\n")      # not enabled: the conffile's off stands
+        for bad, msg in (("{enabled: true}", "domain is required"),
+                         ("true", "domain is required"),
+                         ("{enabled: true, domain: 'not a domain'}", "not a domain name"),
+                         ("{enabled: true, domain: x.local, scheme: ftp}", "scheme must be http or https"),
+                         ("{enabled: true, domain: x.local, admin_email: nobody}", "not an email address"),
+                         ("[a, b]", "must be a mapping")):
+            with self.assertRaises(P.PlanError, msg=bad) as cm:
+                load(MINIMAL + "  firstboot: {components: {maludb-os-core: " + bad + "}}\n")
+            self.assertIn(msg, str(cm.exception), bad)
+
     def test_json_plan(self):
         doc = {"maluos-install": {"version": 1, "storage": {"disk": "first", "erase": True},
                                   "identity": {"user": {"name": "ed", "ssh_keys": ["ssh-ed25519 AAAA ed"]}}}}

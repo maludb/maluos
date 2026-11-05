@@ -124,6 +124,7 @@ bos-init with PostgreSQL, the engine and the MaluDB API local:
 7. the first super-admin (password generated unless configured), the first
    model registry row, the cron jobs, the kernel's Installer and JEV agents.
 
+
 Status 2026-10-18: boot test PASS (44 checks) on the cloud image under
 QEMU/TCG: first boot provisions the kernel end to end (memory database,
 API token, kernel database with all 184 migrations, Apache vhosts, the

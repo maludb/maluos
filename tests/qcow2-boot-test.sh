@@ -19,7 +19,18 @@ ss -ltn | grep -q ":$SSHPORT " && { echo "port $SSHPORT busy" >&2; exit 1; }
 # shell extension and the session service run as a real user (Phase 12 slice 2).
 # The session must not idle-lock during the long server checks: GNOME disables
 # extensions on the lock screen. A dconf system database set before gdm starts.
+
+# The server image carries the Business OS kernel but its component ships off (firstboot.yaml
+# components.maludb-os-core enabled: false; the installer's First boot screen or the plan turns it
+# on). The boot test asks for it the way a plan would, before maluos-firstboot runs (After=cloud-config).
+BOS_SEED=""; BOS_SEED_ON=${BOS_SEED_ON:-1}
+case "$(basename "$IMG")" in *server*) [ "$BOS_SEED_ON" = 1 ] && BOS_SEED="bootcmd:
+  - [sh, -c, \"sed -i '/^  maludb-os-core:/,/^  [a-z]/ s/^    enabled: false/    enabled: true/' /etc/maluos/firstboot.yaml\"]
+";; esac
+DESKTOP_SEED=""
+=======
 DESKTOP_SEED=""; BOOTCMD=""
+
 case "$(basename "$IMG")" in *desktop*) DESKTOP_SEED="write_files:
   - path: /etc/gdm3/custom.conf
     content: |
@@ -45,8 +56,7 @@ users:
     shell: /bin/bash
     ssh_authorized_keys:
       - $(cat testkey.pub)
-$DESKTOP_SEED${BOOTCMD:+bootcmd:
-$BOOTCMD}
+
 UD
 printf 'instance-id: maluos-test-%s\nlocal-hostname: maluos-test\n' "$(date +%s)" > meta-data
 cloud-localds seed.iso user-data meta-data
@@ -353,8 +363,11 @@ atok=$(sudo -n maluctl token api 2>/dev/null); [ "${atok#malu_}" != "$atok" ] &&
 curl -fsS --max-time 10 -H "Authorization: Bearer $atok" http://127.0.0.1:8000/v1/subjects >/dev/null && echo "  ok   API /v1/subjects with token (PostgreSQL 18 query path)" || { echo "  FAIL API /v1/subjects"; sudo -n journalctl -u maludb-api --no-pager | tail -5; fail=1; }
 systemctl is-active --quiet maludb-embedding-worker.timer && echo "  ok   embedding sweep timer" || echo "  warn embedding sweep timer not active"
 else echo "  (no maluos-api in this image)"; fi
-# --- Business OS kernel component (when the image carries it)
-if installed maluos-business-os; then
+# --- Business OS kernel component (when the image carries it and the component is on: firstboot.yaml
+# components.maludb-os-core.enabled, off as shipped, on from the installer's First boot screen, a plan,
+# or this test's seed; a disabled component is skipped by the engine before it is loaded)
+bos_on() { sudo -n python3 -c "import yaml,sys; c=yaml.safe_load(open('/etc/maluos/firstboot.yaml')) or {}; sys.exit(0 if (c.get('components') or {}).get('maludb-os-core', {}).get('enabled', True) is not False else 1)" 2>/dev/null; }
+if installed maluos-business-os && bos_on; then
 for p in maluos-business-os maludb-os-core; do dpkg-query -W -f='${Status}' $p 2>/dev/null | grep -q 'install ok installed' && echo "  ok   $p" || { echo "  FAIL $p"; fail=1; }; done
 bosdom=$(sudo -n python3 -c "import json;print(json.load(open('/var/lib/maluos/firstboot/done'))['components']['maludb-os-core'].get('domain',''))" 2>/dev/null)
 echo "  bos domain: ${bosdom:-?}"
@@ -421,6 +434,10 @@ dcall GET "$desktok" /api/v1/desks/me | grep -q '"name":"Boot test desk"' && ech
 [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -H "Host: app.$bosdom" -H "Authorization: Bearer $desktok" http://127.0.0.1/api/v1/me)" = 401 ] && echo "  ok   the desk token is refused on /api/v1/me (one scope per surface)" || { echo "  FAIL desk token accepted on /api/v1/me"; fail=1; }
 dcall POST "$desktok" /api/v1/desks/leave '{"surface":1}' | grep -q '"status":"retired"' && [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -H "Host: app.$bosdom" -H "Authorization: Bearer $desktok" http://127.0.0.1/api/v1/desks/me)" = 410 ] && echo "  ok   desks/leave retired the desk; its token answers 410" || { echo "  FAIL desks/leave"; fail=1; }
 sudo -n crontab -u www-data -l 2>/dev/null | grep -q desk_presence && echo "  ok   the desk presence job is in www-data's crontab" || { echo "  FAIL desk_presence cron missing"; fail=1; }
+elif installed maluos-business-os; then
+echo "  (the kernel component is off in firstboot.yaml: nothing provisioned, as shipped)"
+sudo -n python3 -c "import json,sys; d=json.load(open('/var/lib/maluos/firstboot/done')); sys.exit(1 if 'maludb-os-core' in (d.get('components') or {}) else 0)" 2>/dev/null && echo "  ok   kernel component skipped: not in the done file" || { echo "  FAIL the done file records maludb-os-core although the component is off"; fail=1; }
+! systemctl is-active --quiet maludb-os-web && ! sudo -n test -d /var/lib/maluos/secrets/business-os && echo "  ok   no kernel unit running, no kernel secrets" || { echo "  FAIL kernel traces with the component off"; fail=1; }
 else echo "  (no maluos-business-os in this image)"; fi
 # --- the desktop (Phase 12): GNOME on gdm, the MaluOS identity on the login screen, no snaps
 if installed maluos-desktop; then
