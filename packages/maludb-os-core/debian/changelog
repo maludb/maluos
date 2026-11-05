@@ -1,3 +1,20 @@
+maludb-os-core (2026.11.01maluos2) resolute; urgency=medium
+
+  * The applications as a first-boot step (the maluos-apps proposal, phase 1):
+    component 60-maludb-os-core runs the kernel's own installer
+    (bin/app_install.php apply, --by/--domain/--scheme from the office's
+    configuration, --hire-agents and --grant-standing-departments) for every
+    key in components.maludb-os-core.apps.install, in order, HR first by
+    default (hr, projects, helpdesk, spaces); a marker per application under
+    /var/lib/maluos/business-os/apps so a re-run reconciles rather than
+    repeats; a failing application is logged (its output beside the marker)
+    and the next continues; the summary carries apps and the office's names.
+  * `maluctl app names` (plugin maluctl.d/app.py, library maludb_os_apps.py):
+    the DNS names the office needs, one per line, from the first-boot state
+    and the installed applications' manifests.
+
+ -- Edward Honour <ed@maludb.org>  Thu, 05 Nov 2026 12:00:00 +0000
+
 maludb-os-core (2026.11.01maluos1) resolute; urgency=medium
 
   * Kernel re-vendored at ab00263 (2026-11-01): db/193, the Memory MCP for

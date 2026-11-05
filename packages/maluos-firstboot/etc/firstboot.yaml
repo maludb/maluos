@@ -65,3 +65,12 @@ components:
     # admin_password: change-me
     # anthropic_api_key: ...
     # openrouter_api_key: ...
+    # The applications installed beside the kernel at first boot (package maluos-apps carries
+    # the host tools), in order, by the kernel's own installer from github.com/maludb/maludb-os-<key>.
+    # Absent: the four defaults. install: [] installs none. A failed application is recorded in
+    # `maluctl status`; `sudo maluctl provision --force` finishes it. `maluctl app names` lists
+    # the DNS names the office needs (the proxy's operator pastes them).
+    # apps:
+    #   install: [hr, projects, helpdesk, spaces]   # add doccloud and others on request
+    #   ref: {}                                     # per key, a git tag or branch; default: the default branch
+    #   propose_agents: []                          # keys whose agents are proposed rather than hired
