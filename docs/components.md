@@ -27,8 +27,9 @@ Modules must be idempotent: `maluctl provision --force` re-runs them all.
 ## Delivery paths
 
 - **Image profile**: image/profiles/server.pkgs lists what the server rootfs
-  carries (today: maluos-server and maluos-api). A profile per variant, or a
-  squashfs layer per component in the ISO catalogue, gives install-time choice.
+  carries (today: maluos-server, maluos-api, maluos-business-os and
+  maluos-apps). A profile per variant, or a squashfs layer per component in
+  the ISO catalogue, gives install-time choice.
 - **cloud-init / autoinstall**: write /etc/maluos/firstboot.yaml with the
   components wanted; packages already in the image are provisioned, absent
   ones are installed from the on-media repository first (planned).
@@ -123,35 +124,6 @@ bos-init with PostgreSQL, the engine and the MaluDB API local:
 7. the first super-admin (password generated unless configured), the first
    model registry row, the cron jobs, the kernel's Installer and JEV agents.
 
-Settings in firstboot.yaml under components.maludb-os-core: enabled, domain,
-scheme, admin_email, admin_name, admin_password, model_key, model_name,
-model_provider_id, anthropic_api_key, openrouter_api_key, malumail_api_key.
-
-**Off by default** (maluos-firstboot 0.1.14, installer 0.3.5; the handbook's
-reconciliation R5, 2026-11-05). Every server image carries the package
-(image/profiles/server.pkgs: maluos-business-os), but the shipped conffile
-says `enabled: false`: a kernel for a domain nobody chose is not wanted on
-every server, and before this a server installed from the screens got one
-for maluos.local. The first-boot engine skips a disabled component before
-loading it (maluos_provision.run_components), so nothing of the kernel is
-provisioned: no databases, no secrets, no units enabled, no entry under
-`components` in /var/lib/maluos/firstboot/done. The package stays installed
-and idle. The kernel is turned on by one of:
-
-1. the installer's First boot screen on server media: the "Business OS"
-   group, the box "Provision the Business OS kernel on this server" and,
-   while it is ticked, the domain, the scheme (http or https), the first
-   super-admin's email and optional name; a domain and an email are
-   required; the answers go to the plan's
-   `firstboot.components.maludb-os-core` (docs/install-plan.md);
-2. an install plan with the same mapping (the medium's unattended server
-   plan asks for it, for maluos.local on http, so the boot test keeps its
-   kernel checks); a plan that enables the kernel must name the domain;
-3. before the first boot, editing /etc/maluos/firstboot.yaml (cloud-init's
-   write_files or a bootcmd: tests/qcow2-boot-test.sh does the latter for
-   the server image); after it, setting `enabled: true` with the domain and
-   running `sudo maluctl provision`, which is idempotent and runs the
-   component then.
 
 Status 2026-10-18: boot test PASS (44 checks) on the cloud image under
 QEMU/TCG: first boot provisions the kernel end to end (memory database,
@@ -163,10 +135,59 @@ emulation provisioning takes about 25 minutes (the first-boot unit allows
 two hours; provisioning resumes on the next boot if interrupted); under KVM
 it is a couple of minutes.
 
-Not yet in this component: the default applications (Help Desk, Spaces,
-HR, Projects) and the integration plugin, which the kernel installs from
-git; the Claude CLI for the agent harness; Hermes. These follow as the next
-slice, vendored for offline installs.
+8. the applications (the maluos-apps proposal, phase 1; 2026-11-05): for
+   every key in `apps.install` (default `[hr, projects, helpdesk, spaces]`,
+   HR first because it is the one application that writes the directory;
+   `[]` installs none), the kernel's own installer, `bin/app_install.php
+   apply https://github.com/maludb/maludb-os-<key>.git --by <admin_email>
+   --domain <domain> --scheme <scheme> --grant-standing-departments`, plus
+   `--hire-agents` unless the key is in `apps.propose_agents` and `--ref`
+   when `apps.ref` names one, as root from /var/www, in the listed order.
+   A marker per application under /var/lib/maluos/business-os/apps (the
+   installer's output beside it as `<key>.log`) means a re-run reconciles
+   rather than repeats; a failing application is logged and the next
+   continues. The step waits for DNS and HTTPS to github.com first (the
+   clone needs both; a first boot can reach network-online before a route
+   is up). The summary gains `apps: {installed, failed, errors}` and
+   `names`, the DNS names the office needs, which `maluctl status` prints.
+   The host tools the builds need come from the metapackage maluos-apps.
+
+Settings in firstboot.yaml under components.maludb-os-core: domain, scheme,
+admin_email, admin_name, admin_password, model_key, model_name,
+model_provider_id, anthropic_api_key, openrouter_api_key, malumail_api_key,
+and `apps` with `install`, `ref` (key to git tag or branch) and
+`propose_agents` (the conffile's commented block shows the defaults).
+
+`maluctl app names` (a maluctl.d plugin shipped by maludb-os-core) prints
+the names the office needs, one per line: the bare domain, www, app, os,
+and `<vhost.label>.<domain>` for every application in /srv/apps whose
+maludb-os.json it finds; the domain from the first-boot state. The proxy's
+operator pastes them. `maluctl app add|update|status|list|remove` and the
+installer's First boot screen are phase 2 of the proposal; packaged
+applications (`maludb-os-<key>` debs, so an offline ISO installs an office
+with its applications) phase 3; `remove --purge` and the names in the
+estate's node report phase 4.
+
+Not yet in this component: the integration plugin; the Claude CLI for the
+agent harness; Hermes.
+
+### maluos-apps (seeds/apps.seed; the maluos-apps proposal, phase 1)
+
+A metapackage only: the host tools every Business OS application's build
+needs on top of maluos-business-os (composer, python3-venv, python3-pip,
+poppler-utils for DocCloud's pdftotext, unzip, git). In the server image
+beside maluos-business-os; on the medium's catalogue like every seed. The
+provisioning is the kernel component's step 8 above (components.maludb-os-core.apps);
+the applications are cloned from github.com/maludb/maludb-os-<key> at first
+boot, so an office needs the network then, until phase 3 packages them.
+
+Status 2026-11-05: built, unit-tested (tests/apps-test.py: the apps block,
+the install loop against a fake installer, the names from two manifests,
+the plugin). The acceptance checks in tests/qcow2-boot-test.sh run when the
+seed leaves the applications on (`BOOT_TEST_APPS=1`; CI's seed sets
+`apps.install: []`, since four clones and builds take long under TCG): on
+the owner's dev host, an office with hr, projects, helpdesk and spaces
+active after first boot and `maluctl app names` listing eight names.
 
 ### maluos-apple-t2 (seeds/apple-t2.seed; the Apple T2 round, docs/phase11-apple-t2.md)
 
@@ -248,5 +269,6 @@ overlay` puts the node API on the estate's network only.
 
 ## Planned
 
-- The default applications and the integration plugin as components.
+- The default applications as packages (maluos-apps phase 3), `maluctl app`
+  (phase 2) and the integration plugin as a component.
 - The ISO catalogue layers and the `maluctl component` selector.

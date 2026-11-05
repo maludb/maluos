@@ -5,6 +5,7 @@ ubuntu-server-minimal
 maluos-server
 maluos-api
 maluos-business-os
+maluos-apps
 linux-generic
 grub-pc-bin
 grub-efi-amd64-signed

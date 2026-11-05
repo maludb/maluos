@@ -1,15 +1,5 @@
 maluos-firstboot (0.1.14) resolute; urgency=medium
 
-  * firstboot.yaml ships the maludb-os-core component with enabled: false
-    (handbook reconciliation R5): the server image carries the Business OS
-    kernel, but a server installed from the screens provisioned one for
-    maluos.local that nobody asked for. The installer's First boot screen
-    or the plan (firstboot.components.maludb-os-core) turns it on with the
-    domain, the scheme and the first super-admin; the engine skips a
-    disabled component before loading it, as before.
-
- -- Edward Honour <ed@maludb.org>  Thu, 05 Nov 2026 09:00:00 +0000
-
 maluos-firstboot (0.1.13) resolute; urgency=medium
 
   * Phase 13 slice 4: firstboot.yaml documents the maluos-memory component

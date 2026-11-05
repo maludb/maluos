@@ -16,6 +16,8 @@ upstream/docs/deploy/bos-agent-exec           usr/sbin
 debian/bos-runner.sudoers                     etc/sudoers.d
 upstream/docs/deploy/php-99-business-os.ini   usr/share/maludb-os-core
 components/60-maludb-os-core.py               usr/lib/maluos/components
+lib/maludb_os_apps.py                         usr/lib/maluos
+lib/maluctl.d/app.py                          usr/lib/maluos/maluctl.d
 upstream/docs/deploy/maludb-os-web.service usr/lib/systemd/system
 upstream/docs/deploy/maludb-os-records-mcp.service usr/lib/systemd/system
 upstream/docs/deploy/maludb-os-activity-mcp.service usr/lib/systemd/system

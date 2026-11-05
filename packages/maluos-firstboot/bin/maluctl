@@ -53,6 +53,12 @@ def cmd_status(_):
         if "error" in r: print(f"component:   {name}  FAILED {r['error'][:80]}"); continue
         extra = f"  {r.get('url')}" if r.get("url") else ""
         print(f"component:   {name}  {'ok' if r.get('healthy', True) else 'unhealthy'}{extra}")
+        apps = r.get("apps")
+        if apps and (apps.get("installed") or apps.get("failed")):
+            print(f"apps:        {', '.join(apps.get('installed') or []) or '-'}"
+                  + (f"  FAILED {', '.join(apps['failed'])}" if apps.get("failed") else ""))
+        if r.get("names"):
+            print(f"names:       {' '.join(r['names'])}")
     en = st.get("enroll")
     if en:
         if en.get("ok"):

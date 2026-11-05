@@ -1,0 +1,13 @@
+# maluos-apps: the host tools every Business OS application's build needs, so
+# the kernel's installer (bin/app_install.php) can clone, build and register
+# an application at first boot (docs/components.md, the maluos-apps proposal).
+# In the server image beside maluos-business-os. The applications themselves
+# are cloned from github.com/maludb/maludb-os-<key> at first boot (phase 1);
+# packaged as maludb-os-<key> later (phase 3).
+maluos-business-os
+composer
+python3-venv
+python3-pip
+poppler-utils
+unzip
+git

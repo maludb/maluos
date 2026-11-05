@@ -1,3 +1,12 @@
+maluos-meta (0.2.17) resolute; urgency=medium
+
+  * New metapackage maluos-apps (seeds/apps.seed): the host tools the
+    Business OS applications' builds need (composer, python3-venv,
+    python3-pip, poppler-utils, unzip, git) on top of maluos-business-os;
+    in the server image beside it.
+
+ -- Edward Honour <ed@maludb.org>  Thu, 05 Nov 2026 12:00:00 +0000
+
 maluos-meta (0.2.16) resolute; urgency=medium
 
   * maluos-desktop carries maluos-fonts, the presentation and document fonts

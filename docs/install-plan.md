@@ -212,6 +212,36 @@ maluos-install:
   finish: {action: reboot}
 ```
 
+**An office: the server image with the Business OS kernel and its
+applications** (the component's keys pass through to firstboot.yaml;
+`apps.install` names the applications the kernel installs at first boot,
+in order, the four defaults when the key is absent, `[]` for none; the DNS
+names the office needs come from `maluctl app names` afterwards):
+
+```yaml
+maluos-install:
+  version: 1
+  source: {image: maluos-server}
+  locale: {language: en_GB.UTF-8, keyboard: {layout: gb}, timezone: Europe/London}
+  network: {mode: dhcp}
+  storage: {disk: first, erase: true, layout: lvm, root_size: 100G, encrypt: false}
+  identity:
+    hostname: office
+    user: {name: maluos, password: "$6$…", ssh_keys: ["url:https://github.com/maludb.keys"]}
+    ssh: {server: true, password_auth: false}
+  firstboot:
+    tenant: example
+    components:
+      maludb-os-core:
+        enabled: true
+        domain: example.com
+        scheme: https
+        admin_email: admin@example.com
+        apps: {install: [hr, projects, helpdesk, spaces, doccloud], propose_agents: [doccloud]}
+  telemetry: {send: false}
+  finish: {action: reboot}
+```
+
 **A desk for a person, installed over SSH and enrolled with the office:**
 
 ```yaml
