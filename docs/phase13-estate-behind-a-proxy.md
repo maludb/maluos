@@ -327,9 +327,9 @@ the conffile's commented `proxy_address`.
    the note recommends the GPU server when it has the port, because it
    leaves the proxy host untouched and the office a plain spoke.
 2. **The branch `estate/hub-and-proxy-address` in maludb-os-core** is
-   vendored here at 8600c3d but not pushed: the owner merges it (after
-   `bin/test_estate_overlay.php` on a kernel) and, as with db/188 to
-   db/193, the VENDORED ref is then `main`.
+   vendored here at 8600c3d but not pushed: its proof passed (62 checks,
+   Status); the owner says when to push it, merges it, and, as with
+   db/188 to db/193, the VENDORED ref is then `main`.
 3. **`proxy_address` on the office**: the proxy's LAN address
    (192.168.100.1), as the operator did by hand, not its public address
    (a LAN that does not hairpin cannot reach its own public address);
@@ -356,9 +356,10 @@ the conffile's commented `proxy_address`.
   the interface down and the node on an ordinary address, a second
   release 409, the role taken back at `.0.1`, a desk and a `--no-overlay`
   node refused).
-- The kernel's proof (`bin/test_estate_overlay.php`) is linted, not run:
-  no kernel runs on this VM. The owner runs it on the office or the GPU
-  dev host before merging the branch.
+- The kernel's proof `bin/test_estate_overlay.php`: **62 ok, 0 FAIL**
+  (2026-11-06, the branch served by `php -S` from the checkout against the
+  scratch database `maludb_os_desktest` on the development VM: the 48
+  checks of slice 1b and the 14 of the hub-as-a-setting section).
 - The server image's UEFI boot test (build/logs/chain-d1c.sh: packages,
   the repository, the server rootfs and qcow2, the test with the https
   seed and the hub round trip): **215 ok, 0 FAIL** on the second run
