@@ -1,4 +1,10 @@
-# Installing the Business OS kernel on a fresh server
+# Developer install: the Business OS kernel by hand on plain Ubuntu 24.04
+
+> **Not for MaluOS.** On a MaluOS server the kernel is already installed as a package and first boot
+> provisions it from the install plan (`firstboot.components.maludb-os-core`); running this runbook there
+> installs a second engine and a second kernel beside the packaged ones. The MaluOS path is the
+> [handbook](https://github.com/maludb/maluos-docs). This document is for a developer's host or a hosting VM
+> on plain Ubuntu 24.04.
 
 The complete, in-order runbook for putting `maludb-os-core` on a clean **Ubuntu 24.04** host, from an empty
 machine to a signed-in super-admin with the kernel's agents hired and the default applications installed.

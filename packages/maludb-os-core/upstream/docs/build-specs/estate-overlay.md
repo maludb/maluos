@@ -80,7 +80,7 @@ the GPU host, back; a keyless member refused).
 ## Proof
 
 `BOS_INTERNAL_URL=http://127.0.0.1:8089 php bin/test_estate_overlay.php`
-(48 checks, re-runnable: it releases its own quarantined addresses); the node and desk proofs still pass.
+(62 checks since 2026-11-05, the hub-as-a-setting section among them; re-runnable: it releases its own quarantined addresses); the node and desk proofs still pass.
 
 ## Not in this slice
 

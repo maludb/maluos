@@ -222,11 +222,12 @@ $isUrl = preg_match('#^(https?://|git@|ssh://)#', $source) === 1;
 $srcDir = $isUrl ? '' : rtrim(realpath($source) ?: $source, '/');
 if (!$isUrl && !is_file($srcDir . '/maludb-os.json')) { stop('manifest', "no maludb-os.json in {$srcDir}."); }
 if ($isUrl) {
+    // A fresh shallow clone every run: a cached clone from an earlier run read the manifest as it was then, so a
+    // re-run after a manifest fix (DocCloud's port_env, 2026-11-05) installed against the old one.
     $tmp = sys_get_temp_dir() . '/app-install-' . substr(sha1($source), 0, 8);
-    if (!is_file($tmp . '/maludb-os.json')) {
-        [$c, $o] = q('git clone --depth 1 ' . (isset($opts['ref']) ? '--branch ' . escapeshellarg((string) $opts['ref']) . ' ' : '') . escapeshellarg($source) . ' ' . escapeshellarg($tmp));
-        if ($c !== 0) { stop('manifest', "could not read the repository: {$o}"); }
-    }
+    if (is_dir($tmp)) { q('rm -rf ' . escapeshellarg($tmp)); }
+    [$c, $o] = q('git clone --depth 1 ' . (isset($opts['ref']) ? '--branch ' . escapeshellarg((string) $opts['ref']) . ' ' : '') . escapeshellarg($source) . ' ' . escapeshellarg($tmp));
+    if ($c !== 0) { stop('manifest', "could not read the repository: {$o}"); }
     $srcDir = $tmp;
 }
 $m = json_decode((string) file_get_contents($srcDir . '/maludb-os.json'), true);

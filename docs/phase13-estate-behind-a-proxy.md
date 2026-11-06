@@ -11,8 +11,9 @@ address no spoke can dial, and under `scheme: https` the office could not
 reach its own names. Both were design gaps, not configuration mistakes.
 This note weighs the transports, decides, and records what was built in
 maluos (maluos-estate 0.7.0, the kernel component, the installer) and in
-the kernel repository (maludb-os-core 8600c3d, the branch
-`estate/hub-and-proxy-address`). It amends decision 1 of
+the kernel repository (maludb-os-core 8600c3d on the branch
+`estate/hub-and-proxy-address`, merged to main as 9e931ca by PR #6 on
+2026-11-06). It amends decision 1 of
 docs/phase13-slice1b-overlay.md and keeps decision 2 of
 docs/phase13-estate.md.
 
@@ -239,8 +240,9 @@ the hub.
   host that does not resolve.
 - The mock office serves `overlay/hub` with the kernel's semantics.
 
-**maludb-os-core 2026.11.05maluos1** (the component and the vendored
-kernel at 8600c3d)
+**maludb-os-core 2026.11.05maluos1, then 2026.11.06maluos1** (the
+component and the vendored kernel: the branch at 8600c3d, then main at
+9e931ca after the merge)
 
 - `components/60-maludb-os-core.py`: `proxy_address`, the hosts rule of
   decision 8 in `point_names()` (step 1 for the kernel's names, again
@@ -256,7 +258,7 @@ only" field under the scheme, with its hint; `plan.py` checks
 `proxy_address` is an address or a host name. **maluos-firstboot 0.1.16**:
 the conffile's commented `proxy_address`.
 
-## The kernel half (maludb-os-core 8600c3d, branch estate/hub-and-proxy-address)
+## The kernel half (maludb-os-core 8600c3d, branch estate/hub-and-proxy-address; main 9e931ca since PR #6, 2026-11-06)
 
 - `app/features/estate/overlay.php`: `overlay_claim_hub()`,
   `overlay_release_hub()`; `html/api/v1/estate/overlay/hub.php`; the
@@ -326,10 +328,10 @@ the conffile's commented `proxy_address`.
    forward the handbook already describes. The runbook supports both;
    the note recommends the GPU server when it has the port, because it
    leaves the proxy host untouched and the office a plain spoke.
-2. **The branch `estate/hub-and-proxy-address` in maludb-os-core** is
-   vendored here at 8600c3d but not pushed: its proof passed (62 checks,
-   Status); the owner says when to push it, merges it, and, as with
-   db/188 to db/193, the VENDORED ref is then `main`.
+2. ~~The branch `estate/hub-and-proxy-address` in maludb-os-core~~:
+   pushed, proved (62 checks) and merged by the owner as PR #6 on
+   2026-11-06 (main 9e931ca); vendored here at main as maludb-os-core
+   2026.11.06maluos1.
 3. **`proxy_address` on the office**: the proxy's LAN address
    (192.168.100.1), as the operator did by hand, not its public address
    (a LAN that does not hairpin cannot reach its own public address);

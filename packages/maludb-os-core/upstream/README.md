@@ -101,6 +101,22 @@ landing/     static landing page for the bare domain
 
 ## Tech stack
 
+Two supported hosts. MaluOS is the product: the kernel is the package
+`maludb-os-core` in the MaluOS server image, provisioned by first boot
+([handbook](https://github.com/maludb/maluos-docs)). Plain Ubuntu 24.04 is
+the developer's host and the hosting VMs' host, installed by hand with
+[`docs/install.md`](docs/install.md). The code runs on both; the versions
+differ:
+
+| | MaluOS 26.04 (the product) | Ubuntu 24.04 (developer, hosting VMs) |
+|---|---|---|
+| Engine | `maludb-core-26` as packages, PostgreSQL 18 | `maludb-core` built from source, PostgreSQL 17 |
+| PHP | 8.5 (Ubuntu's) | 8.3 |
+| Node | 22 (Ubuntu's) | 24 (NodeSource) |
+| Python | 3.14 | 3.12 |
+| Install | the install plan's `firstboot.components.maludb-os-core` | `docs/install.md`, or `docs/install-on-maludb-hosting.md` on a hosting VM |
+| Applications | `bin/install_default_applications.sh` and `bin/app_install.php` (a `maluos-apps` component is proposed) | the same scripts |
+
 - **PHP 8.3** — vanilla, feature-oriented page controllers with procedural PDO queries (no framework); Composer dependencies in `composer.json`.
 - **PostgreSQL 17** — row-level security, security-barrier views, additive migrations.
 - **Next.js 15 / React 19 / TypeScript** on Node 24 — Bootstrap 5.3 “nxl” look for day-to-day screens.
@@ -110,7 +126,15 @@ landing/     static landing page for the bare domain
 
 ## Getting started
 
-**The fresh-install runbook is [`docs/install.md`](docs/install.md)** — Ubuntu 24.04, from an empty host to a signed-in
+**On MaluOS** nothing below is run by hand: the server image carries the kernel, and the install plan's
+`firstboot.components.maludb-os-core` (domain, scheme, the first super-admin) has first boot provision it:
+the memory database, the kernel database and every migration, the secrets, the Apache vhosts, the units,
+the super-admin and the kernel's agents. The applications are then `bin/install_default_applications.sh`
+and `bin/app_install.php`. The whole path, with the GPU server, the estate and the desks, is the
+[handbook](https://github.com/maludb/maluos-docs).
+
+**On plain Ubuntu 24.04** (a developer's host, a hosting VM) the hand-install runbook is
+[`docs/install.md`](docs/install.md) — from an empty host to a signed-in
 super-admin with the kernel's agents hired and the default applications installed, every step followed by its check,
 written so a person or a Claude Code session with `sudo` can execute it. In outline:
 

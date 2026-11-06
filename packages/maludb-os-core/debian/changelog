@@ -1,3 +1,11 @@
+maludb-os-core (2026.11.06maluos1) resolute; urgency=medium
+
+  * Vendored at main 9e931ca (PR #6 merged 2026-11-06: the hub endpoint as a
+    setting, bin/app_install.php --proxy-address, with what main carried
+    besides: README, docs/install.md, the installer's later changes).
+
+ -- Edward Honour <ed@maludb.org>  Fri, 06 Nov 2026 17:06:15 +0000
+
 maludb-os-core (2026.11.05maluos1) resolute; urgency=medium
 
   * Vendored at 8600c3d (branch estate/hub-and-proxy-address, the owner's to
