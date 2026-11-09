@@ -10,6 +10,11 @@
                                         a provider key through the protected prompt (scripts/set-provider-key.sh);
                                         anthropic, openrouter, openai, deepseek, moonshot, fireworks, malumail
   maluctl office-setup providers --status
+  maluctl office-setup admin [check]    does the first sign-in work, and if not, why (scripts/admin-login.py --check):
+                                        the administrator's member, the stored password against it, the sign-in
+                                        throttle, the session cookie, a real sign-in on the office. No password shown.
+  maluctl office-setup admin reset      a new generated password for the administrator, stored root-only
+                                        (/var/lib/maluos/secrets/business-os/admin-password); then the same checks
 
 The plugin is /usr/share/maluos/claude-plugins/maluos-office-setup (the package maluos-office-setup); its
 sudoers rule lets members of sudo run its scripts as root without a password, which check, status and
@@ -30,11 +35,35 @@ def claude_path():
     return shutil.which("claude", path=env_path)
 
 
+PATH_MARK = "# added by maluctl office-setup: Claude Code lives in ~/.local/bin"
+
+
+def ensure_on_path():
+    """Anthropic's installer puts claude in ~/.local/bin, which a shell opened before the install does not
+    search (the login profile adds the directory only when it exists at login). Without this, `claude` typed
+    after the setup answers "command not found". Add it to ~/.bashrc once, and say what to do in this shell."""
+    local = os.path.join(home(), ".local", "bin")
+    if local in os.environ.get("PATH", "").split(":"):
+        return
+    rc = os.path.join(home(), ".bashrc")
+    try:
+        text = open(rc).read() if os.path.exists(rc) else ""
+        if PATH_MARK not in text:
+            with open(rc, "a") as f:
+                f.write(f'\n{PATH_MARK}\ncase ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) PATH="$HOME/.local/bin:$PATH" ;; esac\n')
+    except OSError as e:
+        print(f"(could not add ~/.local/bin to {rc}: {e})", file=sys.stderr)
+    print("Note: `claude` is installed in ~/.local/bin, which this shell does not search yet. A new terminal finds it;\n"
+          "      in this one run:  export PATH=\"$HOME/.local/bin:$PATH\"\n"
+          "      `maluctl office-setup` and `maluctl office-setup shell` always find it.", flush=True)
+
+
 def ensure_claude():
     if os.geteuid() == 0:
         sys.exit("maluctl office-setup: run this as the operator account (maluos), not as root; the plugin's scripts elevate themselves")
     c = claude_path()
     if c:
+        ensure_on_path()
         return c
     print(f"Claude Code is not installed for {pwd.getpwuid(os.getuid()).pw_name}; installing with Anthropic's native installer ({INSTALLER}) ...", flush=True)
     r = subprocess.run(["bash", "-c", f"curl -fsSL {INSTALLER} | bash"], env=dict(os.environ, HOME=home()))
@@ -44,6 +73,7 @@ def ensure_claude():
     if not c:
         sys.exit("claude is not on PATH after the install; add ~/.local/bin to PATH and run again")
     print(f"Claude Code: {subprocess.run([c, '--version'], capture_output=True, text=True).stdout.strip() or c}")
+    ensure_on_path()
     return c
 
 
@@ -76,6 +106,11 @@ def main(args):
         return as_root([os.path.join(scripts, "preflight.py"), "--report"])
     if verb == "status":
         return as_root([os.path.join(scripts, "preflight.py"), "--human"])
+    if verb == "admin":
+        sub = rest[0] if rest else "check"
+        if sub not in ("check", "reset"):
+            print(__doc__); return 2
+        return as_root([os.path.join(scripts, "admin-login.py"), "--" + sub, *rest[1:]])
     if verb == "providers":
         if not rest:
             print(__doc__); return 2

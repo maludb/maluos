@@ -10,3 +10,4 @@ plugin/VENDORED                             usr/share/maluos/claude-plugins/malu
 marketplace/.claude-plugin                  usr/share/maluos/claude-plugins
 debian/sudoers.d/maluos-office-setup        etc/sudoers.d
 lib/maluctl.d/office-setup.py               usr/lib/maluos/maluctl.d
+debian/maluos-local-bin.sh                  etc/profile.d

@@ -1,3 +1,14 @@
+maludb-os-core (2026.11.09maluos2) resolute; urgency=medium
+
+  * A sign-in over plain http works: vendored at the kernel's branch
+    fix/http-session-cookie (9aad43f, main 9e931ca and one commit). With
+    APP_ENV=prod the session cookie was always Secure, so an office served
+    over http (scheme: http, a LAN without a TLS proxy) never got its session
+    back from the browser and every sign-in failed the CSRF check, whatever
+    the password. To be re-vendored at main once the pull request is merged.
+
+ -- Edward Honour <ed@maludb.org>  Mon, 09 Nov 2026 23:55:00 +0000
+
 maludb-os-core (2026.11.06maluos1) resolute; urgency=medium
 
   * Vendored at main 9e931ca (PR #6 merged 2026-11-06: the hub endpoint as a

@@ -1,3 +1,23 @@
+maluos-office-setup (0.1.1) resolute; urgency=medium
+
+  * The first sign-in can be checked and repaired: scripts/admin-login.py
+    (--check: the administrator's member, the stored password against it,
+    the sign-in throttle, the session cookie for the office's scheme, a real
+    sign-in on the office; --reset: a new generated password, stored
+    root-only, failed attempts cleared) and `maluctl office-setup admin
+    [check|reset]`. The skill runs the check before handing the sign-in over
+    and when the operator reports that it fails; verify.sh runs it too.
+  * `claude` is found after the setup: `maluctl office-setup` adds
+    ~/.local/bin to ~/.bashrc when the shell does not search it and says how
+    to use it in the open shell; /etc/profile.d/maluos-local-bin.sh adds it
+    for login shells. Before, `claude` typed after the setup answered
+    "command not found" until the next login.
+  * Local changes to the vendored plugin (to be carried to its repository):
+    scripts/admin-login.py, scripts/verify.sh, skills/office-setup/SKILL.md,
+    skills/office-check/SKILL.md, the troubleshooting reference.
+
+ -- Edward Honour <ed@maludb.org>  Mon, 09 Nov 2026 23:50:00 +0000
+
 maluos-office-setup (0.1.0) resolute; urgency=medium
 
   * First version: the maluos-office-setup Claude Code plugin (skills

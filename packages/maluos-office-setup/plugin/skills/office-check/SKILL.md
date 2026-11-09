@@ -21,6 +21,10 @@ Then, when the kernel is configured for a domain, the live checks for its scheme
 sudo ${CLAUDE_PLUGIN_ROOT}/scripts/verify.sh --domain <domain> --scheme <scheme> [--proxy-address <proxy>] [--external]
 ```
 
+As root it also runs `admin-login.py --check`: whether the first sign-in can work (the administrator's
+member, the stored password against it, the session cookie, one real sign-in on the office), with no
+password shown.
+
 Use `--external` only when the operator says the proxy (https) or the LAN DNS (http) is in place; it
 tests the names as a client would, from the office.
 

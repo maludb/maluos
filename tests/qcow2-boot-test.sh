@@ -452,6 +452,13 @@ dcall GET "$desktok" /api/v1/desks/me | grep -q '"name":"Boot test desk"' && ech
 [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -H "Host: app.$bosdom" -H "Authorization: Bearer $desktok" http://127.0.0.1/api/v1/me)" = 401 ] && echo "  ok   the desk token is refused on /api/v1/me (one scope per surface)" || { echo "  FAIL desk token accepted on /api/v1/me"; fail=1; }
 dcall POST "$desktok" /api/v1/desks/leave '{"surface":1}' | grep -q '"status":"retired"' && [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -H "Host: app.$bosdom" -H "Authorization: Bearer $desktok" http://127.0.0.1/api/v1/desks/me)" = 410 ] && echo "  ok   desks/leave retired the desk; its token answers 410" || { echo "  FAIL desks/leave"; fail=1; }
 sudo -n crontab -u www-data -l 2>/dev/null | grep -q desk_presence && echo "  ok   the desk presence job is in www-data's crontab" || { echo "  FAIL desk_presence cron missing"; fail=1; }
+# the first sign-in, proved by the office-setup plugin's own check (0.1.1): the administrator's member, the stored
+# password against it, the session cookie for the scheme, one real sign-in against the kernel; no password shown
+if installed maluos-office-setup; then
+  out=$(sudo -n maluctl office-setup admin check 2>&1); rc=$?
+  [ $rc = 0 ] && echo "$out" | grep -q 'PASS  a sign-in on this host with the stored password succeeds' && ! echo "$out" | grep -q '^FAIL' \
+    && echo "  ok   maluctl office-setup admin check: the first sign-in works with the generated password" || { echo "  FAIL office-setup admin check: $(echo "$out" | grep '^FAIL\|^ERROR' | head -3 | cut -c1-260)"; fail=1; }
+fi
 elif installed maluos-business-os; then
 echo "  (the kernel component is off in firstboot.yaml: nothing provisioned, as shipped)"
 sudo -n python3 -c "import json,sys; d=json.load(open('/var/lib/maluos/firstboot/done')); sys.exit(1 if 'maludb-os-core' in (d.get('components') or {}) else 0)" 2>/dev/null && echo "  ok   kernel component skipped: not in the done file" || { echo "  FAIL the done file records maludb-os-core although the component is off"; fail=1; }

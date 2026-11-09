@@ -99,6 +99,14 @@ component supports and adapt (`hosts-proxy.sh` stands in for
 `proxy_address` on 26.04.20261102); nothing in the component or in `maluctl`
 changes for them.
 
+`scripts/admin-login.py` (0.1.1) is the ninth: `--check` proves on the office
+that the first sign-in can work (the administrator's member, the stored
+password against it, the sign-in throttle, the session cookie for the scheme,
+one real sign-in against the kernel) and `--reset` sets a new generated
+password, stored root-only; neither shows a password. `maluctl office-setup
+admin [check|reset]` runs it; `verify.sh` and the skill's sign-in phase run
+the check.
+
 ## Two ways to the same office
 
 An office can be given its configuration at install time or after it:
@@ -154,3 +162,22 @@ carry the kernel, so not the plugin either) and on apt.maluos.com, so an
 office already installed gets it with `sudo apt update && sudo apt install
 maluos-office-setup`. Claude Code is not on the image: `maluctl office-setup`
 installs it for the user who runs it.
+
+2026-11-09 (night): the owner's first run on an installed office failed twice,
+and both are repaired on the branch `office-setup-repair` (0.1.1, kernel
+package 2026.11.09maluos2):
+
+- **The generated password was refused.** Reproduced: with `APP_ENV=prod`
+  the kernel marked its session cookie Secure always, so over plain http the
+  browser dropped it and every sign-in answered `csrf_failed`, whatever the
+  password. Fixed in the kernel (branch `fix/http-session-cookie`: Secure on
+  an https request, and in production unless `APP_URL` is `http://`). The
+  plugin gains `admin-login.py`, which names this and the other causes (a
+  password changed after first boot, the throttle, another administrator's
+  email) and can reset the password. Not confirmed on the owner's machine:
+  whether that office was reached over http is the owner's to say; under
+  https the check tells which cause it is.
+- **`claude: command not found`.** Anthropic's installer puts `claude` in
+  `~/.local/bin`, which a shell opened before the install does not search.
+  `maluctl office-setup` now adds the directory to `~/.bashrc` and says so;
+  `/etc/profile.d/maluos-local-bin.sh` covers login shells.
