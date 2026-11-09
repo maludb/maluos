@@ -146,5 +146,11 @@ the operator, not read from the database); the provider keys themselves.
 2026-11-09: PR #6 reviewed, built with `scripts/build-packages.sh` (lintian
 clean but for the no-manual-page warning every maluctl front end shares; the
 sourced `lib.sh` overridden), `maluos-meta` 0.2.18 regenerated from the seed
-so `maluos-business-os` depends on the package, and merged. Not yet on an
-image or on apt.maluos.com: that is the next build's decision.
+so `maluos-business-os` depends on the package, and merged.
+
+2026-11-09 (later): released as 26.04.20261109, the package alone. It is on
+the server image (through `maluos-business-os`; the desktop image does not
+carry the kernel, so not the plugin either) and on apt.maluos.com, so an
+office already installed gets it with `sudo apt update && sudo apt install
+maluos-office-setup`. Claude Code is not on the image: `maluctl office-setup`
+installs it for the user who runs it.
