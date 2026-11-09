@@ -212,8 +212,12 @@ The plugin's scripts read the kernel component's features (proxy_address since 0
 seeds/business-os.seed, so every server image with the kernel carries the plugin. The operator's path is
 the handbook's 10-office-configuration.md; the package proposal 23-office-setup-package.md.
 
-Status 2026-11-08: packaged (packages/maluos-office-setup, scripts/vendor-maluos-office-setup.sh); not yet
-built in CI or run on an office.
+The whole of it, phase by phase, with the scripts' reads and writes and the two ways an office gets its
+configuration (the installer's First boot screen or this interview): docs/office-setup.md.
+
+Status 2026-11-09: packaged (packages/maluos-office-setup, scripts/vendor-maluos-office-setup.sh), built and
+lintian-checked on the development VM, maluos-meta 0.2.18 regenerated so maluos-business-os depends on it;
+not yet run on an office from the package, not yet on an image or on apt.maluos.com (the next build).
 
 ### maluos-apple-t2 (seeds/apple-t2.seed; the Apple T2 round, docs/phase11-apple-t2.md)
 

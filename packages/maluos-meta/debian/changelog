@@ -1,3 +1,11 @@
+maluos-meta (0.2.18) resolute; urgency=medium
+
+  * maluos-business-os depends on maluos-office-setup (seeds/business-os.seed):
+    every office carries the Claude Code plugin that configures its Business
+    OS after first boot (docs/office-setup.md).
+
+ -- Edward Honour <ed@maludb.org>  Mon, 09 Nov 2026 13:02:47 +0000
+
 maluos-meta (0.2.17) resolute; urgency=medium
 
   * New metapackage maluos-apps (seeds/apps.seed): the host tools the

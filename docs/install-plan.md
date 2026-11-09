@@ -140,6 +140,11 @@ written; the conffile's documented defaults stand for the rest.
 | `enroll.name` | string | the hostname | the desk's or node's name at the office; the installer also writes `enroll.owner`, the plan's user, whose desk it is |
 | `cloud_init` | bool | true on server media, false on desktop | keep cloud-init enabled in the target (NoCloud and cloud data sources); `false` masks it |
 
+An office installed without these keys (the medium's default plan, or a
+screen left on `maluos.local`) is configured afterwards by `maluctl
+office-setup`, the Claude Code interview of docs/office-setup.md, which
+rewrites the same block and re-provisions.
+
 ## `bootloader`
 
 | Key | Type | Default | Notes |

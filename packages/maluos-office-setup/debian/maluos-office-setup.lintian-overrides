@@ -1,0 +1,2 @@
+# lib.sh is sourced by the plugin's scripts, never run; its shebang is the upstream file's and the package installs it 644 on purpose
+maluos-office-setup: script-not-executable [usr/share/maluos/claude-plugins/maluos-office-setup/scripts/lib.sh]

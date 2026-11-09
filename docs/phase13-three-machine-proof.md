@@ -47,10 +47,12 @@ nobody reaches recovers that way.
 ## Step 0: the office
 
 1. Install maluos-server on **office** from the ISO with an install plan
-   that gives the kernel its domain, scheme and admin under
-   `firstboot.components.maludb-os-core` (the installer's screens do not
-   ask them, and the medium's unattended plan installs a kernel for
-   `maluos.local`): the handbook's
+   that gives the kernel its domain, scheme, `proxy_address` and admin under
+   `firstboot.components.maludb-os-core` (the installer's First boot screen
+   asks them too since 0.3.5; the medium's unattended plan installs a kernel
+   for `maluos.local`), or install it plain and run `maluctl office-setup`
+   over SSH afterwards, the Claude Code interview that asks the same and
+   re-provisions (docs/office-setup.md, from the build that carries it): the handbook's
    [office runbook](https://github.com/maludb/maluos-docs/blob/main/10-office-on-proxmox.md)
    and its `plans/office.yaml`. The kernel's own `docs/install.md` is the
    hand install on plain Ubuntu 24.04 and does not apply on MaluOS.
