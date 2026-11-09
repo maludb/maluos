@@ -26,9 +26,37 @@ listener:
   # none = unauthenticated listener (development only); or a literal token.
   token: generate
 
+# Phase 14 (docs/phase14-database-server.md): the data on another MaluOS server.
+# Without this block the database is this host's own cluster, as it always was.
+#
+# On the DATABASE SERVER: role: database-server prepares the cluster for an
+# office (an admin role that is not a superuser, TLS, the client addresses in
+# pg_hba), runs the listener here and no tenant, vault, gateway or kernel.
+# `sudo maluctl db export DIR` then writes the two files the office needs.
+# role: database-server
+# database_server:
+#   listen: 0.0.0.0                # or one address of this server
+#   clients: [192.168.100.0/24]    # who may connect (TLS and a password); default the overlay, 100.100.0.0/16
+#   tls: self-signed               # or {cert: PATH, key: PATH}
+#   names: [db-1.example.com]      # further names and addresses for the certificate
+#   addresses: [192.168.100.20]
+#   admin: maluos_admin
+#
+# On the OFFICE: where its database server is. The credential and the
+# certificate are read once (the plan's medium) and kept root-only on this host.
+# database_server:
+#   host: db-1.example.com         # a name in the server's certificate
+#   port: 5432
+#   admin: maluos_admin
+#   credential: file:/run/media/plans/db-admin.txt
+#   sslmode: verify-full
+#   ca: file:/run/media/plans/db-ca.pem
+
 # OS users that get a PostgreSQL superuser login (peer auth) with the tenant
 # schema on their search_path. "auto" = every human account (uid 1000-59999
 # with a login shell) present at provisioning time; or a list of names.
+# On an office whose database is on another server they get no database role
+# (no superuser outside the database server): `sudo maluctl db psql` instead.
 operators: auto
 
 # Components: packages that ship /usr/lib/maluos/components/<nn>-<name>.py run

@@ -1,3 +1,13 @@
+maluos-vault (0.4.3) resolute; urgency=medium
+
+  * Phase 14 slice 1: the store on a database server. The daemon reads
+    pg_port, pg_sslmode, pg_sslrootcert and pg_password_file; the component
+    gives the role a password in a file of the vault's own (it cannot ask
+    itself) and a unit drop-in for IP sockets, only then. The schema goes
+    through first boot's connection (no runuser to postgres).
+
+ -- Edward Honour <ed@maludb.org>  Mon, 09 Nov 2026 22:32:32 +0000
+
 maluos-vault (0.4.2) resolute; urgency=medium
 
   * first boot: the component waits up to 180 s for the restarted vault to

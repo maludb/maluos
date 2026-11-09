@@ -1,3 +1,13 @@
+maluos-gateway (0.6.2) resolute; urgency=medium
+
+  * Phase 14 slice 1: the database on a database server. The daemon reads
+    pg_port, pg_sslmode, pg_sslrootcert and pg_password_ref (the vault's
+    system compartment, a use grant to user:maluos-gateway) or
+    pg_password_file; the component mints the password and the grant. The
+    schema goes through first boot's connection.
+
+ -- Edward Honour <ed@maludb.org>  Mon, 09 Nov 2026 22:32:32 +0000
+
 maluos-gateway (0.6.1) resolute; urgency=medium
 
   * The mock Ollama's embeddings are a synonym-aware bag of words over 256

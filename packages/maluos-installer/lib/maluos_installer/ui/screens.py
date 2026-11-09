@@ -459,9 +459,43 @@ class FirstBoot(Screen):
                       "(maluos-firstboot). An enrolment joins an office or an estate at that moment.", "title"), urwid.Divider(),
                  self.tenant, self.principal, urwid.Divider(), text("Enrolment:")] + eitems + [self.url, self.code, self.ename, urwid.Divider(), self.cloud]
         self.bos = None
+        self.dgroup = None
         if self.app.variant == "server":
             lines += [urwid.Divider(), text("Business OS:")] + self._build_bos((fb.get("components") or {}).get(self.BOS))
+            lines += [urwid.Divider(), text("Database:")] + self._build_db(fb)
         return lines
+
+    # --- the Database group (Phase 14): where this server's data is, or that it is the estate's database server ------
+    def _build_db(self, fb):
+        ds = fb.get("database_server") or {}
+        mode = "server" if fb.get("role") == "database-server" else ("remote" if ds.get("host") else "")
+        self.dgroup, ditems = radios([("", "This server's own PostgreSQL (the default)"),
+                                      ("remote", "On a MaluOS database server (the four lines below)"),
+                                      ("server", "This server is the database server (no kernel here; the last two lines)")], mode)
+        self.db_host = edit("  Database server (a name in its certificate, or an address): ", ds.get("host", ""))
+        self.db_port = edit("  Port: ", str(ds.get("port") or 5432))
+        self.db_cred = edit("  Admin credential (file:LABEL=PLANS:/db-admin.txt, from `maluctl db export`): ", ds.get("credential", ""))
+        self.db_ca = edit("  Its certificate (file:LABEL=PLANS:/db-ca.pem; verified when given): ", ds.get("ca", ""))
+        self.db_listen = edit("  As the server, listen on (0.0.0.0 for every interface): ", ds.get("listen", "") or "0.0.0.0")
+        self.db_clients = edit("  As the server, admit (networks, comma separated; blank: the estate's overlay): ", ", ".join(ds.get("clients") or []))
+        return ditems + [self.db_host, self.db_port, self.db_cred, self.db_ca, self.db_listen, self.db_clients]
+
+    def _db_raw(self):
+        """(role, database_server) from the group; ("", None) keeps a plan's own keys untouched on the desktop."""
+        if self.dgroup is None:
+            return None
+        mode = chosen(self.dgroup) or ""
+        if mode == "server":
+            clients = [c.strip() for c in self.db_clients.edit_text.split(",") if c.strip()]
+            return "database-server", {"listen": self.db_listen.edit_text.strip() or "0.0.0.0", "clients": clients}
+        if mode == "remote":
+            port = self.db_port.edit_text.strip()
+            raw = {"host": self.db_host.edit_text.strip(), "port": int(port) if port.isdigit() else 0,
+                   "credential": self.db_cred.edit_text.strip()}
+            if self.db_ca.edit_text.strip():
+                raw["ca"] = self.db_ca.edit_text.strip()
+            return "", raw
+        return "", {}
 
     # --- the Business OS group: a box, and the kernel's four settings while it is ticked -----------
     def _build_bos(self, spec):
@@ -518,6 +552,16 @@ class FirstBoot(Screen):
             comps[self.BOS] = bos
         if comps:
             raw["components"] = comps
+        dbr = self._db_raw()
+        if dbr is None:      # no Database group on this medium: a plan's own keys pass through
+            for k in ("role", "database_server"):
+                if (self.plan.get("firstboot") or {}).get(k):
+                    raw[k] = self.plan["firstboot"][k]
+        else:
+            if dbr[0]:
+                raw["role"] = dbr[0]
+            if dbr[1]:
+                raw["database_server"] = dbr[1]
         return raw
 
     def validate(self):
@@ -528,6 +572,12 @@ class FirstBoot(Screen):
                 errs.append("the Business OS kernel needs a domain (the office's name on the network, like office.example.com or maluos.local)")
             if not bos["admin_email"]:
                 errs.append("the Business OS kernel needs the first super-admin's email (the first login)")
+        dbr = self._db_raw()
+        if dbr and dbr[1].get("host") is not None and not dbr[0]:
+            if not dbr[1]["host"]:
+                errs.append("a database server needs its name or address (or choose this server's own PostgreSQL)")
+            if not dbr[1]["credential"]:
+                errs.append("a database server needs the admin credential: `sudo maluctl db export DIR` on it writes db-admin.txt; name it as file:LABEL=<the medium's label>:/db-admin.txt")
         if errs:
             return errs
         return self.errors_for({**self.plan, "firstboot": self._raw(), "version": 1})

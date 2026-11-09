@@ -43,6 +43,22 @@ def provision(ctx):
         with open(os.open(ENV, os.O_WRONLY | os.O_TRUNC), "w") as f:
             f.write("\n".join(lines) + "\n")
         log("maludb-api: generated MALUDB_STORE_KEY")
+    # Phase 14: the API stays on this host; its PostgreSQL is the database server's when there is one. The API
+    # is a libpq client, so PGSSLMODE/PGSSLROOTCERT in its environment verify the server's certificate.
+    dbt = ctx.get("database_target") or {}
+    want = {"MALUDB_PG_HOST": dbt["host"] if dbt else "localhost", "MALUDB_PG_PORT": str(dbt["port"]) if dbt else "5432"}
+    if dbt:
+        want["PGSSLMODE"] = dbt["sslmode"]
+        if dbt.get("ca"):
+            want["PGSSLROOTCERT"] = dbt["ca"]
+    new_lines = [l for l in lines if dbt or not l.startswith(("PGSSLMODE=", "PGSSLROOTCERT="))]
+    for k, v in want.items():
+        new_lines = set_env(new_lines, k, v)
+    if new_lines != lines:
+        lines = new_lines
+        with open(os.open(ENV, os.O_WRONLY | os.O_TRUNC), "w") as f:
+            f.write("\n".join(lines) + "\n")
+        log(f"maludb-api: PostgreSQL at {want['MALUDB_PG_HOST']}:{want['MALUDB_PG_PORT']}")
     host = next((l.split("=", 1)[1] for l in lines if l.startswith("MALUDB_API_HOST=")), "127.0.0.1")
     port = next((l.split("=", 1)[1] for l in lines if l.startswith("MALUDB_API_PORT=")), "8000")
     url = f"http://{'127.0.0.1' if host in ('0.0.0.0', '::') else host}:{port}"

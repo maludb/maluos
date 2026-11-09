@@ -32,7 +32,7 @@ def provision(ctx):
     ccfg = (ctx["cfg"].get("components") or {}).get("maluos-gateway") or {}
 
     # 1. role, schema, grants
-    ensure_schema(psql, exists, qi, ql, db, tenant)
+    ensure_schema(psql, exists, qi, ql, db, tenant, psql_file=ctx.get("psql_file"))
     log(f"gateway: schema in {tenant}, grants to {ROLE}")
 
     # 2. catalogue seed (only when empty) and the engine's principal
@@ -40,6 +40,10 @@ def provision(ctx):
     ensure_engine_principal(psql, exists, qi, ql, db, tenant)
     if seeded:
         log(f"gateway: seeded catalogue ({seeded})")
+    # Phase 14: the database on another server: a password for the role, kept in the vault for the gateway's own use
+    login = ctx["service_login"](ROLE, vault_ref=f"system/pg-{ROLE}-password") if ctx.get("service_login") else {}
+    if login:
+        log(f"gateway: its database is on {login.get('pg_host')}:{login.get('pg_port')} ({login.get('pg_sslmode')}), password {login.get('pg_password_ref')}")
 
     # 3. MCP tool on the listener
     listener_user = unit_user("maludb-mc2dbd.service") or "maludb-mc2dbd"
@@ -51,7 +55,8 @@ def provision(ctx):
     if os.path.exists(CONF):
         with open(CONF) as f:
             conf = yaml.safe_load(f) or {}
-    want = dict(conf); want.update({"database": db, "tenant": tenant})
+    want = {k: v for k, v in conf.items() if not k.startswith("pg_") or k == "pg_role"} if login or any(k.startswith("pg_password") for k in conf) else dict(conf)
+    want.update({"database": db, "tenant": tenant}); want.update(login)
     for k in ("ollama", "tcp"):
         if isinstance(ccfg.get(k), dict):
             want[k] = {**(want.get(k) or {}), **ccfg[k]}
@@ -118,12 +123,13 @@ def provision(ctx):
             "ollama_installed": installed, "pulled": pulled, "mcp_tool": "maluos.model_status"}
 
 
-def ensure_schema(psql, exists, qi, ql, db, tenant, role=ROLE, schema=SCHEMA):
+def ensure_schema(psql, exists, qi, ql, db, tenant, role=ROLE, schema=SCHEMA, psql_file=None):
     if not exists(f"SELECT 1 FROM pg_roles WHERE rolname={ql(role)}"):
         psql(f"CREATE ROLE {qi(role)} LOGIN")
-    r = subprocess.run(["runuser", "-u", "postgres", "--", "psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-d", db,
-                        "-c", f"SET ROLE {qi(tenant)}; SET search_path TO {qi(tenant)}, maludb_core, public;", "-f", schema],
-                       capture_output=True, text=True)
+    if psql_file is None:
+        sys.path.insert(0, "/usr/lib/maluos")
+        from maluos_provision import psql_file
+    r = psql_file(schema, db, pre=f"SET ROLE {qi(tenant)}; SET search_path TO {qi(tenant)}, maludb_core, public;", check=False)
     if r.returncode != 0:
         raise RuntimeError(f"gateway schema failed: {r.stderr.strip()[-400:]}")
     t, rl = qi(tenant), qi(role)

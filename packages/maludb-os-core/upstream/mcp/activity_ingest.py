@@ -21,6 +21,7 @@ import asyncpg
 import httpx
 
 from db import ENV
+from pg_tls import ssl_kwargs
 
 BATCH_LIMIT = 500
 
@@ -67,6 +68,7 @@ async def main() -> int:
         database=ENV.get("DB_NAME", "maludb_os"),
         user=ENV.get("DB_USER", "app_rw"),
         password=ENV.get("DB_PASSWORD", ""),
+        **ssl_kwargs(ENV.get("DB_SSLMODE"), ENV.get("DB_SSLROOTCERT")),
     )
     try:
         # Single-flight: the systemd timer and any manual run must never overlap,

@@ -19,6 +19,8 @@ import json
 
 import asyncpg
 
+from pg_tls import ssl_kwargs
+
 ENV_PATH = Path("/var/www/config/.env")
 
 # Per-request auth context, set by the bearer-auth middleware, read by tools.
@@ -82,6 +84,7 @@ async def make_pool(user: str, password: str) -> asyncpg.Pool:
         password=password,
         min_size=1,
         max_size=8,
+        **ssl_kwargs(ENV.get("DB_SSLMODE"), ENV.get("DB_SSLROOTCERT")),
         command_timeout=15,
         init=_init_connection,
     )

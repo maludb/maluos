@@ -1,3 +1,14 @@
+maluos-installer (0.3.7) resolute; urgency=medium
+
+  * Phase 14 slice 1: firstboot.role (database-server) and
+    firstboot.database_server in the install plan (an office: host, port,
+    admin, credential and ca as file: references read at install time, the
+    password written root-only into the target; a server: listen, clients,
+    names, addresses), their checks, and the Database group on the First
+    boot screen (server medium).
+
+ -- Edward Honour <ed@maludb.org>  Mon, 09 Nov 2026 22:32:32 +0000
+
 maluos-installer (0.3.6) resolute; urgency=medium
 
   * The First boot screen's Business OS group asks for the proxy address

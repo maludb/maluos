@@ -6,7 +6,8 @@ they can be served from different application servers, yet first boot,
 the daemons and the kernel's installer all assume that PostgreSQL runs on
 the host they run on. This document records what the survey of the three
 repositories found, decides how the database moves to a server of its own,
-and cuts the work into slices. Nothing here is built. The owner decided
+and cuts the work into slices. Slice 1 is built ("Slice 1 as built"); the
+rest is not. The owner decided
 2026-11-09 that the database server is a MaluOS server first (decision 1),
 a PostgreSQL the operator provides being deferred, and answered the four
 planning questions the same day ("The owner's decisions"): the overlay
@@ -263,7 +264,152 @@ The four questions the first draft left open were answered the same day:
    database server is specified against the estate as it really looks,
    and after E7 phase 2 where that is already in flight. Roadmap row E9.
 
+## Slice 1 as built (2026-11-09)
+
+Started on the owner's word while the three-machine proof runs (the
+"after D7" of decision 4 was the owner's to waive). What the code does,
+where it differs from the plan above, and what it found.
+
+### The admin role, concretely (the owner's decision 3)
+
+The engine already has a delegated administrator, the role `maludb_admin`
+("trusted admin delegation": it may run `grant_memory_access`, which hands
+out `maludb_user`, `maludb_read` and `maludb_admin`). The database server's
+first boot makes the office's role on top of it:
+
+| What | Why |
+|---|---|
+| `maluos_admin` LOGIN CREATEROLE CREATEDB, `createrole_self_grant = 'set, inherit'` | the tenant's, the services' and the kernel's roles and databases; it may act as the roles it creates (the tenant's schema, an application's database owned by its role) |
+| BYPASSRLS | only a role that has the attribute may give it, and the gateway's role needs it (the engine's queue holds every account's requests); the one attribute beyond the two above |
+| member of `maludb_admin`, `maludb_user`, `maludb_read` WITH ADMIN OPTION | `GRANT maludb_user TO <tenant>` |
+| owner of the MaluDB database (`ALTER DATABASE … OWNER`) | the tenant's schema, the database's `search_path` |
+| every privilege on the engine's schemas, tables, sequences and functions WITH GRANT OPTION, and default privileges for what the engine's owner creates later | a service's `SELECT` on the principals, the tenant facades that `enable_memory_schema` creates as the engine's owner |
+| `maludb_template`, a template database with `vector` and `maludb_core` and the same delegation | `CREATE EXTENSION maludb_core` needs a superuser; the admin copies the template instead (the kernel's memory database) |
+| never SUPERUSER | the owner's decision 3; the boot test asserts that no role but `postgres` is one |
+
+Proved on a scratch cluster (tests/dbserver-local-test.sh): the tenant, the
+principals, the vault's, the gateway's and the memory face's schemas, a
+second engine database, the kernel's 173 migrations and an application's
+database all provision as this role over TLS 1.3 with the certificate
+verified.
+
+### What was built
+
+- **maluos-firstboot 0.1.17.** `maluos_provision.py`: `database_target()`
+  (none: the local cluster as before; a host: the database server),
+  `psql()`, `psql_file()`, `exists()`, `wait_for_postgres()` through it;
+  `prepare_remote()` takes the credential and the certificate from the
+  medium once (`/var/lib/maluos/secrets/db-admin.password` and `.pgpass`,
+  root only; `/etc/maluos/database-server-ca.pem`); `ensure_maludb_database()`
+  (created locally, copied from the template remotely); `service_login()`;
+  `provision_database_server()` and `ensure_database_server()` for `role:
+  database-server` (the table above, the certificate, `conf.d/
+  maluos-database-server.conf`, the marked `pg_hba.conf` block, a restart
+  only on a change). `maluctl db status | psql | export`; `maluctl status`
+  says where the data is. Operators get no database role on an office whose
+  data is remote.
+- **maluos-vault 0.4.3, maluos-gateway 0.6.2, maluos-memory 0.2.2.** The
+  daemons read `pg_port`, `pg_sslmode`, `pg_sslrootcert` and a password: the
+  vault from a file of its own (`/var/lib/maluos-vault/pg.password`; a unit
+  drop-in opens IP sockets to it, only then), the gateway and the memory
+  face from the vault (`system/pg-<role>-password`, a use grant to the
+  service's own principal). The schemas go through first boot's connection.
+- **maludb-api 0.4.1maluos6, maludb-os-core 2026.11.09maluos1.** The API's
+  `MALUDB_PG_HOST`/`PORT` with libpq's `PGSSLMODE`/`PGSSLROOTCERT`; the
+  kernel's `DB_HOST`, `DB_PORT`, `DB_SSLMODE`, `DB_SSLROOTCERT`, the
+  runner's, and `DB_ADMIN_USER`/`DB_ADMIN_PASSFILE` for its installer.
+- **The kernel** (branch `phase14/database-server`, a pull request for the
+  owner): `app/db.php` and the asyncpg clients (`mcp/pg_tls.py`, the runner)
+  read the TLS keys; `bin/app_install.php` takes `--db-host`, `--db-port`,
+  `--db-admin`, `--db-passfile`, `--db-sslmode`, `--db-ca`, or the kernel's
+  `config/.env`, makes the application's roles and database on the server
+  and writes it into the application's `DB_HOST`.
+- **maluos-installer 0.3.7.** `firstboot.role` and
+  `firstboot.database_server` in the plan (the credential and the
+  certificate as `file:` references read at install time; the password
+  written root-only into the target, never into `firstboot.yaml`), and the
+  Database group on the First boot screen.
+- **maluos-estate 0.7.1.** The node's report carries a `database` part.
+
+### Where it differs from the plan
+
+1. **The first provisioning cannot use the overlay name** (the owner's
+   decision 1). The overlay is the office's: its members and their keys are
+   rows of the kernel's database, and that database is the one on the
+   server. An office that reaches its database only over the overlay cannot
+   boot the kernel that defines the overlay. So `database_server.host` is
+   a LAN name or address at first boot, verified by TLS (the server's
+   certificate carries its host name, `<host>.internal`, and what
+   `names`/`addresses` add); `clients` then lists the office's LAN network.
+   The default of `clients` stays the overlay range for the later members
+   (application servers, slice 3). Moving the office itself onto the overlay
+   afterwards needs the overlay to come up from the office's local state
+   before the kernel starts, on every boot; that is not tested and is a
+   question for the owner (below).
+2. **No node kind `database` yet.** The kernel knows the kinds in about ten
+   places (the CHECK, `NODE_KINDS`, the queries of inference, memory and
+   delegation, the web console). The database server enrols as a `server`
+   node and says what it is in its report's `database` part; the kind
+   moves to slice 2 with the image role.
+3. **The kernel's own TLS verification waits for the kernel's pull
+   request.** Until it is merged and re-vendored from main, this tree
+   carries the branch; the kernel then verifies the certificate
+   (`DB_SSLMODE=verify-full`). The MaluDB API and the three daemons verify
+   it already.
+4. **An application's own provisioning script** (`database.provision`) that
+   calls `runuser -u postgres psql` does not reach a database server; the
+   installer hands it libpq's variables (`PGHOST`, `PGUSER`, `PGPASSFILE`,
+   …), so a plain `psql` in it works. An application whose own database
+   needs an untrusted extension (the engine, `vector`) needs a template on
+   the server; none of the four default applications does.
+5. **Moving an existing office's data** to a database server is not in
+   this slice: the block is for an office provisioned against the server
+   from its first boot (the kernel's migration ledger and markers are local
+   state of the office).
+6. **Engine upgrades** (`ALTER EXTENSION maludb_core UPDATE` in each
+   database and in the template) are the database server's work and have
+   no command yet (`maluctl db upgrade`, slice 2).
+
+### The operator's steps
+
+```
+# the database server (a MaluOS server; firstboot.yaml or the plan)
+role: database-server
+database_server: {listen: 0.0.0.0, clients: [192.168.100.0/24], names: [db-1.example.com]}
+sudo maluctl db export /media/plans        # db-admin.txt, db-ca.pem, database-server.yaml (and the listener's token)
+
+# the office (the plan, or the First boot screen's Database group)
+firstboot:
+  database_server: {host: db-1.example.com, credential: 'file:LABEL=PLANS:/db-admin.txt', ca: 'file:LABEL=PLANS:/db-ca.pem'}
+sudo maluctl db status                      # where the data is, reached as maluos_admin, not a superuser
+sudo maluctl db psql                        # a session there, as the admin role
+```
+
+### Test
+
+- `python3 tests/database-server-test.py`: 16 tests (the target, the
+  credential, the pg_hba block, the plan, what the installer writes).
+- `tests/dbserver-local-test.sh`: a scratch cluster on this host made a
+  database server by the real first-boot code, an office provisioned
+  against it, the services' logins, the installer's database steps.
+- `tests/qcow2-boot-test.sh` (server image): after every other check, a
+  second cluster of the VM is made a database server, the office is
+  provisioned against it with `maluctl provision --force`, and the VM's own
+  cluster is stopped: the vault, the gateway, the memory face, the MaluDB
+  API and the kernel must still answer. `BOOT_TEST_DBSERVER=0` skips it.
+
+### Status
+
+Built; the unit tests and the scratch-cluster test pass. The boot test and
+the kernel's pull request are recorded here when they have run.
+
 ## Open questions
 
-None at planning time. The kernel-side design of application servers
+1. **The office on the overlay after its first boot** (difference 1). Keep
+   the LAN name for the office's own connection for good (the simple
+   answer: TLS with the certificate verified is what protects it, and the
+   overlay stays for the other members), or build the switch (the overlay
+   up from local state before the kernel)? Recommended: keep the LAN name.
+
+The earlier planning questions: none were left open. The kernel-side design of application servers
 (decision 4, slice 3) is written as its own note before slice 3 starts.

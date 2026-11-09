@@ -297,6 +297,27 @@ from `endpoints.overlay` every minute and at once on a heartbeat's
 refresh`; `--no-overlay` opts a host out; `maluctl gateway expose --bind
 overlay` puts the node API on the estate's network only.
 
+## A database on another server (Phase 14)
+
+Every component above reaches PostgreSQL through first boot's connection
+(`ctx["psql"]`, `ctx["psql_file"]`, `ctx["exists"]`), so the same code
+provisions the host's own cluster as the local superuser or, with a
+`database_server` block in firstboot.yaml, a MaluOS database server as its
+admin role over TLS (docs/phase14-database-server.md). What a component
+may rely on:
+
+| ctx key | Meaning |
+|---|---|
+| `psql(sql, db)`, `exists(sql, db)` | a statement on the database, wherever it is |
+| `psql_file(path, db, pre=None, check=True)` | a file of SQL (a schema, a migration) through the same connection; `pre` runs first in the session (`SET ROLE …`). Never `runuser -u postgres psql -f` |
+| `ensure_maludb_database(name)` | a database with the engine in it: created with its extensions locally, copied from the server's template remotely. True when it was created |
+| `database_target` | None for the local cluster, else `{host, port, admin, sslmode, ca}`: what to write into a configuration that names the database's host |
+| `service_login(role, password_file=…, owner=…)` or `(role, vault_ref=…)` | `{}` locally (the socket, peer authentication). Remotely the role gets a password and the call returns the keys for the service's configuration: `pg_host`, `pg_port`, `pg_sslmode`, `pg_sslrootcert`, `pg_user` and `pg_password_file` or `pg_password_ref` |
+
+On a database server the admin role is not a superuser: a component must
+not `CREATE EXTENSION` an untrusted extension, `ALTER SYSTEM`, or create a
+SUPERUSER role. With `role: database-server` no component runs at all.
+
 ## Planned
 
 - The default applications as packages (maluos-apps phase 3), `maluctl app`

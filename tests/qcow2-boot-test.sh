@@ -46,6 +46,13 @@ BOOT_TEST_PROXY=${BOOT_TEST_PROXY:-1}; PROXY_ADDR=10.0.2.2
 SEEDPY="import os, yaml; p='/etc/maluos/firstboot.yaml'; c=(yaml.safe_load(open(p)) if os.path.exists(p) else None) or {}; k=c.setdefault('components', {}).setdefault('maludb-os-core', {})"
 [ "$BOOT_TEST_APPS" = 1 ] || SEEDPY="$SEEDPY; k['apps']={'install': []}"
 case "$(basename "$IMG")" in *server*) [ "$BOOT_TEST_PROXY" = 1 ] && SEEDPY="$SEEDPY; k['scheme']='https'; k['proxy_address']='$PROXY_ADDR'";; esac
+# The database on another server (docs/phase14-database-server.md, slice 1): after every other check, a second
+# PostgreSQL cluster on the same VM is made a database server by the real first-boot code (port 5433, TLS, clients by
+# address) and the office is provisioned against it, as the admin role; then the VM's own cluster is stopped and the
+# office must still work. The seed leaves a marker for the checks (the heredoc below cannot see this script's
+# variables). BOOT_TEST_DBSERVER=0 skips it (about half an hour under TCG).
+BOOT_TEST_DBSERVER=${BOOT_TEST_DBSERVER:-1}
+case "$(basename "$IMG")" in *server*) [ "$BOOT_TEST_DBSERVER" = 1 ] && SEEDPY="$SEEDPY; c['boot_test']={'database_server': True}";; esac
 BOOTCMD="$BOOTCMD  - [python3, -c, \"$SEEDPY; open(p, 'w').write(yaml.safe_dump(c, sort_keys=False))\"]
 "
 cat > user-data <<UD
@@ -1015,6 +1022,71 @@ for i in $(seq 1 20); do [ ! -f ~/.local/share/applications/maluos-agent-office-
 sudo -n systemctl stop maluos-mock-office 2>/dev/null
 maluctl secret delete user:maluos/deskkey >/dev/null 2>&1 || true
 sudo -n maluctl agent remove desk --purge >/dev/null 2>&1 || true
+fi
+# --- Phase 14 slice 1: the office with its database on a MaluOS database server (a second cluster of this VM stands in
+# for the server). Last, because it moves the office's data: nothing after it may assume the first cluster.
+p14_on() { sudo -n python3 -c "import yaml,sys; c=yaml.safe_load(open('/etc/maluos/firstboot.yaml')) or {}; sys.exit(0 if (c.get('boot_test') or {}).get('database_server') else 1)" 2>/dev/null; }
+if installed maluos-business-os && bos_on && p14_on; then
+echo "  -- Phase 14: a database server (cluster 18/dbs, port 5433) and the office provisioned against it"
+D=/etc/maluos/dbs-test; DP=5433
+DBS="MALUOS_FIRSTBOOT_CONFIG=$D/firstboot.yaml MALUOS_STATE_DIR=$D/state MALUOS_SECRETS_DIR=$D/secrets MALUOS_DB_SERVER_DIR=$D/tls"
+DPSQL() { sudo -n -u postgres env PGCLUSTER=18/dbs psql -XAtq "$@"; }
+sudo -n pg_createcluster 18 dbs --port $DP --start >/dev/null 2>&1
+sudo -n mkdir -p $D
+printf 'role: database-server\ndatabase: maludb\noperators: []\nlistener: {enabled: false}\ndatabase_server:\n  cluster: 18/dbs\n  listen: 127.0.0.1\n  clients: [127.0.0.1/32]\n' | sudo -n tee $D/firstboot.yaml >/dev/null
+sudo -n env $DBS maluctl provision --force > /tmp/p14-server.log 2>&1
+sudo -n python3 -c "import json; d=json.load(open('$D/state/done')); s=d['database_server']; assert d['role']=='database-server' and d['tenant'] is None and s['admin']=='maluos_admin' and s['port']==$DP and s['tls']=='self-signed' and len(s['fingerprint'])==95, d" 2>/dev/null \
+  && echo "  ok   role: database-server provisioned the second cluster (the admin role, TLS, its fingerprint; no tenant)" || { echo "  FAIL database server provisioning: $(tail -3 /tmp/p14-server.log | cut -c1-300)"; fail=1; }
+[ "$(DPSQL -c "select rolcanlogin, rolcreaterole, rolcreatedb, rolbypassrls, rolsuper from pg_roles where rolname='maluos_admin'")" = 't|t|t|t|f' ] \
+  && echo "  ok   the admin role creates roles and databases and is not a superuser" || { echo "  FAIL admin role: $(DPSQL -c "select rolcreaterole, rolcreatedb, rolsuper from pg_roles where rolname='maluos_admin'")"; fail=1; }
+[ "$(DPSQL -c 'show ssl')" = on ] && sudo -n grep -q '^hostssl all all 127.0.0.1/32 scram-sha-256' /etc/postgresql/18/dbs/pg_hba.conf && [ "$(DPSQL -c "select datistemplate from pg_database where datname='maludb_template'")" = t ] \
+  && echo "  ok   TLS on, the client in pg_hba (hostssl, scram), the engine's template database" || { echo "  FAIL server side: ssl=$(DPSQL -c 'show ssl')"; fail=1; }
+sudo -n env $DBS maluctl db export /root/dbs-export > /tmp/p14-export.log 2>&1
+sudo -n test -s /root/dbs-export/db-admin.txt && sudo -n grep -q 'BEGIN CERTIFICATE' /root/dbs-export/db-ca.pem && [ "$(sudo -n stat -c %a /root/dbs-export/db-admin.txt)" = 600 ] \
+  && echo "  ok   maluctl db export wrote the admin credential (0600) and the certificate for the office" || { echo "  FAIL db export: $(cat /tmp/p14-export.log | cut -c1-200)"; fail=1; }
+# the office: the block in firstboot.yaml, the kernel's local ledger and markers cleared (its database is a new one), then the real provisioning
+sudo -n python3 -c "import yaml; p='/etc/maluos/firstboot.yaml'; c=yaml.safe_load(open(p)) or {}; c['database_server']={'host': 'localhost', 'port': $DP, 'admin': 'maluos_admin', 'credential': 'file:/root/dbs-export/db-admin.txt', 'sslmode': 'verify-full', 'ca': 'file:/root/dbs-export/db-ca.pem'}; open(p, 'w').write(yaml.safe_dump(c, sort_keys=False))"
+sudo -n rm -f /var/lib/maluos/business-os/migrations-applied /var/lib/maluos/business-os/hire-installer /var/lib/maluos/business-os/hire-jev
+sudo -n maluctl provision --force > /tmp/p14-office.log 2>&1
+sudo -n python3 -c "
+import json
+d = json.load(open('/var/lib/maluos/firstboot/done'))
+ds = d['database_server']
+assert ds == {'host': 'localhost', 'port': $DP, 'admin': 'maluos_admin', 'sslmode': 'verify-full'}, ds
+bad = {k: v for k, v in d['components'].items() if v is not None and ('error' in v or v.get('healthy') is False)}
+assert not bad, bad
+assert d['listener'] is None, d['listener']
+" 2>/tmp/p14-done.err && echo "  ok   the office provisioned against the database server: every component healthy, the summary says where the data is" || { echo "  FAIL office provisioning: $(tail -2 /tmp/p14-done.err | cut -c1-300) | $(grep -i 'FAILED\|warning' /tmp/p14-office.log | tail -3 | cut -c1-300)"; fail=1; }
+sudo -n maluctl status | grep -q "data:        on the database server localhost:$DP (verify-full) as maluos_admin" && echo "  ok   maluctl status: data on the database server" || { echo "  FAIL status line: $(sudo -n maluctl status | sed -n 2,4p)"; fail=1; }
+sudo -n maluctl db status | tr '\n' ' ' | grep -q "reached:   yes, as maluos_admin (not a superuser).*TLSv1.3.*maludb_os" && echo "  ok   maluctl db status: reached as the admin role, not a superuser, TLS 1.3, the kernel's database there" || { echo "  FAIL db status: $(sudo -n maluctl db status 2>&1 | tr '\n' ' ' | cut -c1-300)"; fail=1; }
+[ "$(stat -c '%a %U' /var/lib/maluos/secrets/db-admin.pgpass 2>/dev/null || sudo -n stat -c '%a %U' /var/lib/maluos/secrets/db-admin.pgpass)" = '600 root' ] && cmp -s <(sudo -n cat /root/dbs-export/db-ca.pem) /etc/maluos/database-server-ca.pem \
+  && echo "  ok   the credential is root-only on the office; the certificate is beside its configuration" || { echo "  FAIL credential files"; fail=1; }
+[ "$(DPSQL -c "select count(*) from pg_roles where rolsuper and rolname <> 'postgres'")" = 0 ] && [ "$(DPSQL -c "select count(*) from pg_roles where rolname='maluos'")" = 1 ] && [ "$(DPSQL -c "select count(*) from pg_roles where rolname = '$(id -un)'")" = 0 ] \
+  && echo "  ok   no superuser but postgres on the database server; the operator has no role there (the tenant has)" || { echo "  FAIL roles on the server: $(DPSQL -c "select string_agg(rolname, ',') from pg_roles where rolsuper")"; fail=1; }
+[ "$(DPSQL -c "select string_agg(datname, ',' order by datname) from pg_database where datname in ('maludb','maludb_os','maludb_os_memory')")" = 'maludb,maludb_os,maludb_os_memory' ] && [ "$(DPSQL -d maludb_os -c 'select count(*) > 0 from members')" = t ] \
+  && echo "  ok   the kernel's databases are on the database server (its migrations applied there, the super-admin made)" || { echo "  FAIL kernel databases: $(DPSQL -c "select string_agg(datname, ',') from pg_database")"; fail=1; }
+for i in $(seq 1 20); do [ "$(DPSQL -c "select count(distinct a.usename) from pg_stat_activity a join pg_stat_ssl s using (pid) where s.ssl and a.usename in ('maluos-vault','maluos-gateway','maluos-memory')")" = 3 ] && break; maluctl gateway status >/dev/null 2>&1; curl -fsS --max-time 5 --unix-socket /run/maluos/memory.sock http://x/v1/health >/dev/null 2>&1; sudo -n maluctl secret list >/dev/null 2>&1; sleep 3; done
+[ "$(DPSQL -c "select count(distinct a.usename) from pg_stat_activity a join pg_stat_ssl s using (pid) where s.ssl and a.usename in ('maluos-vault','maluos-gateway','maluos-memory')")" = 3 ] \
+  && echo "  ok   the vault, the gateway and the memory face hold TLS connections there as their own roles (passwords: a file, the vault)" || { echo "  FAIL service connections: $(DPSQL -c "select string_agg(distinct a.usename || ':' || s.ssl, ',') from pg_stat_activity a join pg_stat_ssl s using (pid) where a.usename like 'maluos-%'")"; fail=1; }
+sudo -n grep -q "^pg_password_file: /var/lib/maluos-vault/pg.password" /etc/maluos/vault.yaml && [ "$(sudo -n stat -c '%a %U' /var/lib/maluos-vault/pg.password)" = '600 maluos-vault' ] && grep -q '^pg_password_ref: system/pg-maluos-gateway-password' /etc/maluos/gateway.yaml && grep -q '^pg_password_ref: system/pg-maluos-memory-password' /etc/maluos/memory.yaml \
+  && echo "  ok   vault.yaml names the vault's own password file; the gateway and the memory face name a vault reference" || { echo "  FAIL service configuration: $(grep -h '^pg_' /etc/maluos/gateway.yaml /etc/maluos/memory.yaml | tr '\n' ' ')"; fail=1; }
+sudo -n grep -q "^DB_HOST=localhost" /var/www/config/.env && sudo -n grep -q "^DB_PORT=$DP" /var/www/config/.env && sudo -n grep -q '^DB_SSLMODE=verify-full' /var/www/config/.env && sudo -n grep -q "^RUNNER_DB_PORT=$DP" /etc/business-os/runner.env && sudo -n grep -q "^MALUDB_PG_PORT=$DP" /etc/maludb/maludb-api.env \
+  && echo "  ok   the kernel, the runner and the MaluDB API are pointed at the database server" || { echo "  FAIL kernel configuration: $(sudo -n grep -h '^DB_HOST\|^DB_PORT\|^RUNNER_DB' /var/www/config/.env /etc/business-os/runner.env | tr '\n' ' ')"; fail=1; }
+! systemctl is-enabled --quiet maludb-mc2dbd 2>/dev/null && echo "  ok   no listener on the office (the engine's face stays with the data)" || { echo "  FAIL the office still runs a listener"; fail=1; }
+# the proof: the office's own cluster stopped, everything still answers
+sudo -n systemctl stop postgresql@18-main
+sudo -n systemctl restart maluos-vault maluos-gateway maluos-memory maludb-api apache2 2>/dev/null
+for i in $(seq 1 40); do sudo -n maluctl secret list >/dev/null 2>&1 && curl -fsS --max-time 5 http://127.0.0.1:8080/api/v1/health >/dev/null 2>&1 && curl -fsS --max-time 5 http://127.0.0.1:8000/health >/dev/null 2>&1 && break; sleep 3; done
+echo on-the-database-server | sudo -n maluctl secret add system/p14-proof --kind token --stdin >/dev/null 2>&1; [ "$(sudo -n maluctl secret show system/p14-proof 2>/dev/null)" = on-the-database-server ] \
+  && echo "  ok   the office's own cluster stopped: the vault stores and returns a secret" || { echo "  FAIL vault without the local cluster: $(sudo -n maluctl secret show system/p14-proof 2>&1 | tail -1 | cut -c1-200)"; fail=1; }
+maluctl gateway status 2>/dev/null | grep -qi 'gateway\|backend' && curl -fsS --max-time 10 --unix-socket /run/maluos/memory.sock http://x/v1/health 2>/dev/null | grep -q '"ok": *true' \
+  && echo "  ok   the office's own cluster stopped: the gateway and the memory face answer" || { echo "  FAIL gateway or memory face without the local cluster: $(maluctl gateway status 2>&1 | tail -1 | cut -c1-160)"; fail=1; }
+tok=$(sudo -n cat /var/lib/maluos/secrets/api.token 2>/dev/null); curl -fsS --max-time 20 -H "Authorization: Bearer $tok" http://127.0.0.1:8000/v1/whoami >/dev/null 2>&1 \
+  && echo "  ok   the office's own cluster stopped: the MaluDB API answers for the tenant" || { echo "  FAIL MaluDB API without the local cluster: $(curl -s --max-time 20 -H "Authorization: Bearer $tok" http://127.0.0.1:8000/v1/whoami | cut -c1-200)"; fail=1; }
+[ "$(sudo -n runuser -u www-data -- php -r 'require "/var/www/app/bootstrap.php"; echo db()->query("SELECT current_user || chr(58) || (SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid())")->fetchColumn();' 2>/dev/null)" = 'app_rw:true' ] \
+  && echo "  ok   the office's own cluster stopped: the kernel reads its database as app_rw over TLS" || { echo "  FAIL kernel without the local cluster: $(sudo -n runuser -u www-data -- php -r 'require "/var/www/app/bootstrap.php"; echo db()->query("SELECT current_user")->fetchColumn();' 2>&1 | tail -1 | cut -c1-200)"; fail=1; }
+sudo -n maluctl estate report 2>/dev/null | grep -q "database: on localhost:$DP (verify-full)" && echo "  ok   the node's report says where its data is" || echo "  warn no database line in the estate report (the node is not enrolled on this boot)"
+sudo -n systemctl start postgresql@18-main
 fi
 sudo -n maluctl status | sed 's/^/  maluctl: /'
 exit $fail

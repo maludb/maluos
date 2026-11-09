@@ -1,3 +1,16 @@
+maludb-os-core (2026.11.09maluos1) resolute; urgency=medium
+
+  * Phase 14 slice 1: the component takes DB_HOST, DB_PORT and the runner's
+    host from the database server when there is one, writes DB_SSLMODE,
+    DB_SSLROOTCERT and the installer's DB_ADMIN_USER / DB_ADMIN_PASSFILE,
+    creates the kernel's memory database from the server's template and runs
+    the migrations through first boot's connection.
+  * Vendored at the kernel's branch phase14/database-server (55284f1: TLS
+    keys for the kernel's connections, bin/app_install.php --db-*); to be
+    re-vendored at main once the pull request is merged.
+
+ -- Edward Honour <ed@maludb.org>  Mon, 09 Nov 2026 22:32:32 +0000
+
 maludb-os-core (2026.11.06maluos1) resolute; urgency=medium
 
   * Vendored at main 9e931ca (PR #6 merged 2026-11-06: the hub endpoint as a

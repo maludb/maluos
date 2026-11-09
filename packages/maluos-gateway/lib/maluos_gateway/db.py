@@ -1,7 +1,7 @@
 """Database access for the gateway: the catalogue (backends, tiers, aliases,
 classes, policies), principals and tokens, the ledger, status publishing,
 and the engine's model request queue."""
-import asyncio, hashlib, json, time
+import asyncio, hashlib, json, os, time
 import psycopg
 from psycopg import sql as pgsql
 from psycopg.rows import dict_row
@@ -59,6 +59,37 @@ class Catalog:
         return merged
 
 
+_PG_PASSWORD = {}
+
+
+def remote_kwargs(d):
+    """Phase 14: the database on another server. The port, TLS, and the role's password: from a file, or from the
+    vault (`pg_password_ref`, a use grant to this service's own principal), fetched once and again after a failure."""
+    kw = {}
+    if d.get("pg_port"):
+        kw["port"] = int(d["pg_port"])
+    if d.get("pg_sslmode"):
+        kw["sslmode"] = d["pg_sslmode"]
+    if d.get("pg_sslrootcert"):
+        kw["sslrootcert"] = d["pg_sslrootcert"]
+    if d.get("pg_password_file"):
+        with open(d["pg_password_file"]) as f:
+            kw["password"] = f.read().strip()
+    elif d.get("pg_password_ref"):
+        ref = d["pg_password_ref"]
+        if ref not in _PG_PASSWORD:
+            import sys
+            sys.path.insert(0, "/usr/lib/maluos")
+            from maluos_vault_client import Vault
+            _PG_PASSWORD[ref] = Vault(d.get("vault_socket") or os.environ.get("MALUOS_VAULT_SOCKET") or "/run/maluos/vault.sock").use(ref, "the database password")["value"]
+        kw["password"] = _PG_PASSWORD[ref]
+    return kw
+
+
+def forget_password():
+    _PG_PASSWORD.clear()
+
+
 class Database:
     def __init__(self, cfg):
         self.cfg = cfg
@@ -71,6 +102,7 @@ class Database:
               "options": f"-c search_path={d['tenant']},maludb_core,public"}
         if d.get("pg_user"):
             kw["user"] = d["pg_user"]
+        kw.update(remote_kwargs(d))
         conn = await psycopg.AsyncConnection.connect(**kw)
         if d.get("pg_role"):
             await conn.execute(pgsql.SQL("SET ROLE {}").format(pgsql.Identifier(d["pg_role"])))

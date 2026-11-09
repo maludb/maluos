@@ -8,6 +8,9 @@
   maluctl principal add REF [--kind agent|human] [--name NAME] [--home SCOPE]
   maluctl provision [--force]         (re)run first-boot provisioning now
   maluctl firstboot status            the same as status (the installer's enrolment line included)
+  maluctl db status                   where the data is: this host's cluster, or the estate's database server
+  maluctl db psql [DATABASE] [ARGS]   a psql session there (the local superuser, or the database server's admin role)
+  maluctl db export DIR               on a database server: the admin credential and the certificate, for an office's plan
   maluctl <plugin> ...                subcommands from /usr/lib/maluos/maluctl.d (e.g. secret)
 """
 import json, os, secrets, subprocess, sys, urllib.request
@@ -29,10 +32,20 @@ def cmd_status(_):
     if not st:
         print("provisioned: no  (systemctl status maluos-firstboot)"); return 1
     print(f"provisioned: {st['provisioned_at']}")
+    ds = st.get("database_server")
+    if st.get("role") == "database-server":
+        print("role:        database server (Phase 14: the estate's data; an office provisions against it)")
     print(f"database:    {st['database']}  (maludb_core {st.get('maludb_core')})")
-    print(f"tenant:      {st['tenant']}")
-    print(f"principal:   {st['admin_principal']}")
-    if os.geteuid() == 0:
+    if st.get("role") == "database-server" and ds:
+        print(f"serves:      {ds.get('listen')} port {ds.get('port')}, TLS {ds.get('tls')}, clients {', '.join(ds.get('clients') or []) or 'none'}")
+        print(f"admin role:  {ds.get('admin')}  (not a superuser; `sudo maluctl db export DIR` writes its credential for an office's plan)")
+        print(f"certificate: {ds.get('fingerprint')}")
+    elif ds:
+        print(f"data:        on the database server {ds.get('host')}:{ds.get('port')} ({ds.get('sslmode')}) as {ds.get('admin')}")
+    if st.get("tenant"):
+        print(f"tenant:      {st['tenant']}")
+        print(f"principal:   {st['admin_principal']}")
+    if os.geteuid() == 0 and st.get("tenant"):
         try:
             n = mp.psql(f"SET ROLE {mp.qi(st['tenant'])}; SET search_path TO {mp.qi(st['tenant'])}, maludb_core, public; "
                         f"SELECT count(*) FROM maludb_principal;", st["database"])
@@ -115,6 +128,78 @@ def cmd_principal(args):
     print(__doc__); return 2
 
 
+def cmd_db(args):
+    """Phase 14: where the data is, and a way to it that needs no superuser outside the database server."""
+    need_root()
+    st = state() or {}
+    cfg = mp.load_config()
+    t = mp.database_target(cfg)
+    db = st.get("database") or cfg["database"]
+    sub = args[0] if args else "status"
+    if sub == "status":
+        if mp.is_database_server(cfg):
+            ds = st.get("database_server") or {}
+            print(f"role:      database server, cluster {ds.get('cluster') or '-'}, port {ds.get('port') or mp.cluster_port()}")
+            print(f"admin:     {ds.get('admin') or '-'}  (credential {ds.get('credential') or '-'})")
+            print(f"clients:   {', '.join(ds.get('clients') or []) or '-'}")
+            print(f"tls:       {ds.get('tls') or '-'}  {ds.get('fingerprint') or ''}")
+        elif t:
+            print(f"data:      on the database server {t['host']}:{t['port']} ({t['sslmode']}) as {t['admin']}")
+        else:
+            print("data:      this host's own PostgreSQL cluster (the local superuser over the socket)")
+        try:
+            row = mp.psql("SELECT current_user || '|' || current_setting('is_superuser') || '|' || current_setting('server_version') || '|' || "
+                          "coalesce((SELECT CASE WHEN ssl THEN version ELSE 'no TLS' END FROM pg_stat_ssl WHERE pid = pg_backend_pid()), 'socket')")
+            user, sup, ver, tls = (row.split("|") + ["", "", "", ""])[:4]
+            print(f"reached:   yes, as {user} ({'superuser' if sup == 'on' else 'not a superuser'}), PostgreSQL {ver}, {tls}")
+            print("databases: " + (mp.psql("SELECT string_agg(datname, ', ' ORDER BY datname) FROM pg_database WHERE NOT datistemplate OR datname = " + mp.ql(mp.DB_TEMPLATE)) or "-"))
+            return 0
+        except Exception as e:
+            print(f"reached:   NO: {str(e).splitlines()[0][:200]}"); return 1
+    if sub == "psql":
+        rest = args[1:]
+        if rest and not rest[0].startswith("-"):
+            db, rest = rest[0], rest[1:]
+        if t:
+            mp.prepare_remote(t)
+            os.execvpe("psql", ["psql", "-d", mp.conninfo(t, db), *rest], {**os.environ, "PGPASSFILE": mp.DB_PGPASS})
+        env = mp._local_env() or dict(os.environ)
+        os.execvpe("runuser", ["runuser", "-u", "postgres", "--", "psql", "-d", db, *rest], env)
+    if sub == "export" and len(args) == 2:
+        if not mp.is_database_server(cfg) or not st.get("database_server"):
+            print("maluctl db export: this host is not a provisioned database server (role: database-server)", file=sys.stderr); return 1
+        ds, out = st["database_server"], args[1]
+        os.makedirs(out, mode=0o700, exist_ok=True)
+        import shutil, socket
+        cred, ca = os.path.join(out, "db-admin.txt"), os.path.join(out, "db-ca.pem")
+        with open(os.open(cred, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
+            f.write(open(ds["credential"]).read().strip() + "\n")
+        shutil.copyfile(ds["certificate"], ca); os.chmod(ca, 0o644)
+        host = socket.gethostname().split(".")[0]
+        frag = os.path.join(out, "database-server.yaml")
+        with open(frag, "w") as f:
+            f.write("# for the office's /etc/maluos/firstboot.yaml (or its install plan): the paths are where the two\n"
+                    "# files beside this one will be on the office at first boot (the plan's medium)\n"
+                    f"database_server:\n  host: {host}.internal\n  port: {ds.get('port')}\n  admin: {ds.get('admin')}\n"
+                    "  credential: file:/PATH/TO/db-admin.txt\n  sslmode: verify-full\n  ca: file:/PATH/TO/db-ca.pem\n")
+        if st.get("listener") and st.get("token_file") and os.path.exists(st["token_file"]):
+            lcfg = cfg.get("listener") or {}
+            ltok = os.path.join(out, "listener-token.txt")
+            with open(os.open(ltok, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
+                f.write(open(st["token_file"]).read().strip() + "\n")
+            reach = str(lcfg.get("host") or "127.0.0.1")
+            with open(frag, "a") as f:
+                f.write("# the engine's listener stays with the data: the office's agents reach it here" +
+                        ("" if reach not in ("127.0.0.1", "localhost", "::1") else " (set listener.host on this server first: it listens on loopback only)") + "\n"
+                        f"listener:\n  url: http://{host}.internal:{lcfg.get('port', 5329)}\n  token: file:/PATH/TO/listener-token.txt\n")
+            print(f"{ltok}   the listener's bearer token")
+        print(f"{cred}   the admin role's password (keep it off shared media once the office has booted)")
+        print(f"{ca}     this server's certificate (public)  {ds.get('fingerprint')}")
+        print(f"{frag}   the office's database_server block")
+        return 0
+    print(__doc__); return 2
+
+
 def cmd_provision(args):
     need_root()
     return mp.provision(force="--force" in args)
@@ -137,7 +222,7 @@ def run_plugin(path, args):
 
 
 if __name__ == "__main__":
-    cmds = {"status": cmd_status, "token": cmd_token, "principal": cmd_principal, "provision": cmd_provision, "firstboot": cmd_firstboot}
+    cmds = {"status": cmd_status, "token": cmd_token, "principal": cmd_principal, "provision": cmd_provision, "firstboot": cmd_firstboot, "db": cmd_db}
     ext = plugins()
     if len(sys.argv) < 2 or (sys.argv[1] not in cmds and sys.argv[1] not in ext):
         print(__doc__.rstrip())

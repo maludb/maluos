@@ -1,3 +1,21 @@
+maluos-firstboot (0.1.17) resolute; urgency=medium
+
+  * Phase 14 slice 1 (docs/phase14-database-server.md): the data on another
+    MaluOS server. maluos_provision takes its connection from the
+    database_server block: none, the local cluster as before; a host, the
+    database server's admin role over TLS with the password in a PGPASSFILE
+    (psql, psql_file, exists, wait_for_postgres; the credential and the
+    certificate taken from the plan's medium once). role: database-server
+    prepares the cluster for an office: the admin role (create role, create
+    database, bypass RLS, never a superuser; the engine's delegated
+    administrator), the engine's objects delegated with the grant option, a
+    template database with the engine, TLS, the clients in pg_hba, the listen
+    address. Operators get no database role on an office whose data is remote.
+  * maluctl db status | psql | export; maluctl status says where the data is.
+  * service_login for the components: a password login for a service's role.
+
+ -- Edward Honour <ed@maludb.org>  Mon, 09 Nov 2026 22:32:32 +0000
+
 maluos-firstboot (0.1.16) resolute; urgency=medium
 
   * The conffile documents components.maludb-os-core.proxy_address (https

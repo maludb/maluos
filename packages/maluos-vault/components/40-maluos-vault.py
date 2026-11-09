@@ -40,8 +40,10 @@ def provision(ctx):
         log(f"vault: master key sealed to {CRED} ({'TPM2 + host key' if has_tpm() else 'host key'})")
 
     # 2. database role and schema
-    ensure_schema(psql, exists, qi, ql, db, tenant)
+    ensure_schema(psql, exists, qi, ql, db, tenant, psql_file=ctx.get("psql_file"))
     log(f"vault: schema in {tenant}, grants to {ROLE}")
+    # Phase 14: the database on another server. The vault cannot ask itself for its password: a file of its own.
+    login = ctx["service_login"](ROLE, password_file=os.path.join(STATE, "pg.password"), owner=ROLE) if ctx.get("service_login") else {}
 
     # 3. configuration
     import yaml
@@ -49,7 +51,8 @@ def provision(ctx):
     if os.path.exists(CONF):
         with open(CONF) as f:
             cfg = yaml.safe_load(f) or {}
-    want = dict(cfg); want.update({"database": db, "tenant": tenant})
+    want = {k: v for k, v in cfg.items() if not k.startswith("pg_") or k == "pg_role"} if login or any(k.startswith("pg_password") for k in cfg) else dict(cfg)
+    want.update({"database": db, "tenant": tenant}); want.update(login)
     if want != cfg:
         with open(CONF, "w") as f:
             f.write("# MaluOS vault (maluos-vault). database/tenant are set by first boot.\n"
@@ -57,6 +60,21 @@ def provision(ctx):
                     "# identities: map a Linux user to a principal other than user:<name>.\n")
             yaml.safe_dump(want, f, sort_keys=True)
         os.chmod(CONF, 0o644)
+
+    # the vault's unit speaks only over Unix sockets; a database on another server needs IP too (a drop-in, only then)
+    dropin = "/etc/systemd/system/maluos-vault.service.d/database-server.conf"
+    if login:
+        os.makedirs(os.path.dirname(dropin), exist_ok=True)
+        text = ("# written by first boot: the vault's store is on the database server " + str(login.get("pg_host")) + " (Phase 14)\n"
+                "[Unit]\nAfter=network-online.target\nWants=network-online.target\n"
+                "[Service]\nRestrictAddressFamilies=AF_UNIX AF_INET AF_INET6\n")
+        if not os.path.exists(dropin) or open(dropin).read() != text:
+            with open(dropin, "w") as f:
+                f.write(text)
+            subprocess.run(["systemctl", "daemon-reload"], check=False)
+        log(f"vault: its store is on {login.get('pg_host')}:{login.get('pg_port')} ({login.get('pg_sslmode')}), password in {login.get('pg_password_file')}")
+    elif os.path.exists(dropin):
+        os.remove(dropin); subprocess.run(["systemctl", "daemon-reload"], check=False)
 
     # 4. start
     subprocess.run(["systemctl", "enable", "--quiet", "maluos-vault.socket"], check=False)
@@ -102,22 +120,25 @@ def provision(ctx):
                 env_var="MALUDB_MC2DBD_TOKEN", upsert=True); imported += 1
     log(f"vault healthy at {v.socket_path}; {imported} system secret(s) imported")
     return {"healthy": True, "socket": v.socket_path, "role": ROLE, "credential": CRED,
-            "sealing": "tpm2+host" if has_tpm() else "host", "imported": imported}
+            "sealing": "tpm2+host" if has_tpm() else "host", "imported": imported,
+            "database_server": login.get("pg_host")}
 
 
-def ensure_schema(psql, exists, qi, ql, db, tenant, role=ROLE, schema=SCHEMA):
+def ensure_schema(psql, exists, qi, ql, db, tenant, role=ROLE, schema=SCHEMA, psql_file=None):
     """Vault role, tenant-schema objects (as the tenant) and the role's grants. Idempotent."""
+    if psql_file is None:
+        sys.path.insert(0, "/usr/lib/maluos")
+        from maluos_provision import psql_file
     if not exists(f"SELECT 1 FROM pg_roles WHERE rolname={ql(role)}"):
         psql(f"CREATE ROLE {qi(role)} LOGIN")
-    r = subprocess.run(["runuser", "-u", "postgres", "--", "psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-d", db,
-                        "-c", f"SET ROLE {qi(tenant)}; SET search_path TO {qi(tenant)}, maludb_core, public;", "-f", schema],
-                       capture_output=True, text=True)
+    r = psql_file(schema, db, pre=f"SET ROLE {qi(tenant)}; SET search_path TO {qi(tenant)}, maludb_core, public;", check=False)
     if r.returncode != 0:
         raise RuntimeError(f"vault schema failed: {r.stderr.strip()[-400:]}")
     t, rl = qi(tenant), qi(role)
     psql(f"GRANT CONNECT ON DATABASE {qi(db)} TO {rl}", db)
     # The principal facades are owned by the extension owner (enable_memory_schema
-    # is SECURITY DEFINER), so a superuser grants them; the tenant grants its own tables.
+    # is SECURITY DEFINER), so a superuser grants them (on a database server: the admin
+    # role, which holds them with the grant option); the tenant grants its own tables.
     psql(f"""GRANT USAGE ON SCHEMA maludb_core TO {rl};
              GRANT SELECT ON maludb_core."malu$principal", maludb_core."malu$principal_scope" TO {rl};
              GRANT USAGE ON SCHEMA {t} TO {rl};

@@ -117,13 +117,18 @@ def provision(ctx):
         psql(f"CREATE ROLE {qi(MEM_USER)} LOGIN PASSWORD {ql(mem_pw)}")
     else:
         psql(f"ALTER ROLE {qi(MEM_USER)} WITH LOGIN PASSWORD {ql(mem_pw)}")
-    if not exists(f"SELECT 1 FROM pg_database WHERE datname={ql(MEM_DB)}"):
-        psql(f"CREATE DATABASE {qi(MEM_DB)}")
-        log(f"created memory database {MEM_DB}")
-    for ext in ("vector", "maludb_core"):
-        if not exists(f"SELECT 1 FROM pg_extension WHERE extname={ql(ext)}", MEM_DB):
-            psql(f"CREATE EXTENSION {qi(ext)} CASCADE", MEM_DB)
-    psql(f"ALTER DATABASE {qi(MEM_DB)} SET search_path TO maludb_core, public")
+    # a database with the engine in it: created here, or copied from the database server's template (Phase 14)
+    if ctx.get("ensure_maludb_database"):
+        if ctx["ensure_maludb_database"](MEM_DB):
+            log(f"created memory database {MEM_DB}")
+    else:
+        if not exists(f"SELECT 1 FROM pg_database WHERE datname={ql(MEM_DB)}"):
+            psql(f"CREATE DATABASE {qi(MEM_DB)}")
+            log(f"created memory database {MEM_DB}")
+        for ext in ("vector", "maludb_core"):
+            if not exists(f"SELECT 1 FROM pg_extension WHERE extname={ql(ext)}", MEM_DB):
+                psql(f"CREATE EXTENSION {qi(ext)} CASCADE", MEM_DB)
+        psql(f"ALTER DATABASE {qi(MEM_DB)} SET search_path TO maludb_core, public")
     psql(f"GRANT maludb_user TO {qi(MEM_USER)}", MEM_DB)
     if not exists(f"SELECT 1 FROM pg_namespace WHERE nspname={ql(MEM_USER)}", MEM_DB):
         psql(f"CREATE SCHEMA {qi(MEM_USER)} AUTHORIZATION {qi(MEM_USER)}", MEM_DB)
@@ -167,8 +172,11 @@ def provision(ctx):
     for f in sorted(glob.glob(f"{WWW}/db/*.sql")):
         base = os.path.basename(f)
         if base in done: continue
-        r = subprocess.run(["runuser", "-u", "postgres", "--", "psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-d", DB, "-f", f],
-                           capture_output=True, text=True)
+        if ctx.get("psql_file"):   # the same connection as every other statement: the local superuser, or the database server's admin
+            r = ctx["psql_file"](f, DB, check=False)
+        else:
+            r = subprocess.run(["runuser", "-u", "postgres", "--", "psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-d", DB, "-f", f],
+                               capture_output=True, text=True)
         if r.returncode != 0:
             raise RuntimeError(f"migration {base} failed: {r.stderr[-600:]}")
         with open(ledger, "a") as fh: fh.write(base + "\n")
@@ -182,20 +190,26 @@ def provision(ctx):
             psql(f"ALTER ROLE {qi(role)} WITH LOGIN PASSWORD {ql(pw)}")
 
     # ---- 6. configuration files
+    # Phase 14: where the data is. The kernel's roles already log in with passwords; only the host changes.
+    dbt = ctx.get("database_target") or {}
+    db_host, db_port = (dbt["host"], str(dbt["port"])) if dbt else ("127.0.0.1", "5432")
+    # DB_ADMIN_*: how the kernel's application installer reaches the same server (a path only root reads, no password here)
+    db_tls = {"DB_SSLMODE": dbt["sslmode"], **({"DB_SSLROOTCERT": dbt["ca"]} if dbt.get("ca") else {}),
+              "DB_ADMIN_USER": dbt["admin"], "DB_ADMIN_PASSFILE": os.path.join(ctx["secrets_dir"], "db-admin.pgpass")} if dbt else {}
     keys = {n: secret(n) for n in ("app_totp_key", "action_token_key", "secrets_key", "web_internal_key",
                                    "runner_key", "actions_relay_key", "proxy_key_secret")}
     envf = f"{WWW}/config/.env"
     if not os.path.exists(envf):
         shutil.copy(f"{WWW}/config/.env.example", envf)
     pairs = {"APP_ENV": "prod", "APP_URL": f"{scheme}://app.{domain}", "OS_HOST": f"os.{domain}", "APP_HOST": f"app.{domain}",
-             "SESSION_COOKIE_DOMAIN": f".{domain}", "DB_HOST": "127.0.0.1", "DB_PORT": "5432", "DB_NAME": DB,
+             "SESSION_COOKIE_DOMAIN": f".{domain}", "DB_HOST": db_host, "DB_PORT": db_port, "DB_NAME": DB,
              "DB_USER": "app_rw", "DB_PASSWORD": pws["app_rw"],
              "MCP_RECORDS_DB_USER": "app_records_ro", "MCP_RECORDS_DB_PASSWORD": pws["app_records_ro"],
              "MCP_ACTIVITY_DB_USER": "app_activity_ro", "MCP_ACTIVITY_DB_PASSWORD": pws["app_activity_ro"],
              "APP_TOTP_KEY": keys["app_totp_key"], "ACTION_TOKEN_KEY": keys["action_token_key"], "SECRETS_KEY": keys["secrets_key"],
              "WEB_INTERNAL_KEY": keys["web_internal_key"], "RUNNER_KEY": keys["runner_key"], "ACTIONS_RELAY_KEY": keys["actions_relay_key"],
              "MALUDB_API_URL": api_url, "MALUDB_API_TOKEN": token, "MALUDB_MEMORY_DB": MEM_DB, "MALUDB_MEMORY_USER": MEM_USER,
-             "MALUDB_MEMORY_PASSWORD": mem_pw, "MAIL_FROM": f"no-reply@{domain}"}
+             "MALUDB_MEMORY_PASSWORD": mem_pw, "MAIL_FROM": f"no-reply@{domain}", **db_tls}
     if cfg.get("malumail_api_key"): pairs["MALUMAIL_API_KEY"] = cfg["malumail_api_key"]
     write_env(envf, pairs, ("root", "www-data"), 0o640)
     webenv = f"{WWW}/web/.env.local"
@@ -204,7 +218,8 @@ def provision(ctx):
     renv = f"{BOS}/runner.env"
     if not os.path.exists(renv):
         shutil.copy(f"{WWW}/docs/deploy/runner.env.example", renv)
-    rpairs = {"RUNNER_DB_USER": "app_runner", "RUNNER_DB_PASSWORD": pws["app_runner"], "RUNNER_DB_NAME": DB, "RUNNER_DB_HOST": "127.0.0.1",
+    rpairs = {"RUNNER_DB_USER": "app_runner", "RUNNER_DB_PASSWORD": pws["app_runner"], "RUNNER_DB_NAME": DB, "RUNNER_DB_HOST": db_host, "RUNNER_DB_PORT": db_port,
+              **({"RUNNER_DB_SSLMODE": dbt["sslmode"], **({"RUNNER_DB_SSLROOTCERT": dbt["ca"]} if dbt.get("ca") else {})} if dbt else {}),
               "ACTION_TOKEN_KEY": keys["action_token_key"], "RUNNER_KEY": keys["runner_key"], "PROXY_KEY_SECRET": keys["proxy_key_secret"],
               "MALUDB_API_URL": api_url, "MALUDB_API_TOKEN": token, "RUNNER_SCHEDULER": "on"}
     for k in ("anthropic_api_key", "openrouter_api_key"):

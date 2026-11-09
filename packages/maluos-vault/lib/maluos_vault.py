@@ -120,13 +120,28 @@ def load_master():
 
 
 # ---------------------------------------------------------------- database
-def connect():
-    d = CFG.data
+def pg_kwargs(d):
+    """Where the store is: the local socket (peer authentication), or the estate's database server (Phase 14):
+    pg_host, pg_port, TLS, and the role's password from a file of the vault's own (it cannot ask itself)."""
     kw = {"dbname": d["database"], "host": d["pg_host"], "autocommit": True,
           "options": f"-c search_path={d['tenant']},maludb_core,public"}
     if d.get("pg_user"):
         kw["user"] = d["pg_user"]
-    conn = psycopg.connect(**kw)
+    if d.get("pg_port"):
+        kw["port"] = int(d["pg_port"])
+    if d.get("pg_sslmode"):
+        kw["sslmode"] = d["pg_sslmode"]
+    if d.get("pg_sslrootcert"):
+        kw["sslrootcert"] = d["pg_sslrootcert"]
+    if d.get("pg_password_file"):
+        with open(d["pg_password_file"]) as f:
+            kw["password"] = f.read().strip()
+    return kw
+
+
+def connect():
+    d = CFG.data
+    conn = psycopg.connect(**pg_kwargs(d))
     if d.get("pg_role"):
         conn.execute(pgsql.SQL("SET ROLE {}").format(pgsql.Identifier(d["pg_role"])))
     return conn

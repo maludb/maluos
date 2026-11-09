@@ -1,3 +1,11 @@
+maluos-memory (0.2.2) resolute; urgency=medium
+
+  * Phase 14 slice 1: the database on a database server (pg_port,
+    pg_sslmode, pg_sslrootcert, pg_password_ref or pg_password_file, as the
+    gateway); the component mints the password and the grant.
+
+ -- Edward Honour <ed@maludb.org>  Mon, 09 Nov 2026 22:32:32 +0000
+
 maluos-memory (0.2.1) resolute; urgency=medium
 
   * Slice 4b, from the chain's sixth run: every embedding call carries the

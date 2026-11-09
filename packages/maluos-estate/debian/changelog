@@ -1,3 +1,11 @@
+maluos-estate (0.7.1) resolute; urgency=medium
+
+  * Phase 14 slice 1: the node's report carries a database part (a database
+    server: its port, clients and certificate fingerprint; an office with its
+    data elsewhere: the server it uses), and the summary a line for it.
+
+ -- Edward Honour <ed@maludb.org>  Mon, 09 Nov 2026 22:32:32 +0000
+
 maluos-estate (0.7.0) resolute; urgency=medium
 
   * The estate behind a proxy (docs/phase13-estate-behind-a-proxy.md): the

@@ -20,6 +20,12 @@ declare(strict_types=1);
  *          --proxy-address <addr> (the proxy's address as this host sees it: under https the name goes to it in /etc/hosts
  *          instead of loopback, and the sign-on proof dials it; MaluOS passes components.maludb-os-core.proxy_address)
  *
+ *          --db-host <host> --db-port <port> --db-admin <role> --db-passfile <PGPASSFILE> [--db-sslmode <mode>]
+ *          [--db-ca <file>] (MaluOS Phase 14: the application's database and roles are made on the estate's database
+ *          server, as its admin role, not on this host as postgres; the application's DB_HOST is that server. Without
+ *          the options the kernel's config/.env decides: DB_HOST that is not loopback with DB_ADMIN_USER and
+ *          DB_ADMIN_PASSFILE, which MaluOS writes, means the same.)
+ *
  * What stays the owner's: DNS for <label>.<domain>, TLS, and any grant not named here. A name that does not resolve
  * yet gets a line in /etc/hosts (loopback, or --proxy-address), and the plan says so.
  *
@@ -49,7 +55,9 @@ for ($i = 3, $n = count($argvAll); $i < $n; $i++) {
 if (!in_array($mode, ['plan', 'apply'], true) || $source === '') {
     fwrite(STDERR, "Usage: php bin/app_install.php plan|apply <repository dir or git URL> [--by <email>] [--domain <domain>] [--scheme http|https]\n"
         . "       [--tenant <db prefix>] [--ref <tag>] [--hire-agents] [--grant-standing-departments] [--no-restart] [--rotate-db-passwords]\n"
-        . "       [--proxy-address <addr>]  (https behind a proxy: the name points at the proxy, not loopback)\n");
+        . "       [--proxy-address <addr>]  (https behind a proxy: the name points at the proxy, not loopback)\n"
+        . "       [--db-host <host> --db-port <port> --db-admin <role> --db-passfile <file> [--db-sslmode <mode>] [--db-ca <file>]]\n"
+        . "                                 (the database on another server, as its admin role)\n");
     exit(1);
 }
 $APPLY = $mode === 'apply';
@@ -89,14 +97,43 @@ function q(string $cmd): array
     exec($cmd . ' 2>&1', $out, $code);
     return [$code, implode("\n", $out)];
 }
+/**
+ * Where the databases are made. null: this host's cluster, as the local superuser (runuser -u postgres). An array
+ * (MaluOS Phase 14): the estate's database server, as its admin role over TLS, the password in a PGPASSFILE that
+ * only root reads. Set once the options and the kernel's config/.env are known (section 0).
+ */
+$DBT = null;
+function psql_cmd(bool $readOnly = false): string
+{
+    global $DBT;
+    if ($DBT === null) {
+        return ($readOnly && posix_geteuid() !== 0 ? 'sudo -n -u postgres' : 'runuser -u postgres --') . ' psql';
+    }
+    $env = ['PGPASSFILE' => $DBT['passfile'], 'PGCONNECT_TIMEOUT' => '15'];
+    if ($DBT['sslmode'] !== '') { $env['PGSSLMODE'] = $DBT['sslmode']; }
+    if ($DBT['ca'] !== '') { $env['PGSSLROOTCERT'] = $DBT['ca']; }
+    $pairs = [];
+    foreach ($env as $k => $v) { $pairs[] = $k . '=' . escapeshellarg($v); }
+    return 'env ' . implode(' ', $pairs) . ' psql -X -h ' . escapeshellarg($DBT['host']) . ' -p ' . (int) $DBT['port'] . ' -U ' . escapeshellarg($DBT['admin']);
+}
+/** The same connection for a provisioning script: libpq's own variables, so a plain `psql` in it reaches the server. */
+function psql_env(): array
+{
+    global $DBT;
+    if ($DBT === null) { return []; }
+    $env = ['PGHOST' => $DBT['host'], 'PGPORT' => (string) $DBT['port'], 'PGUSER' => $DBT['admin'], 'PGPASSFILE' => $DBT['passfile'],
+            'DB_HOST' => $DBT['host'], 'DB_PORT' => (string) $DBT['port']];
+    if ($DBT['sslmode'] !== '') { $env['PGSSLMODE'] = $DBT['sslmode']; }
+    if ($DBT['ca'] !== '') { $env['PGSSLROOTCERT'] = $DBT['ca']; }
+    return $env;
+}
 function psql(string $sql, string $db = 'postgres'): array
 {
-    return q('runuser -u postgres -- psql -At -v ON_ERROR_STOP=1 -d ' . escapeshellarg($db) . ' -c ' . escapeshellarg($sql));
+    return q(psql_cmd() . ' -At -v ON_ERROR_STOP=1 -d ' . escapeshellarg($db) . ' -c ' . escapeshellarg($sql));
 }
 function psql_ro(string $sql, string $db = 'postgres'): array
 {
-    $pre = posix_geteuid() === 0 ? 'runuser -u postgres --' : 'sudo -n -u postgres';
-    return q($pre . ' psql -At -d ' . escapeshellarg($db) . ' -c ' . escapeshellarg($sql));
+    return q(psql_cmd(true) . ' -At -d ' . escapeshellarg($db) . ' -c ' . escapeshellarg($sql));
 }
 function env_file_read(string $path): array
 {
@@ -190,6 +227,26 @@ function render_template(string $text, array $vars): array
 // ---- 0. the kernel, the super-admin, the manifest ---------------------------------------------------------------
 $pdo = db();
 $kernelEnv = env_file_read($KERNEL . '/config/.env');
+// The database server (MaluOS Phase 14): the options, else what MaluOS wrote into the kernel's config/.env.
+$optStr = static fn (string $k): string => isset($opts[$k]) && is_string($opts[$k]) ? trim($opts[$k]) : '';
+$dbHost = $optStr('db-host') !== '' ? $optStr('db-host') : (string) ($kernelEnv['DB_HOST'] ?? '');
+$dbAdmin = $optStr('db-admin') !== '' ? $optStr('db-admin') : (string) ($kernelEnv['DB_ADMIN_USER'] ?? '');
+$dbPassfile = $optStr('db-passfile') !== '' ? $optStr('db-passfile') : (string) ($kernelEnv['DB_ADMIN_PASSFILE'] ?? '');
+$dbLocal = in_array($dbHost, ['', '127.0.0.1', '::1', 'localhost'], true) || str_starts_with($dbHost, '/');
+if ($optStr('db-host') !== '' && !$dbLocal && ($dbAdmin === '' || $dbPassfile === '')) {
+    stop('database', '--db-host needs --db-admin <role> and --db-passfile <PGPASSFILE> (the admin role of the database server).');
+}
+if (!$dbLocal && $dbAdmin !== '' && $dbPassfile !== '') {
+    if (preg_match('/^[A-Za-z0-9.:_-]{1,253}$/', $dbHost) !== 1 || preg_match('/^[A-Za-z_][A-Za-z0-9_-]{0,62}$/', $dbAdmin) !== 1) {
+        stop('database', 'the database server\'s host or admin role is not a name: ' . json_encode([$dbHost, $dbAdmin]));
+    }
+    $DBT = ['host' => $dbHost, 'port' => (int) ($optStr('db-port') !== '' ? $optStr('db-port') : ($kernelEnv['DB_PORT'] ?? 5432)),
+            'admin' => $dbAdmin, 'passfile' => $dbPassfile,
+            'sslmode' => $optStr('db-sslmode') !== '' ? $optStr('db-sslmode') : (string) ($kernelEnv['DB_SSLMODE'] ?? ''),
+            'ca' => $optStr('db-ca') !== '' ? $optStr('db-ca') : (string) ($kernelEnv['DB_SSLROOTCERT'] ?? '')];
+    if (posix_geteuid() === 0 && !is_readable($dbPassfile)) { stop('database', "the admin role's PGPASSFILE {$dbPassfile} is not there."); }
+    say('database-server', 'done', "{$DBT['host']}:{$DBT['port']} as {$DBT['admin']}" . ($DBT['sslmode'] !== '' ? " ({$DBT['sslmode']})" : '') . ' — the roles and the database are made there');
+}
 $by = null;
 if (isset($opts['by']) && is_string($opts['by'])) {
     $by = find_member_by_email($pdo, normalize_email($opts['by']));
@@ -319,7 +376,8 @@ $provisionPath = $provision !== '' ? (is_file($A . '/' . $provision) ? $A . '/' 
 if ($provision !== '' && !is_file($provisionPath)) { stop('database', "database.provision names {$provision}, which is not in the repository."); }
 $provisionCmd = static function () use ($provisionPath, $dbName, $roles, $A, $key, $name, $tenant): string {
     $env = ['DB_NAME' => $dbName, 'DB_RW_ROLE' => (string) $roles['rw'], 'DB_RECORDS_ROLE' => (string) ($roles['records_ro'] ?? ''),
-            'DB_ACTIVITY_ROLE' => (string) ($roles['activity_ro'] ?? ''), 'APP_DIR' => $A, 'APP_KEY' => $key, 'APP_NAME' => $name, 'TENANT' => $tenant];
+            'DB_ACTIVITY_ROLE' => (string) ($roles['activity_ro'] ?? ''), 'APP_DIR' => $A, 'APP_KEY' => $key, 'APP_NAME' => $name, 'TENANT' => $tenant]
+        + psql_env();   // on a database server: PGHOST and its kin, so the script's own psql reaches it (no `runuser -u postgres` there)
     $pairs = [];
     foreach ($env as $k => $v) { $pairs[] = $k . '=' . escapeshellarg($v); }
     return 'env ' . implode(' ', $pairs) . ' bash ' . escapeshellarg($provisionPath);
@@ -347,7 +405,7 @@ if ($dbExists) {
     } else {
         foreach ($migrations as $f) {
             if (!$APPLY) { continue; }
-            [$c, $o] = q('runuser -u postgres -- psql -v ON_ERROR_STOP=1 -q -d ' . escapeshellarg($dbName) . ' -f ' . escapeshellarg($f));
+            [$c, $o] = q(psql_cmd() . ' -v ON_ERROR_STOP=1 -q -d ' . escapeshellarg($dbName) . ' -f ' . escapeshellarg($f));
             if ($c !== 0) { stop('database', basename($f) . ": {$o}"); }
         }
         if ($APPLY) { say('database', 'ok', count($migrations) . ' migrations applied'); }
@@ -391,12 +449,16 @@ $envPath = $A . '/config/.env';
 $required = (array) ($m['env']['required'] ?? []);
 $values = [
     'APP_ENV' => 'production', 'APP_DEBUG' => '0', 'APP_NAME' => $name, 'APP_URL' => $appUrl, 'APP_KEY' => $key,
-    'DB_HOST' => '127.0.0.1', 'DB_PORT' => '5432', 'DB_NAME' => $dbName, 'DB_USER' => (string) $roles['rw'],
+    'DB_HOST' => $DBT['host'] ?? '127.0.0.1', 'DB_PORT' => (string) ($DBT['port'] ?? '5432'), 'DB_NAME' => $dbName, 'DB_USER' => (string) $roles['rw'],
     'MCP_RECORDS_DB_USER' => (string) ($roles['records_ro'] ?? ''), 'MCP_ACTIVITY_DB_USER' => (string) ($roles['activity_ro'] ?? ''),
     'ACTION_TOKEN_KEY' => (string) ($kernelEnv['ACTION_TOKEN_KEY'] ?? ''), 'ACTIONS_RELAY_KEY' => (string) ($kernelEnv['ACTIONS_RELAY_KEY'] ?? ''),
     'OS_INTERNAL_URL' => 'http://127.0.0.1:8080', 'OS_LAUNCHER_URL' => $scheme . '://' . (string) ($kernelEnv['APP_HOST'] ?? ('app.' . $domain)) . '/',
     'MALUDB_API_URL' => (string) ($kernelEnv['MALUDB_API_URL'] ?? 'http://127.0.0.1:8000'),
 ] + $ports;
+if ($DBT !== null && $DBT['sslmode'] !== '') {
+    $values['DB_SSLMODE'] = $DBT['sslmode'];
+    if ($DBT['ca'] !== '') { $values['DB_SSLROOTCERT'] = $DBT['ca']; }
+}
 if ($passwords !== []) {
     $values['DB_PASSWORD'] = $passwords['rw'] ?? '';
     $values['MCP_RECORDS_DB_PASSWORD'] = $passwords['records_ro'] ?? '';
@@ -432,7 +494,7 @@ $missing = array_values(array_diff($missing, $mailMissing));    // a required ma
 // processcore_dev and refused every hand-off as expired because its ACTION_TOKEN_KEY was not the kernel's. Rewritten when they
 // differ, named in a todo line, values never shown. Secrets the installer generates ONCE (the roles' passwords, TOTP_KEY,
 // DUMMY_PASSWORD_HASH) and the ports stay as they are.
-$installerOwned = ['APP_ENV', 'APP_NAME', 'APP_URL', 'APP_KEY', 'DB_HOST', 'DB_PORT', 'DB_NAME', 'DB_USER', 'MCP_RECORDS_DB_USER', 'MCP_ACTIVITY_DB_USER',
+$installerOwned = ['APP_ENV', 'APP_NAME', 'APP_URL', 'APP_KEY', 'DB_HOST', 'DB_PORT', 'DB_SSLMODE', 'DB_SSLROOTCERT', 'DB_NAME', 'DB_USER', 'MCP_RECORDS_DB_USER', 'MCP_ACTIVITY_DB_USER',
     'ACTION_TOKEN_KEY', 'ACTIONS_RELAY_KEY', 'OS_INTERNAL_URL', 'OS_LAUNCHER_URL', 'MALUDB_API_URL'];
 if (!empty($m['identity']['enabled_env'])) { $installerOwned[] = (string) $m['identity']['enabled_env']; }
 $sharedKeys = array_values(array_filter($installerOwned,

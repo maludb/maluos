@@ -115,6 +115,14 @@ SCHEMA = {
             "name": S("str", ""),
         },
         "cloud_init": S("bool", lambda v: v == "server"),
+        # Phase 14 (docs/phase14-database-server.md): "" = an ordinary host with its own PostgreSQL (or an office
+        # whose database_server.host names another server); database-server = this host is the estate's database.
+        "role": E(["", "database-server"], ""),
+        "database_server": {
+            "host": S("str", ""), "port": S("int", 5432), "admin": S("str", "maluos_admin"),
+            "credential": S("str", ""), "sslmode": E(["", "require", "verify-ca", "verify-full"], ""), "ca": S("str", ""),
+            "listen": S("str", ""), "clients": S("list", []), "names": S("list", []), "addresses": S("list", []),
+        },
     },
     "bootloader": {
         "mode": E(["auto", "bios", "uefi", "both"], "auto"),
@@ -135,8 +143,9 @@ SCHEMA = {
 }
 
 SECRET_PATHS = (("identity", "user", "password"), ("storage", "passphrase"),
-                ("firstboot", "enroll", "code"), ("network", "wifi", "password"))
-REF_PATHS = SECRET_PATHS + (("identity", "user", "ssh_keys"),)
+                ("firstboot", "enroll", "code"), ("network", "wifi", "password"),
+                ("firstboot", "database_server", "credential"))
+REF_PATHS = SECRET_PATHS + (("identity", "user", "ssh_keys"), ("firstboot", "database_server", "ca"))
 
 
 def _is_leaf(node):
@@ -282,6 +291,7 @@ def semantic_errors(plan):
     if fb["enroll"]["kind"] and not fb["enroll"]["code"]:
         errs.append("firstboot.enroll.code is required with firstboot.enroll.kind")
     errs += component_errors(fb["components"] or {})
+    errs += database_errors(fb)
     img = plan["source"]["image"]
     if "://" in img:
         errs.append("source.image from a URL is not supported yet (the key is reserved)")
@@ -291,6 +301,40 @@ def semantic_errors(plan):
 
 
 BOS = "maludb-os-core"
+HOST_RE = r"^([0-9.]{7,15}|[0-9A-Fa-f:]{2,39}|[A-Za-z0-9]([A-Za-z0-9-]{0,62}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,62}[A-Za-z0-9])?)*)$"
+
+
+def database_errors(fb):
+    """firstboot.role and firstboot.database_server (Phase 14). A database server names who may connect and runs
+    no kernel; an office with its data elsewhere names the host and brings the admin role's credential."""
+    errs = []
+    ds, role = fb["database_server"], fb["role"]
+    where = "firstboot.database_server"
+    if role == "database-server":
+        if ds["host"]:
+            errs.append(f"{where}.host is for an office that uses a database server; with firstboot.role database-server this host is the server (listen, clients)")
+        spec = (fb["components"] or {}).get(BOS)
+        if spec is True or (isinstance(spec, dict) and spec.get("enabled") is True):
+            errs.append(f"firstboot.role database-server runs no Business OS kernel: turn firstboot.components.{BOS} off, or install the office on another host")
+        for c in ds["clients"]:
+            if not re.match(r"^[0-9A-Fa-f:.]+(/[0-9]{1,3})?$", c):
+                errs.append(f"{where}.clients: {c!r} is not an address or a network (like 192.168.100.0/24)")
+        if ds["listen"] and not re.match(r"^(\*|[0-9A-Fa-f:.]+)$", ds["listen"]):
+            errs.append(f"{where}.listen {ds['listen']!r} is not an address (0.0.0.0 for every interface)")
+    elif ds["host"]:
+        if not re.match(HOST_RE, ds["host"]):
+            errs.append(f"{where}.host {ds['host']!r} is neither an address nor a host name")
+        if not ds["credential"]:
+            errs.append(f"{where}.credential is required with {where}.host (the admin role's password: 'file:' + a path on the plan's medium; `maluctl db export` on the database server writes it)")
+        if not 1 <= ds["port"] <= 65535:
+            errs.append(f"{where}.port {ds['port']!r} is not a port")
+        if ds["sslmode"] in ("verify-ca", "verify-full") and not ds["ca"]:
+            errs.append(f"{where}.sslmode {ds['sslmode']} needs {where}.ca (the database server's certificate: 'file:' + a path)")
+        if not re.match(r"^[A-Za-z_][A-Za-z0-9_-]{0,62}$", ds["admin"]):
+            errs.append(f"{where}.admin {ds['admin']!r} is not a role name")
+    elif any(ds[k] for k in ("credential", "ca", "listen", "clients")):
+        errs.append(f"{where} is set but names no host and firstboot.role is not database-server: give {where}.host (an office) or the role (the server)")
+    return errs
 
 
 def component_errors(comps):

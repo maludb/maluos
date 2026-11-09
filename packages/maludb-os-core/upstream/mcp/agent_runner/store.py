@@ -22,13 +22,28 @@ log = logging.getLogger("agent_runner.store")
 _pool: asyncpg.Pool | None = None
 
 
+def _ssl_kwargs(mode: str, rootcert: str) -> dict:
+    """TLS to a PostgreSQL on another server (MaluOS Phase 14): the same rule as mcp/pg_tls.py, kept here because
+    the runner is its own package with its own environment file."""
+    import ssl
+    mode = (mode or "").strip()
+    if mode not in ("disable", "allow", "prefer", "require", "verify-ca", "verify-full"):
+        return {}
+    if mode in ("verify-ca", "verify-full") and (rootcert or "").strip():
+        ctx = ssl.create_default_context(cafile=rootcert.strip())
+        ctx.check_hostname = mode == "verify-full"
+        return {"ssl": ctx}
+    return {"ssl": mode}
+
+
 async def pool() -> asyncpg.Pool:
     global _pool
     if _pool is None:
         _pool = await asyncpg.create_pool(
             host=config.get("RUNNER_DB_HOST", "127.0.0.1"), port=int(config.get("RUNNER_DB_PORT", "5432")),
             database=config.get("RUNNER_DB_NAME", "maludb_os"), user=config.require("RUNNER_DB_USER"),
-            password=config.require("RUNNER_DB_PASSWORD"), min_size=1, max_size=6)
+            password=config.require("RUNNER_DB_PASSWORD"), min_size=1, max_size=6,
+            **_ssl_kwargs(config.get("RUNNER_DB_SSLMODE", ""), config.get("RUNNER_DB_SSLROOTCERT", "")))
     return _pool
 
 

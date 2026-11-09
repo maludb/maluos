@@ -33,7 +33,12 @@ def provision(ctx):
     if os.path.exists(CONF):
         with open(CONF) as f:
             conf = yaml.safe_load(f) or {}
-    want = dict(conf); want.update({"database": db, "tenant": tenant, "guest": GUEST, "sync_principal": SYNC})
+    # Phase 14: the database on another server: a password for the role, kept in the vault for the face's own use
+    login = ctx["service_login"](ROLE, vault_ref=f"system/pg-{ROLE}-password") if ctx.get("service_login") else {}
+    if login:
+        log(f"memory: its database is on {login.get('pg_host')}:{login.get('pg_port')} ({login.get('pg_sslmode')}), password {login.get('pg_password_ref')}")
+    want = {k: v for k, v in conf.items() if not k.startswith("pg_") or k == "pg_role"} if login or any(k.startswith("pg_password") for k in conf) else dict(conf)
+    want.update({"database": db, "tenant": tenant, "guest": GUEST, "sync_principal": SYNC}); want.update(login)
     want.setdefault("tcp", {"enabled": False, "host": "overlay", "port": 11437})
     ccfg = (ctx["cfg"].get("components") or {}).get("maluos-memory") or {}
     if isinstance(ccfg.get("tcp"), dict):

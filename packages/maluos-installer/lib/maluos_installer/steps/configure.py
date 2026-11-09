@@ -363,6 +363,25 @@ def sub_firstboot(ctx):
         e = fb["enroll"]
         doc["enroll"] = {"kind": e["kind"], "url": e["url"], "code": e["code"], "name": e["name"] or ctx.plan["identity"]["hostname"],
                          "owner": ctx.plan["identity"]["user"]["name"]}
+    # Phase 14: the database server, or an office whose data is on one (docs/phase14-database-server.md)
+    ds, secret = fb.get("database_server") or {}, False
+    if fb.get("role") == "database-server":
+        doc["role"] = "database-server"
+        blk = {k: ds[k] for k in ("listen", "clients", "names", "addresses") if ds.get(k)}
+        blk["admin"] = ds.get("admin") or "maluos_admin"
+        doc["database_server"] = blk
+    elif ds.get("host"):
+        # the plan's references are already their content: the password goes to the root-only place first boot
+        # reads it from, the certificate (public) beside the configuration; the medium is not needed again
+        ctx.run(["install", "-d", "-m", "700", ctx.tpath("var/lib/maluos/secrets")], check=False)
+        ctx.write("/var/lib/maluos/secrets/db-admin.password", ds["credential"].strip() + "\n", mode=0o600)
+        blk = {"host": ds["host"], "port": int(ds.get("port") or 5432), "admin": ds.get("admin") or "maluos_admin",
+               "credential": "file:/var/lib/maluos/secrets/db-admin.password"}
+        if ds.get("ca"):
+            ctx.write("/etc/maluos/database-server-ca.pem", ds["ca"].strip() + "\n", mode=0o644)
+            blk["ca"] = "file:/etc/maluos/database-server-ca.pem"
+        blk["sslmode"] = ds.get("sslmode") or ("verify-full" if ds.get("ca") else "require")
+        doc["database_server"] = blk
     text = (yaml.safe_dump(doc, sort_keys=False) if yaml else json.dumps(doc, indent=2))
     header = ("# MaluOS first-boot provisioning, written by the MaluOS installer from the\n"
               "# install plan. Read once by maluos-firstboot.service. The keys the plan did\n"

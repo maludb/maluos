@@ -20,7 +20,7 @@ function db(): PDO
         env('DB_HOST', '127.0.0.1'),
         env('DB_PORT', '5432'),
         env('DB_NAME', 'maludb_os')
-    );
+    ) . db_tls_dsn();
 
     $pdo = new PDO($dsn, env('DB_USER', 'app_rw'), (string) env('DB_PASSWORD', ''), [
         PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
@@ -30,6 +30,25 @@ function db(): PDO
 
     db_apply_context($pdo);
     return $pdo;
+}
+
+/**
+ * TLS to a PostgreSQL on another server (MaluOS Phase 14, the database server): DB_SSLMODE (libpq's sslmode:
+ * require, verify-ca, verify-full) and DB_SSLROOTCERT (the server's certificate or its CA) in config/.env.
+ * Unset, the DSN is unchanged: a local database, libpq's own default.
+ */
+function db_tls_dsn(): string
+{
+    $mode = (string) env('DB_SSLMODE', '');
+    if (preg_match('/^(disable|allow|prefer|require|verify-ca|verify-full)$/', $mode) !== 1) {
+        return '';
+    }
+    $dsn = ';sslmode=' . $mode;
+    $ca = (string) env('DB_SSLROOTCERT', '');
+    if ($ca !== '' && preg_match('#^[A-Za-z0-9_./-]+$#', $ca) === 1) {
+        $dsn .= ';sslrootcert=' . $ca;
+    }
+    return $dsn;
 }
 
 /**

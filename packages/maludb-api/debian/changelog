@@ -1,3 +1,11 @@
+maludb-api (0.4.1maluos6) resolute; urgency=medium
+
+  * Phase 14 slice 1: the component points MALUDB_PG_HOST and MALUDB_PG_PORT
+    at the database server when there is one, with PGSSLMODE and
+    PGSSLROOTCERT in the service's environment (the API is a libpq client).
+
+ -- Edward Honour <ed@maludb.org>  Mon, 09 Nov 2026 22:32:32 +0000
+
 maludb-api (0.4.1maluos5) resolute; urgency=medium
 
   * Component: keep the tenant database password and the API token in

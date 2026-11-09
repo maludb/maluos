@@ -207,6 +207,27 @@ def overlay():
             "warning": OV.reachability(st)}      # the one UDP port not reaching the hub (docs/phase13-estate-behind-a-proxy.md)
 
 
+FIRSTBOOT_DONE = os.environ.get("MALUOS_PROVISIONED", "/var/lib/maluos/firstboot/done")
+
+
+def database():
+    """Phase 14: where this node's data is, from the first-boot summary. None: its own cluster (nothing to say).
+    A database server: what it serves (the port, the clients, its certificate's fingerprint). An office with its
+    data elsewhere: the server it uses. Never a credential."""
+    try:
+        with open(FIRSTBOOT_DONE) as f:
+            st = json.load(f)
+    except (OSError, ValueError):
+        return None
+    ds = st.get("database_server")
+    if not isinstance(ds, dict):
+        return None
+    if st.get("role") == "database-server":
+        return {"role": "server", "port": ds.get("port"), "clients": ds.get("clients"), "tls": ds.get("tls"),
+                "fingerprint": ds.get("fingerprint"), "admin": ds.get("admin"), "maludb_core": st.get("maludb_core")}
+    return {"role": "client", "host": ds.get("host"), "port": ds.get("port"), "sslmode": ds.get("sslmode")}
+
+
 def report():
     """The whole report; each part guarded, the errors listed, the size bounded."""
     errors = []
@@ -226,6 +247,9 @@ def report():
     part("memory", memory)
     part("load", load)
     part("overlay", overlay)
+    part("database", database)
+    if rep.get("database") is None:
+        rep.pop("database", None)       # a node with its own cluster reports as it always did
     rep["errors"] = errors
     data = json.dumps(rep)
     if len(data) > MAX_BYTES:
@@ -263,4 +287,8 @@ def summary(rep):
         lines.append(f"overlay:  {o.get('address') or '-'} {o.get('name') or ''} {o.get('role') or ''}" + (f" hub {o['hub']}" if o.get("hub") else "") + f"  {len(o.get('peers') or [])} peer(s)" if o.get("configured") else f"overlay:  not configured ({o.get('reason') or '?'})")
         if o.get("warning"):
             lines.append(f"          warn: {o['warning']}")
+    d = rep.get("database")
+    if d:
+        lines.append(f"database: serves port {d.get('port')} to {', '.join(d.get('clients') or []) or 'nobody'} (TLS {d.get('tls')})" if d.get("role") == "server"
+                     else f"database: on {d.get('host')}:{d.get('port')} ({d.get('sslmode')})")
     return "\n".join(lines)

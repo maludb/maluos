@@ -139,6 +139,30 @@ written; the conffile's documented defaults stand for the rest.
 | `enroll.code` | string | | the one-time code; `file:` + a path on the media for an unattended plan |
 | `enroll.name` | string | the hostname | the desk's or node's name at the office; the installer also writes `enroll.owner`, the plan's user, whose desk it is |
 | `cloud_init` | bool | true on server media, false on desktop | keep cloud-init enabled in the target (NoCloud and cloud data sources); `false` masks it |
+| `role` | `database-server` | none | *asked* on server media (the First boot screen's Database group). Phase 14 (docs/phase14-database-server.md): this host is the estate's database server; its first boot prepares the cluster for an office (an admin role that is not a superuser, TLS, the clients in `pg_hba`) and provisions no tenant and no component. Refused together with the kernel component |
+| `database_server.host` | string | none: the host's own PostgreSQL | *asked* on server media. An office whose data is on a MaluOS database server: a name in the server's certificate, or an address. With it: `port` (5432), `admin` (`maluos_admin`), `credential` (required), `sslmode`, `ca` |
+| `database_server.credential` | string | | the admin role's password, `file:` + a path on the media (`db-admin.txt` from `sudo maluctl db export` on the database server). Read at install time and written root-only into the target (`/var/lib/maluos/secrets/db-admin.password`); `firstboot.yaml` names the file, never the password |
+| `database_server.ca` | string | | the server's certificate, `file:` + a path (`db-ca.pem` from the same export); written to `/etc/maluos/database-server-ca.pem`. Given, `sslmode` defaults to `verify-full`; without it, `require` (encrypted, the server not verified) |
+| `database_server.sslmode` | `require` \| `verify-ca` \| `verify-full` | by `ca` | the two verifying modes need `ca` |
+| `database_server.listen`, `.clients`, `.names`, `.addresses` | string, lists | every interface; the overlay's range; none | with `role: database-server`: where the cluster listens, who may connect (networks or addresses, TLS and a password), further names and addresses for the certificate first boot makes |
+
+An office with its database on another server (Phase 14):
+
+```yaml
+maluos-install:
+  version: 1
+  # ... storage, identity ...
+  firstboot:
+    components:
+      maludb-os-core: {enabled: true, domain: office.example.com, admin_email: admin@example.com}
+    database_server:
+      host: db-1.example.com
+      credential: 'file:LABEL=PLANS:/db-admin.txt'
+      ca: 'file:LABEL=PLANS:/db-ca.pem'
+```
+
+and the database server it uses: `firstboot: {role: database-server,
+database_server: {clients: [192.168.100.0/24], names: [db-1.example.com]}}`.
 
 An office installed without these keys (the medium's default plan, or a
 screen left on `maluos.local`) is configured afterwards by `maluctl
