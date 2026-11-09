@@ -7,8 +7,10 @@ the daemons and the kernel's installer all assume that PostgreSQL runs on
 the host they run on. This document records what the survey of the three
 repositories found, decides how the database moves to a server of its own,
 and cuts the work into slices. Nothing here is built. The owner decided
-2026-11-09 that the database server is a MaluOS server first (decision 1);
-a PostgreSQL the operator provides is deferred.
+2026-11-09 that the database server is a MaluOS server first (decision 1),
+a PostgreSQL the operator provides being deferred, and answered the four
+planning questions the same day ("The owner's decisions"): the overlay
+address, the credential on the medium, `maludb_admin` only, after D7.
 
 ## What the survey found
 
@@ -107,16 +109,19 @@ host.
    `scram-sha-256` (certificates in slice 2 for the vault and the engine's
    listener), and TLS is on with a certificate first boot makes
    (self-signed, its fingerprint published in the node's report and in the
-   plan's `database_server.ca`), or the operator's. Over the estate's
-   overlay the addresses are stable names (`db-1.internal`); a database
-   server that is also the overlay hub is the natural layout for a small
-   estate.
+   plan's `database_server.ca`), or the operator's. The office reaches it
+   over the estate's overlay by its stable name (`db-1.internal`), and a
+   database server that is also the overlay hub is the recommended layout
+   (the owner's decision 1 below); a LAN address stays possible for a
+   database server that is not a member yet.
 6. **The listener and the operators move with the data.** The MC2DB
    listener runs on the database server (it is the engine's own face); the
    office's `endpoints.memory` point at it. Operators keep peer superuser
-   logins on the database server; on the office they get password logins
-   to the same roles, minted by first boot into the vault, so `psql` on
-   the office still works (`maluctl db psql`).
+   logins on the database server; on the office they get a password login
+   as `maludb_admin`, the tenant's owner, minted by first boot into the
+   vault, so `psql` on the office still works (`maluctl db psql`) without
+   a superuser anywhere but on the database server (the owner's decision
+   3 below).
 7. **The image roles are seeds, not new images.** `seeds/server.seed` is
    split: `maluos-server` (the base, the vault, the gateway, the client
    tools) and `maluos-database-server` (postgresql-18, the extension,
@@ -225,17 +230,40 @@ with two clusters.
 | slice 2 (seeds, roles, two-VM test, certificates) | M |
 | slice 3 (application servers), after its design note | L |
 
-## Open questions for the owner
+## The owner's decisions (2026-11-09)
 
-1. The database server's address for the office: the LAN, or the estate's
-   overlay (`db-1.internal`, which makes the database server the natural
-   hub)? The contract allows either; the runbook needs one to recommend.
-2. The admin credential's path to the office at install time: a file on
-   the plan's medium (the contract above), or the office enrolling first
-   and fetching it from the kernel? The first needs no kernel change and
-   is what slice 1 assumes.
-3. Whether operators should keep superuser logins at all once the
-   database is remote, or get `maludb_admin` (the tenant's owner) only.
-4. The phase's place in the roadmap: before or after E7 phase 2 and the
-   proof rerun (D7). The note assumes after D7, since D7 tells us what the
-   estate's real machines look like.
+The four questions the first draft left open were answered the same day:
+
+1. **The overlay address.** The office reaches its database server as
+   `db-1.internal` over the estate's overlay; the database server is the
+   estate's hub where the layout allows (it is the one server every other
+   member must reach anyway). The LAN address stays possible in the
+   contract for a database server that is not a member yet, but the
+   runbook recommends the overlay, and `pg_hba` admits the overlay range
+   first. Consequence for slice 1: the database server joins the estate
+   before the office is provisioned against it, so its name resolves; the
+   first-boot order on the office is enrol, then provision the kernel,
+   which `maluctl provision` already allows (the enrolment is a component).
+2. **The credential on the medium.** The admin credential reaches the
+   office as a file on the plan's medium (`credential: file:…`), as the
+   contract above shows; no kernel change, and the same path the
+   installer already uses for a plan's secrets (`enroll.code`, the
+   passphrase). It is read once at first boot and stored root-only under
+   `/var/lib/maluos/secrets`; the medium can be removed afterwards.
+3. **`maludb_admin` only.** Once the database is remote, operators do not
+   get superuser logins. On the office they get a password login as
+   `maludb_admin`, the tenant's owner, minted into the vault at first boot
+   (`maluctl db psql` uses it); the database server keeps peer logins for
+   its own operators as phase 4 made them. The `operators` key of
+   firstboot.yaml therefore means "tenant owner" on an office with a remote
+   database and "superuser" on a host that runs its own cluster; the
+   summary says which. Decision 6 is amended accordingly.
+4. **After D7.** The phase starts after the three-machine proof has run on
+   the owner's machines (docs/phase13-three-machine-proof.md), so the
+   database server is specified against the estate as it really looks,
+   and after E7 phase 2 where that is already in flight. Roadmap row E9.
+
+## Open questions
+
+None at planning time. The kernel-side design of application servers
+(decision 4, slice 3) is written as its own note before slice 3 starts.
