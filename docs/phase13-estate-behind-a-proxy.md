@@ -375,5 +375,8 @@ the conffile's commented `proxy_address`.
   the four names resolve to 10.0.2.2 from the marked block and none on
   loopback, the summary says `proxy 10.0.2.2`.
 
-The owner's three machines run the proof (docs/phase13-three-machine-proof.md,
-step 0a first).
+**Released**: apt.maluos.com republished 2026-11-06 22:17 UTC (estate 0.7.0,
+kernel 2026.11.06maluos1, installer 0.3.6, firstboot 0.1.16); the images
+and ISOs as 26.04.20261108 (2026-11-08; the 26.04.20261106 cut of 11-06 was a
+mixed set, docs/release.md). The owner's three machines run the proof
+(docs/phase13-three-machine-proof.md, step 0a first).
