@@ -1,0 +1,16 @@
+#!/bin/bash
+# maluos-office-setup: start Claude Code on this office with the office-setup plugin loaded and the setup
+# interview running. Run as the operator (maluos), not as root.
+#
+#   maluos-office-setup                 the setup interview (/office-setup)
+#   maluos-office-setup /office-check   the state report only
+#   maluos-office-setup /office-providers
+#   maluos-office-setup --shell         Claude Code with the plugin loaded, no skill started
+set -euo pipefail
+ROOT=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
+export PATH="$HOME/.local/bin:$PATH"
+[ "$(id -u)" -ne 0 ] || { echo "run this as the operator account (maluos), not as root; the scripts elevate themselves" >&2; exit 1; }
+command -v claude >/dev/null 2>&1 || { echo "Claude Code is not installed for $(id -un): run $ROOT/bootstrap.sh first" >&2; exit 1; }
+[ -f /etc/maluos/firstboot.yaml ] || echo "warning: /etc/maluos/firstboot.yaml is missing; this does not look like a MaluOS office" >&2
+if [ "${1:-}" = "--shell" ]; then exec claude --plugin-dir "$ROOT"; fi
+exec claude --plugin-dir "$ROOT" "${1:-/office-setup}"

@@ -1,0 +1,13 @@
+maluos-office-setup (0.1.0) resolute; urgency=medium
+
+  * First version: the maluos-office-setup Claude Code plugin (skills
+    office-setup, office-providers, office-check; the scripts preflight.py,
+    configure-kernel.py, provision.sh, verify.sh, hosts-proxy.sh,
+    proxy-config.sh, set-provider-key.sh, vm-guest.sh) vendored under
+    /usr/share/maluos/claude-plugins with a local marketplace, the sudoers
+    rule for its scripts, the launcher, and `maluctl office-setup`
+    (run|check|status|providers). In seeds/business-os.seed, so every
+    server image that carries the kernel carries the plugin that
+    configures it (the handbook's 23-office-setup-package.md, phase 2).
+
+ -- Edward Honour <ed@maludb.org>  Sun, 08 Nov 2026 16:00:00 +0000

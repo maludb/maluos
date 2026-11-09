@@ -1,0 +1,6 @@
+repository: https://github.com/maludb/maluos-office-setup
+origin: /Users/user/malu-docs/plugins/maluos-office-setup
+ref: local
+commit: ee42075
+version: 0.1.0
+vendored: 2026-11-09

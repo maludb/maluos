@@ -1,0 +1,20 @@
+#!/usr/bin/make -f
+%:
+	dh $@
+
+override_dh_auto_build:
+	# the sudoers rule names the installed path of the plugin's scripts
+	mkdir -p debian/sudoers.d && sed 's|@PLUGIN_ROOT@|/usr/share/maluos/claude-plugins/maluos-office-setup|' plugin/sudoers/maluos-office-setup > debian/sudoers.d/maluos-office-setup
+
+override_dh_auto_clean:
+	rm -rf debian/sudoers.d
+	find plugin -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true
+
+override_dh_fixperms:
+	dh_fixperms
+	chmod 755 debian/maluos-office-setup/usr/share/maluos/claude-plugins/maluos-office-setup/scripts/*.sh \
+	          debian/maluos-office-setup/usr/share/maluos/claude-plugins/maluos-office-setup/scripts/*.py \
+	          debian/maluos-office-setup/usr/share/maluos/claude-plugins/maluos-office-setup/bin/* \
+	          debian/maluos-office-setup/usr/share/maluos/claude-plugins/maluos-office-setup/bootstrap.sh
+	chmod 644 debian/maluos-office-setup/usr/share/maluos/claude-plugins/maluos-office-setup/scripts/lib.sh
+	chmod 440 debian/maluos-office-setup/etc/sudoers.d/maluos-office-setup

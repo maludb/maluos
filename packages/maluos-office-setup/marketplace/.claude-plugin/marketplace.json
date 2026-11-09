@@ -1,0 +1,16 @@
+{
+  "name": "maluos",
+  "owner": {
+    "name": "MaluOS"
+  },
+  "metadata": {
+    "description": "The Claude Code plugins MaluOS ships under /usr/share/maluos/claude-plugins. Add this directory as a marketplace: /plugin marketplace add /usr/share/maluos/claude-plugins"
+  },
+  "plugins": [
+    {
+      "name": "maluos-office-setup",
+      "source": "./maluos-office-setup",
+      "description": "Configures a freshly installed MaluOS office after first boot: topology, domain, administrator, provisioning, the proxy's names, first sign-in, provider keys and a topology-aware summary"
+    }
+  ]
+}

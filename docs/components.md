@@ -198,6 +198,27 @@ seed leaves the applications on (`BOOT_TEST_APPS=1`; CI's seed sets
 the owner's dev host, an office with hr, projects, helpdesk and spaces
 active after first boot and `maluctl app names` listing eight names.
 
+### maluos-office-setup (package maluos-office-setup, in maluos-business-os)
+
+Not a component (no first-boot module): the Claude Code plugin that configures an office's Business
+OS after first boot, vendored at a pinned ref of github.com/maludb/maluos-office-setup under
+/usr/share/maluos/claude-plugins/maluos-office-setup, with a local marketplace at
+/usr/share/maluos/claude-plugins (`/plugin marketplace add` that directory), the sudoers rule that lets
+members of sudo run exactly the plugin's scripts as root without a password, the launcher
+/usr/bin/maluos-office-setup and `maluctl office-setup run|shell|check|status|providers` (run installs
+Claude Code for the operator with Anthropic's native installer, as the desktop's Tools Installer does).
+The plugin's scripts read the kernel component's features (proxy_address since 0.1.16, apps.install since
+0.1.15) and drive `maluctl provision --force`; nothing in the component changes for it. In
+seeds/business-os.seed, so every server image with the kernel carries the plugin. The operator's path is
+the handbook's 10-office-configuration.md; the package proposal 23-office-setup-package.md.
+
+The whole of it, phase by phase, with the scripts' reads and writes and the two ways an office gets its
+configuration (the installer's First boot screen or this interview): docs/office-setup.md.
+
+Status 2026-11-09: packaged (packages/maluos-office-setup, scripts/vendor-maluos-office-setup.sh), built and
+lintian-checked on the development VM, maluos-meta 0.2.18 regenerated so maluos-business-os depends on it;
+not yet run on an office from the package, not yet on an image or on apt.maluos.com (the next build).
+
 ### maluos-apple-t2 (seeds/apple-t2.seed; the Apple T2 round, docs/phase11-apple-t2.md)
 
 Hardware support rather than software: what an Intel Mac with the T2 chip
