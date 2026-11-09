@@ -3,3 +3,5 @@ maluos-base
 maluos-api
 maludb-os-core
 ?malu123-web
+# the office configuration interview for Claude Code (10-office-configuration.md): the plugin, its sudoers rule, maluctl office-setup
+maluos-office-setup

@@ -1,0 +1,6 @@
+# maluos-office-setup: the operator's account runs this plugin's scripts as root without a password, so
+# Claude Code can call them (its shell has no terminal to answer sudo's prompt). The scripts are the whole
+# privileged surface; they live in a root-owned directory. Installed by bootstrap.sh (which substitutes
+# the path) or by the maluos-office-setup package. Members of the sudo group already have full sudo; this
+# rule only removes the password prompt for exactly these files.
+%sudo ALL=(root) NOPASSWD: @PLUGIN_ROOT@/scripts/*

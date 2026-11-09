@@ -1,0 +1,13 @@
+{
+  "name": "maluos-office-setup",
+  "owner": {
+    "name": "Edward Honour"
+  },
+  "plugins": [
+    {
+      "name": "maluos-office-setup",
+      "source": "./",
+      "description": "Configures a freshly installed MaluOS office after first boot: topology, domain, administrator, provisioning, the proxy's names, first sign-in, provider keys and a topology-aware summary"
+    }
+  ]
+}

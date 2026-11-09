@@ -1,0 +1,28 @@
+Source: maluos-office-setup
+Section: admin
+Priority: optional
+Maintainer: Edward Honour <ed@maludb.org>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.7.0
+Homepage: https://github.com/maludb/maluos-office-setup
+Rules-Requires-Root: no
+
+Package: maluos-office-setup
+Architecture: all
+Depends: ${misc:Depends}, maluos-firstboot (>= 0.1.15), maludb-os-core, python3, python3-yaml, curl, ca-certificates, sudo, iproute2
+Recommends: tmux
+Description: MaluOS office setup: the Business OS configuration interview for Claude Code
+ The Claude Code plugin that configures a freshly installed MaluOS office
+ (the server that runs the MaluDB Business OS kernel) after first boot:
+ the deployment topology, the business domain and the first
+ administrator, the re-provision, the office's names and the proxy's
+ server blocks, the first sign-in hand-off, the provider keys through a
+ protected prompt, the VM guest agent and one topology-aware summary.
+ .
+ The plugin is installed under /usr/share/maluos/claude-plugins with a
+ local marketplace beside it, a sudoers rule that lets members of sudo
+ run exactly its scripts as root without a password (Claude Code's shell
+ cannot answer a prompt), and the launcher maluos-office-setup. `maluctl
+ office-setup` installs Claude Code for the operator (Anthropic's native
+ installer, per user) and starts the interview; `maluctl office-setup
+ check` and `providers` run the plugin's scripts without Claude.

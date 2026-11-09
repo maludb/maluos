@@ -1,0 +1,12 @@
+plugin/.claude-plugin                       usr/share/maluos/claude-plugins/maluos-office-setup
+plugin/skills                               usr/share/maluos/claude-plugins/maluos-office-setup
+plugin/scripts                              usr/share/maluos/claude-plugins/maluos-office-setup
+plugin/bin                                  usr/share/maluos/claude-plugins/maluos-office-setup
+plugin/sudoers                              usr/share/maluos/claude-plugins/maluos-office-setup
+plugin/bootstrap.sh                         usr/share/maluos/claude-plugins/maluos-office-setup
+plugin/README.md                            usr/share/maluos/claude-plugins/maluos-office-setup
+plugin/LICENSE                              usr/share/maluos/claude-plugins/maluos-office-setup
+plugin/VENDORED                             usr/share/maluos/claude-plugins/maluos-office-setup
+marketplace/.claude-plugin                  usr/share/maluos/claude-plugins
+debian/sudoers.d/maluos-office-setup        etc/sudoers.d
+lib/maluctl.d/office-setup.py               usr/lib/maluos/maluctl.d
