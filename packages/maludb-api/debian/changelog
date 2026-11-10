@@ -1,3 +1,12 @@
+maludb-api (0.4.1maluos7) resolute; urgency=medium
+
+  * The component waits for /health by the clock (240 s) instead of thirty
+    tries: a refused connection returns at once, so thirty tries were one
+    minute, too short on a loaded host where a re-provisioning restarts
+    every service first. The warning names the unit's state.
+
+ -- Edward Honour <ed@maludb.org>  Tue, 10 Nov 2026 01:30:00 +0000
+
 maludb-api (0.4.1maluos6) resolute; urgency=medium
 
   * Phase 14 slice 1: the component points MALUDB_PG_HOST and MALUDB_PG_PORT

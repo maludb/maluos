@@ -66,16 +66,21 @@ def provision(ctx):
     # 3. (re)start and wait for /health
     subprocess.run(["systemctl", "enable", "--quiet", "maludb-api.service"], check=False)
     subprocess.run(["systemctl", "restart", "maludb-api.service"], check=False)
-    for _ in range(30):
+    # by the clock, not by a count of tries: a refused connection returns at once, and a loaded host starts the
+    # workers slowly (a re-provisioning restarts every service before this one)
+    deadline = time.monotonic() + 240
+    while True:
         try:
             with urllib.request.urlopen(url + "/health", timeout=3) as r:
                 if r.status == 200:
                     break
         except Exception:
-            time.sleep(2)
-    else:
-        log(f"warning: maludb-api not healthy at {url}/health")
-        return {"url": url, "healthy": False}
+            pass
+        if time.monotonic() > deadline:
+            state = subprocess.run(["systemctl", "is-active", "maludb-api.service"], capture_output=True, text=True).stdout.strip()
+            log(f"warning: maludb-api not healthy at {url}/health within 240s (unit {state}; see: journalctl -u maludb-api)")
+            return {"url": url, "healthy": False}
+        time.sleep(2)
 
     # 4. tenant API token
     tok_file = os.path.join(secrets_dir, "api.token")

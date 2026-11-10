@@ -615,12 +615,13 @@ def store_system_secret(name, value, kind="token", provider=None, env_var=None):
         log(f"vault: could not store {name}: {e}"); return False
 
 
-def service_login(role, password_file=None, owner=None, vault_ref=None):
+def service_login(role, password_file=None, owner=None, vault_ref=None, level="use"):
     """A service's way to the database. Local: {} (the Unix socket, peer authentication, nothing to store).
     On a database server: the role gets a password (kept in a root-only copy, so a re-run does not rotate it)
     and the service's configuration the keys to connect with: the host, the port, TLS, and either
     `pg_password_file` (written here for `owner`: the vault cannot ask itself) or `pg_password_ref` (the vault's
-    system compartment, a use grant to the service's own principal user:<role>): decision 3."""
+    system compartment, a grant to the service's own principal user:<role>): decision 3. The grant's `level` is
+    use for a broker (the gateway), read for any other service: the vault gives mode=use to brokers only."""
     out = service_target()
     if not out:
         return {}
@@ -643,7 +644,7 @@ def service_login(role, password_file=None, owner=None, vault_ref=None):
         if not store_system_secret(name, pw, kind="password", provider="postgresql", env_var="PGPASSWORD"):
             raise RuntimeError(f"the vault did not take {vault_ref}: {role} has no way to its database password")
         from maluos_vault_client import Vault
-        Vault().grant(f"system/{name}", "principal", f"user:{role}", level="use")
+        Vault().grant(f"system/{name}", "principal", f"user:{role}", level=level)
         out["pg_password_ref"] = f"system/{name}"
     out["pg_user"] = role
     return out

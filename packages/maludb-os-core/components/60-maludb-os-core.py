@@ -246,14 +246,19 @@ def provision(ctx):
     subprocess.run(["systemctl", "restart", "apache2"], check=False)
     subprocess.run(["systemctl", "enable", "--now", "--quiet", *UNITS], check=False)
     subprocess.run(["systemctl", "restart", *UNITS], check=False)
-    for _ in range(45):
+    deadline = time.monotonic() + 300    # by the clock: a refused connection returns at once, a loaded host is slow
+    last = None
+    while True:
         try:
-            with urllib.request.urlopen("http://127.0.0.1:8080/api/v1/health", timeout=3) as r:
+            # 20 s: the health route writes one activity row, and on a database server that is a TLS connection first
+            with urllib.request.urlopen("http://127.0.0.1:8080/api/v1/health", timeout=20) as r:
                 if r.status == 200: break
-        except Exception:
-            time.sleep(2)
-    else:
-        raise RuntimeError("the kernel's PHP API on 127.0.0.1:8080 did not become healthy")
+                last = f"HTTP {r.status}"
+        except Exception as e:
+            last = repr(e)[:200]
+        if time.monotonic() > deadline:
+            raise RuntimeError(f"the kernel's PHP API on 127.0.0.1:8080 did not become healthy within 300s (last: {last})")
+        time.sleep(2)
 
     # ---- 8. the first super-admin, the first model, cron, the kernel's agents
     count = psql(f"SELECT count(*) FROM members WHERE lower(email)=lower({ql(admin_email)})", DB)

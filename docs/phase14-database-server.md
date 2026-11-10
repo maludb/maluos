@@ -312,8 +312,9 @@ verified.
   daemons read `pg_port`, `pg_sslmode`, `pg_sslrootcert` and a password: the
   vault from a file of its own (`/var/lib/maluos-vault/pg.password`; a unit
   drop-in opens IP sockets to it, only then), the gateway and the memory
-  face from the vault (`system/pg-<role>-password`, a use grant to the
-  service's own principal). The schemas go through first boot's connection.
+  face from the vault (`system/pg-<role>-password`, a grant to the
+  service's own principal: use for the gateway, a broker; read for the
+  memory face, since the vault gives mode=use to brokers only). The schemas go through first boot's connection.
 - **maludb-api 0.4.1maluos6, maludb-os-core 2026.11.09maluos1.** The API's
   `MALUDB_PG_HOST`/`PORT` with libpq's `PGSSLMODE`/`PGSSLROOTCERT`; the
   kernel's `DB_HOST`, `DB_PORT`, `DB_SSLMODE`, `DB_SSLROOTCERT`, the
@@ -400,8 +401,30 @@ sudo maluctl db psql                        # a session there, as the admin role
 
 ### Status
 
-Built; the unit tests and the scratch-cluster test pass. The boot test and
-the kernel's pull request are recorded here when they have run.
+Built. The unit tests and the scratch-cluster test pass, and the server
+image's UEFI boot test passed on 2026-11-10 (234 checks, none failed; its
+last section is this slice's proof). The kernel's pull request is recorded
+here when it is opened.
+
+What the boot test found on the way, each fixed before the passing run:
+
+- The memory face asked the vault for its database password with
+  `mode=use`, which the vault gives to brokers only. It now reads the value
+  under a read grant (`service_login(..., level="read")`); the gateway, a
+  broker, keeps its use grant.
+- The MaluDB API's and the kernel's health waits counted tries, and a
+  refused connection returns at once: one minute and ninety seconds. They
+  now wait by the clock (240 s and 300 s).
+- The kernel's health wait failed in two runs of four even at 300 s, with
+  three seconds allowed per request. With twenty seconds per request it
+  passed. The cause is not confirmed: the health route writes one activity
+  row, and under emulation with every service restarting the request may
+  simply be slow. One passing run does not settle it; the component's
+  error now carries the last failure, and the test prints the Apache log
+  and the server's log if it happens again.
+- Three checks of the test itself were wrong (the operator's name was the
+  tenant's, an instant of pg_stat_activity instead of the server's
+  connection log, a health route that never touches the database).
 
 ## Open questions
 

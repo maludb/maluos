@@ -1,5 +1,7 @@
 maluos-firstboot (0.1.17) resolute; urgency=medium
 
+  * service_login takes the grant's level: use for a broker (the gateway),
+    read for any other service (the vault gives mode=use to brokers only).
   * Phase 14 slice 1 (docs/phase14-database-server.md): the data on another
     MaluOS server. maluos_provision takes its connection from the
     database_server block: none, the local cluster as before; a host, the

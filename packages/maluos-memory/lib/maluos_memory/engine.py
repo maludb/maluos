@@ -89,7 +89,7 @@ _PG_PASSWORD = {}
 
 def remote_kwargs(d):
     """Phase 14: the database on another server. The port, TLS, and the role's password: from a file, or from the
-    vault (`pg_password_ref`, a use grant to this service's own principal), fetched once and again after a failure."""
+    vault (`pg_password_ref`, a read grant to this service's own principal: the face is not a broker), fetched once and again after a failure."""
     kw = {}
     if d.get("pg_port"):
         kw["port"] = int(d["pg_port"])
@@ -106,7 +106,7 @@ def remote_kwargs(d):
             import sys
             sys.path.insert(0, "/usr/lib/maluos")
             from maluos_vault_client import Vault
-            _PG_PASSWORD[ref] = Vault(d.get("vault_socket") or os.environ.get("MALUOS_VAULT_SOCKET") or "/run/maluos/vault.sock").use(ref, "the database password")["value"]
+            _PG_PASSWORD[ref] = Vault(d.get("vault_socket") or os.environ.get("MALUOS_VAULT_SOCKET") or "/run/maluos/vault.sock").value(ref, "read", "the database password")["value"]
         kw["password"] = _PG_PASSWORD[ref]
     return kw
 

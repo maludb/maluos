@@ -5,6 +5,8 @@ maludb-os-core (2026.11.09maluos1) resolute; urgency=medium
     DB_SSLROOTCERT and the installer's DB_ADMIN_USER / DB_ADMIN_PASSFILE,
     creates the kernel's memory database from the server's template and runs
     the migrations through first boot's connection.
+  * The health wait after the services start is by the clock (300 s, 20 s
+    a request) and its error carries the last failure.
   * Vendored at the kernel's branch phase14/database-server (55284f1: TLS
     keys for the kernel's connections, bin/app_install.php --db-*); to be
     re-vendored at main once the pull request is merged.

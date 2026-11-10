@@ -2,7 +2,8 @@ maluos-memory (0.2.2) resolute; urgency=medium
 
   * Phase 14 slice 1: the database on a database server (pg_port,
     pg_sslmode, pg_sslrootcert, pg_password_ref or pg_password_file, as the
-    gateway); the component mints the password and the grant.
+    gateway); the component mints the password and a read grant (the face
+    is not a broker, so it reads the value: mode=use is the gateway's).
 
  -- Edward Honour <ed@maludb.org>  Mon, 09 Nov 2026 22:32:32 +0000
 
