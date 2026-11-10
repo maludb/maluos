@@ -160,7 +160,11 @@ if (PHP_SAPI !== 'cli') {
     $cookieParams = [
         'lifetime' => 0,
         'path'     => '/',
-        'secure'   => $isHttps || app_is_prod(),
+        // Secure in production, unless the office is deliberately served over plain http (APP_URL http://…,
+        // MaluOS topology B: a trusted LAN with no TLS proxy). A browser drops a Secure cookie it receives over
+        // http, so the session and its CSRF token never came back and every sign-in failed with a correct
+        // password (2026-11-09). An https request is Secure whatever APP_URL says.
+        'secure'   => $isHttps || (app_is_prod() && !str_starts_with(strtolower((string) env('APP_URL', '')), 'http://')),
         'httponly' => true,
         'samesite' => 'Lax',
     ];

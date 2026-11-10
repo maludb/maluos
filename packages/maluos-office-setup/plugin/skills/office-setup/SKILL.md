@@ -175,7 +175,20 @@ and record "LAN DNS: operator-confirmed" or "not yet" in the summary accordingly
 
 ## Phase 6: the first sign-in
 
-Give the hand-off without revealing anything:
+First prove on the office that the sign-in can work, without seeing the password:
+
+```bash
+sudo ${CLAUDE_PLUGIN_ROOT}/scripts/admin-login.py --check
+```
+
+It checks the administrator's member record, the stored password against it, the sign-in throttle, the
+session cookie for the scheme, and makes one real sign-in against the kernel. Do not hand over while a
+line says FAIL: show the line and act on it (a wrong `APP_URL`: `provision.sh`; a Secure cookie under
+http: update `maludb-os-core`, or use https; a stored password that is not the member's:
+`admin-login.py --reset`, with the operator's consent, which sets a new generated password and stores
+it in the same root-only file).
+
+Then give the hand-off without revealing anything:
 
 - URL: `https://app.$DOMAIN` (or `http://` under B); email: the administrator's.
 - Password: generated at provisioning and kept root-only in
@@ -187,7 +200,13 @@ Give the hand-off without revealing anything:
 - The Linux `maluos` password and this Business OS password are different credentials.
 
 Ask the operator to confirm the sign-in and the password change, and record their answer (do not
-verify it by reading the database).
+verify it by reading the database). If they say the password is refused, run `admin-login.py --check`
+again and read its lines to them: when every line passes, the cause is between their browser and the
+office (the name's DNS, the proxy's server block, `http` typed where the office is `https` or the
+reverse), not the password; `admin-login.py --reset` is for a stored password that no longer matches.
+
+Claude Code itself: `maluctl office-setup` installed it in `~/.local/bin`. Tell the operator that a new
+terminal finds `claude`, and that `maluctl office-setup shell` always starts it with this plugin.
 
 ## Phase 7: provider keys
 

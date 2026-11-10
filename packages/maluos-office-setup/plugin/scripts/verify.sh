@@ -39,6 +39,16 @@ if [ "$(id -u)" -eq 0 ]; then
   [ -s /var/lib/maluos/secrets/business-os/admin-password ] && pass "generated admin password file present (root-only; not shown)" || note "no generated admin-password file (a password was given in the plan, or the account predates this run)"
 fi
 
+if [ "$(id -u)" -eq 0 ] && [ -x "$(dirname "$(readlink -f "$0")")/admin-login.py" ]; then
+  say "## the first sign-in"
+  if out=$("$(dirname "$(readlink -f "$0")")/admin-login.py" --check 2>&1); then
+    printf '%s\n' "$out" | grep -E '^(PASS|NOTE)' || true
+  else
+    printf '%s\n' "$out" | grep -E '^(PASS|NOTE|FAIL|ERROR)' || true
+    FAILED=$(( FAILED + $(printf '%s\n' "$out" | grep -cE '^(FAIL|ERROR)') ))
+  fi
+fi
+
 say "## the office's own names ($SCHEME)"
 res=$(getent ahostsv4 "app.$DOMAIN" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ' | sed 's/ $//')
 loop=$(grep -cE "^127\.0\.0\.1[[:space:]].*(^|[[:space:]])(app|os|www)?\.?$DOMAIN([[:space:]]|$)" /etc/hosts 2>/dev/null || true)

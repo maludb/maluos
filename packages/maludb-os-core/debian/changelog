@@ -1,3 +1,24 @@
+maludb-os-core (2026.11.10maluos1) resolute; urgency=medium
+
+  * Vendored at the kernel's integration/20261110 (46cf1d7: main 9e931ca
+    with fix/http-session-cookie and phase14/database-server merged), so
+    one package carries the sign-in over plain http (2026.11.09maluos2) and
+    the database on another server (2026.11.09maluos1). To be re-vendored
+    at main once the kernel's pull requests are merged.
+
+ -- Edward Honour <ed@maludb.org>  Tue, 10 Nov 2026 17:00:00 +0000
+
+maludb-os-core (2026.11.09maluos2) resolute; urgency=medium
+
+  * A sign-in over plain http works: vendored at the kernel's branch
+    fix/http-session-cookie (9aad43f, main 9e931ca and one commit). With
+    APP_ENV=prod the session cookie was always Secure, so an office served
+    over http (scheme: http, a LAN without a TLS proxy) never got its session
+    back from the browser and every sign-in failed the CSRF check, whatever
+    the password. To be re-vendored at main once the pull request is merged.
+
+ -- Edward Honour <ed@maludb.org>  Mon, 09 Nov 2026 23:55:00 +0000
+
 maludb-os-core (2026.11.09maluos1) resolute; urgency=medium
 
   * Phase 14 slice 1: the component takes DB_HOST, DB_PORT and the runner's
@@ -8,8 +29,7 @@ maludb-os-core (2026.11.09maluos1) resolute; urgency=medium
   * The health wait after the services start is by the clock (300 s, 20 s
     a request) and its error carries the last failure.
   * Vendored at the kernel's branch phase14/database-server (55284f1: TLS
-    keys for the kernel's connections, bin/app_install.php --db-*); to be
-    re-vendored at main once the pull request is merged.
+    keys for the kernel's connections, bin/app_install.php --db-*).
 
  -- Edward Honour <ed@maludb.org>  Mon, 09 Nov 2026 22:32:32 +0000
 
