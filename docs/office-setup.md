@@ -174,9 +174,12 @@ package 2026.11.09maluos2):
   an https request, and in production unless `APP_URL` is `http://`). The
   plugin gains `admin-login.py`, which names this and the other causes (a
   password changed after first boot, the throttle, another administrator's
-  email) and can reset the password. Not confirmed on the owner's machine:
-  whether that office was reached over http is the owner's to say; under
-  https the check tells which cause it is.
+  email) and can reset the password. This was NOT the owner's failure: that
+  office was on https behind a proxy with certificates the whole time (the
+  owner, 2026-11-10). The likely cause was another email typed with a
+  correct password, which the kernel refuses with the same message. The
+  http fault is real and stays fixed; 0.1.2 makes the skill and the check
+  say the sign-in name in full.
 - **`claude: command not found`.** Anthropic's installer puts `claude` in
   `~/.local/bin`, which a shell opened before the install does not search.
   `maluctl office-setup` now adds the directory to `~/.bashrc` and says so;

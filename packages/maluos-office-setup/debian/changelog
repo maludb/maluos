@@ -1,3 +1,15 @@
+maluos-office-setup (0.1.2) resolute; urgency=medium
+
+  * The sign-in name is said plainly. The owner's first sign-in was refused
+    with a correct password because another email was typed (the office was
+    on https the whole time; the http cookie fault of 0.1.1 was real but not
+    that failure). The skill writes the administrator's email out in full at
+    the hand-off and asks which email was typed before anything else;
+    admin-login.py --check ends with the name to sign in with and notes
+    the sign-ins tried under an email no member has.
+
+ -- Edward Honour <ed@maludb.org>  Tue, 10 Nov 2026 17:30:00 +0000
+
 maluos-office-setup (0.1.1) resolute; urgency=medium
 
   * The first sign-in can be checked and repaired: scripts/admin-login.py

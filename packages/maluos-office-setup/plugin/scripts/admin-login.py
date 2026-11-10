@@ -47,6 +47,9 @@ if ($m !== null) {
 }
 $st = $pdo->prepare("SELECT count(*) FROM login_attempts WHERE email = :e AND NOT successful AND attempted_at > now() - interval '15 minutes'");
 $st->execute(["e" => $email]); $out["recent_failures"] = (int) $st->fetchColumn();
+// sign-ins tried under an email no member has: the commonest refusal is the wrong name, not the wrong password
+$st = $pdo->prepare("SELECT count(*) FROM login_attempts a WHERE NOT a.successful AND a.attempted_at > now() - interval '1 day' AND NOT EXISTS (SELECT 1 FROM members m WHERE m.email = a.email)");
+$st->execute(); $out["unknown_email_failures"] = (int) $st->fetchColumn();
 $out["super_admins"] = $pdo->query("SELECT email FROM members WHERE business_role = 'super_admin' AND member_kind = 'human' AND status = 'active' ORDER BY id")->fetchAll(PDO::FETCH_COLUMN);
 echo json_encode($out);
 '''
@@ -206,6 +209,10 @@ def main():
         bad(f"{n} failed sign-ins for this email in the last 15 minutes: the kernel refuses further ones for a while (--reset clears them)")
     elif n:
         note(f"{n} failed sign-in(s) for this email in the last 15 minutes (5 lock it for a while)")
+    u = r.get("unknown_email_failures", 0)
+    if u:
+        note(f"{u} failed sign-in(s) in the last day used an email that no member has: the name to sign in with is exactly {email} "
+             "(not 'admin', not the Linux user)")
     if r.get("exists") and password and r.get("password_matches"):
         try:
             good, text = sign_in(email, password, domain, scheme)
@@ -215,7 +222,7 @@ def main():
     say()
     if FAILED:
         say(f"{FAILED} check(s) failed"); return 1
-    say(f"the sign-in works on the office itself. If a browser still cannot sign in at {scheme}://app.{domain}, the cause is between the "
+    say(f"the sign-in works on the office itself: sign in as {email} with the stored password. If a browser still cannot sign in at {scheme}://app.{domain}, the cause is between the "
         "browser and the office: the name's DNS, the proxy's server block, or a different scheme in the address bar than the office is configured for")
     return 0
 

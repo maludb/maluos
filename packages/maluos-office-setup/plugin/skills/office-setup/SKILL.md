@@ -190,7 +190,10 @@ it in the same root-only file).
 
 Then give the hand-off without revealing anything:
 
-- URL: `https://app.$DOMAIN` (or `http://` under B); email: the administrator's.
+- URL: `https://app.$DOMAIN` (or `http://` under B).
+- Sign-in name: write out the administrator's email in full, exactly as configured (`$ADMIN_EMAIL`). Say
+  plainly that this is the name to type: not `admin`, not the Linux user `maluos`, not another address
+  of theirs. A correct password under another email is refused with the same message as a wrong one.
 - Password: generated at provisioning and kept root-only in
   `/var/lib/maluos/secrets/business-os/admin-password`. The operator reads it in their own terminal:
   `sudo cat /var/lib/maluos/secrets/business-os/admin-password`. Do not run that command yourself.
@@ -200,8 +203,9 @@ Then give the hand-off without revealing anything:
 - The Linux `maluos` password and this Business OS password are different credentials.
 
 Ask the operator to confirm the sign-in and the password change, and record their answer (do not
-verify it by reading the database). If they say the password is refused, run `admin-login.py --check`
-again and read its lines to them: when every line passes, the cause is between their browser and the
+verify it by reading the database). If they say the password is refused, first ask which email they
+typed and compare it with `$ADMIN_EMAIL` (the commonest cause), then run `admin-login.py --check`
+again and read its lines to them (a NOTE counts the sign-ins tried under an email no member has): when every line passes, the cause is between their browser and the
 office (the name's DNS, the proxy's server block, `http` typed where the office is `https` or the
 reverse), not the password; `admin-login.py --reset` is for a stored password that no longer matches.
 
