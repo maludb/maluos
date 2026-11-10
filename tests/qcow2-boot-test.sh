@@ -821,7 +821,8 @@ out=$(maluctl gateway chat "secret" --model mock-7b --prefer estate --sensitivit
 sudo -n maluctl gateway policy rm --principal user:maluos >/dev/null 2>&1
 # step 3: the serving side's switch and the idle rule, seen from the caller
 sudo -n maluctl gateway share off >/dev/null 2>&1; sleep 1
-out=$(maluctl gateway chat "x" --model mock-7b --prefer estate 2>&1); echo "$out" | grep -q 'not_shared\|backend_unavailable' && echo "  ok   share off on the serving side: the call through the estate rung is refused not_shared (the local rung was skipped by --prefer estate)" || { echo "  FAIL not_shared through the rung: $out"; fail=1; }
+for i in 1 2 3 4 5 6; do out=$(maluctl gateway chat "x" --model mock-7b --prefer estate 2>&1); echo "$out" | grep -q 'not_shared\|backend_unavailable' && break; sleep 3; done   # the switch reaches the serving side within a moment, not within the one second above on a slow host
+echo "$out" | grep -q 'not_shared\|backend_unavailable' && echo "  ok   share off on the serving side: the call through the estate rung is refused not_shared (the local rung was skipped by --prefer estate)" || { echo "  FAIL not_shared through the rung: $out"; fail=1; }
 sudo -n maluctl gateway share on --when idle >/dev/null 2>&1; sleep 1
 # the serving side's switch travels by heartbeat and the directory publishes only a sharing node: wait for the rung to be back in the desk's cache
 rung_back() { for j in $(seq 1 40); do [ -f /run/maluos/session/idle ] && maluctl gateway status 2>/dev/null | grep -q 'estate:test-node' && return 0; sleep 3; done; return 1; }
