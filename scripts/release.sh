@@ -18,6 +18,8 @@
 # tag and the GitHub Release are made but nothing reaches download.maluos.com (it says so at the end).
 # The public MaluApps catalogue (docs/site/apps/catalog.json) is signed and published too (apps/);
 # scripts/publish-catalog.sh does only that, between releases.
+# The download page (docs/site/download.md, download.html) is brought to the release in the release commit
+# and published as index.html and download.html on the bucket; scripts/publish-download-page.sh does only that.
 set -euo pipefail
 ROOT_DIR=$(cd "$(dirname "$0")/.." && pwd)
 drop_caches_loop() { while :; do sleep 15; sync; sudo -n sh -c 'echo 1 > /proc/sys/vm/drop_caches' 2>/dev/null || true; done; }
@@ -123,6 +125,11 @@ echo "$VERSION" > VERSION
 if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
     echo "== $TAG already tagged; resuming the upload"
 else
+    # The download page names this release (links, sizes, verify commands) in the release commit itself;
+    # it is uploaded below, after the files it links to. A release without the desktop pair leaves the
+    # page alone, since its desktop links would point at files that do not exist.
+    case " $PROFILES " in *" desktop "*) scripts/publish-download-page.sh --edit "$VERSION"; git add docs/site/download.md docs/site/download.html;;
+        *) echo "   (no desktop pair in this release: the download page is left as it is; edit docs/site/download.* by hand)";; esac
     git add VERSION && git commit -q -m "Release $VERSION" && git tag -a "$TAG" -m "MaluOS $VERSION" && git push -q origin main "$TAG"
     echo "== tagged $TAG"
 fi
@@ -147,6 +154,8 @@ if [ $UPLOAD = 1 ]; then
             aws "${ep[@]}" s3 cp "$OUT/apps/$f" "$MALUOS_DOWNLOAD_S3/apps/$f" --cache-control "max-age=300" --content-type "$([ "$f" = catalog.json ] && echo application/json || echo text/plain)"
         done
         echo "== apps catalogue and its signature on the download bucket under apps/"
+        scripts/publish-download-page.sh --upload "$VERSION" \
+            || echo "!! the download page was NOT published: download.maluos.com still shows the previous release. Run: scripts/publish-download-page.sh $VERSION, commit docs/site/" >&2
     elif [ -n "${MALUOS_DOWNLOAD_RSYNC:-}" ]; then
         rsync -az --info=stats1 "$OUT/" "$MALUOS_DOWNLOAD_RSYNC/$VERSION/"
         echo "== artefacts on the download host under $VERSION/"

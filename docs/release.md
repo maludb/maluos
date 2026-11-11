@@ -209,14 +209,23 @@ are today.
   `docs/site/download.html` (self-contained page) carry the links,
   fingerprint, verify commands, requirements and install guide. The page
   is published on the download bucket as `download.html` and `index.html`
-  (https://download.maluos.com/download.html), after each release:
+  (https://download.maluos.com/download.html). Since 2026-11-11
+  `scripts/release.sh` does it: `scripts/publish-download-page.sh --edit`
+  rewrites the release number, the dates and the sizes in both files
+  before the release commit, and `--upload` copies the page to the
+  bucket after the release files and reads it back. Before that it was a
+  step by hand, and the releases of 11-06, 11-08, 11-09 and 11-11 went
+  out with the bucket's page at 26.04.20261031 and the source at
+  26.04.20261102. To publish the page alone (a correction to its prose):
   ```sh
   source ~/.config/maluos/publish.env
-  for k in index.html download.html; do
-    aws --endpoint-url "$MALUOS_S3_ENDPOINT" s3 cp docs/site/download.html "$MALUOS_DOWNLOAD_S3/$k" \
-      --content-type "text/html; charset=utf-8" --cache-control "max-age=300"
-  done
+  scripts/publish-download-page.sh            # the release in VERSION; --edit or --upload for one half
   ```
+  The script leaves a "Since 26.04.…" in the prose alone (that is
+  history) and the prose itself is a hand edit. The maluos.com landing
+  page is a separate hand-written page on a host this machine has no
+  credentials for; it repeats the release number and is not updated by
+  any of this.
   R2 custom domains serve objects by key only, so the bare
   `https://download.maluos.com/` is a 404 until a Cloudflare transform rule
   rewrites the path `/` to `/index.html` (dashboard: Rules, Transform
