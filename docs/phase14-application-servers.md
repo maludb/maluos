@@ -1,19 +1,20 @@
 # Phase 14 slice 3: application servers (design)
 
-Written 2026-11-12, a draft for the owner. It is the note that
-docs/phase14-database-server.md (decision 4, slice 3) says is written before
-slice 3 starts. Nothing here is built.
+Written 2026-11-12. It is the note that docs/phase14-database-server.md
+(decision 4, slice 3) says is written before slice 3 starts. The owner
+answered its five questions the same day ("The owner's decisions" at the
+end); the text below is the design as decided. Nothing here is built.
 
 ## The layout this serves
 
 The owner's target (2026-11-12):
 
 ```
-                 TLS proxy (the owner's)                     the estate's overlay
-   example.com, app., os.  ─────────►  kernel server   ◄───────────────┐
-   hr.example.com          ─────────►  application server 1 ───────────┤
-   projects.example.com    ─────────►  application server 2 ───────────┤
-                                       database server  ───────────────┘
+                 TLS proxy (the owner's)                     the LAN
+   example.com, app., os.  ─────────►  kernel server   ◄───────────────┐  the applications' door (8081)
+   hr.example.com          ─────────►  application server 1 ───────────┤  and the applications' internal
+   projects.example.com    ─────────►  application server 2 ───────────┘  ports, admitted by address
+                                       database server
                                             ▲   PostgreSQL over TLS, by LAN name
                                             └── kernel server, application servers
 ```
@@ -77,26 +78,47 @@ scope `node`).
 
 ## The design
 
-### 1. An application server is an estate node that runs no platform services
+### 1. An application server is a MaluOS server without the kernel
 
 `role: application-server` in `firstboot.yaml` (and the installer's role
 question). First boot on it:
 
-- provisions **no** tenant, vault, gateway, memory face, MaluDB API or
-  kernel (as `role: database-server` provisions none);
+- provisions the **platform services** as any MaluOS server does: the
+  tenant, the vault, the gateway and the memory face, so agents can run
+  there. Agents that support applications and act as the IT department
+  are a core premise of MaluOS (the owner, 2026-11-12); an application
+  server hosts its own (its Linux and security agents, agents for the
+  applications it carries) beside the kernel's agents, which stay on the
+  kernel server's runner;
+- provisions **no** kernel and no MaluDB API of its own (it uses the
+  kernel server's through the door);
 - joins the estate with the code from the plan (`enroll`), which gives it
-  a node token and an overlay address;
+  a node token;
 - installs the applications the plan names (below).
 
 The image is the server image as it is: `maludb-os-core` and `maluos-apps`
 are installed (PHP, Apache, composer, the installer's code) and the kernel
 is simply not provisioned, which is already how a server ships.
 
-Consequence: **gap 8 disappears for application servers.** They make no
-service roles on the database server, so nothing collides. What remains
-is "one kernel server per database server", which is the estate's own
-shape. Cost: no local agents and no local vault on an application server;
-by the owner's rule none are wanted there.
+**Its platform data, and gap 8.** The services' data is in PostgreSQL, and
+PostgreSQL is on the database server. Every MaluOS server makes the roles
+`maluos-vault`, `maluos-gateway`, `maluos-memory` and the database `maludb`
+under fixed names today, so a second server on one database server resets
+the first one's passwords. Slice 3 gives each server its own names there:
+
+- the database `maludb_<node>` (copied from the server's template, as the
+  kernel server's is), and the roles `maluos-vault-<node>`,
+  `maluos-gateway-<node>`, `maluos-memory-<node>`; `<node>` is the
+  server's host name, lower case, checked against what exists;
+- the kernel server keeps the plain names, so an estate provisioned
+  before slice 3 needs no change;
+- `service_login()` and the three components take the names from one
+  function (`platform_names(cfg)`); the daemons already read `pg_user`
+  and the database from their configuration when the data is remote.
+
+Each application server therefore needs the database server's admin
+credential at first boot, as the kernel server does (the plan's medium,
+`maluctl db export`), and the database server's `clients` must admit it.
 
 ### 2. The installer in two halves, joined by an API under the node token
 
@@ -139,54 +161,80 @@ app_install.php apply <repo> --kernel URL
   role, over TLS, by the database server's LAN name. An application whose
   database needs an untrusted extension still needs a template on the
   database server (difference 4 of slice 1), unchanged.
+- The application's roles and database are still made by the kernel's
+  side in `prepare`, although the application server holds the admin
+  credential too (section 1): one place decides names and ownership, and
+  the application's installer never needs more than its own roles.
 
 ### 3. The applications' door on the kernel server
 
-A third Apache vhost on the kernel server, bound to its **overlay
-address** (port 8081), admitted by address to the estate's members:
+A third Apache vhost on the kernel server, bound to its **LAN address**
+(port 8081) and admitted **by address**: `Require ip` for the application
+servers' addresses, written by first boot from
+`components.maludb-os-core.application_servers` (a list of addresses or
+networks, the same idea as the database server's `clients`).
 
 | Path | Goes to | For |
 |---|---|---|
 | `/api/v1/{directory,agents/chat,notify,apps,runs/facts,ledger}` | the internal API, those paths only | everything an application calls, under its application token |
+| `/api/v1/estate/apps/{prepare,register}` | the same | the installer's two calls, under the node token |
 | `/maludb/` | `127.0.0.1:8000` | the application's episodes and memory |
 | `/model/` | `127.0.0.1:8816` | an application's own model credential (K24) |
 
 It is an allow-list, like the public vhost's. The internal vhost on
 `127.0.0.1:8080` serves every PHP handler and must not be widened.
 `OS_INTERNAL_URL`, `MALUDB_API_URL` and the model URL in a remote
-application's environment point at the door.
+application's environment point at the door, by the kernel server's LAN
+name or address.
 
 In the other direction the Actions MCP posts to
-`http://<node>.internal:<APP_INTERNAL_PORT>`: the application's internal
-vhost listens on the application server's overlay address and admits the
-kernel server's. The registry's `base_url` becomes that address (the code
-already accepts any URL; only the installer writes loopback).
+`http://<application server>:<APP_INTERNAL_PORT>`: the application's
+internal vhost listens on the application server's LAN address and admits
+the kernel server's address only. The registry's `base_url` becomes that
+address (the code already accepts any URL; only the installer writes
+loopback).
 
-Why the overlay and not the LAN with TLS: the internal handlers have no
-TLS today and are protected by being unreachable. The overlay keeps them
-unreachable from the LAN, authenticates both ends, and needs no
-certificates. An application server can depend on the overlay; only the
-kernel's own database connection cannot (slice 1, difference 1).
+**LAN addresses, not the overlay** (the owner, 2026-11-12: it has to stay
+understandable to an administrator who knows networks, not MaluOS). What
+that means, stated plainly for the handbook:
 
-### 4. A key per application
+- The door and the applications' internal ports speak plain HTTP on the
+  LAN, as the proxy already does to the office. They are protected by the
+  address lists on both sides and by the tokens every call carries.
+- The servers belong on a network segment the business trusts (a server
+  VLAN), with a host firewall rule beside each listener; first boot writes
+  the rule where a firewall is active and says so where none is.
+- The addresses must be stable (static or reserved), as the proxy's
+  upstreams must be.
+- TLS on these two listeners can follow with the per-application keys
+  (section 4) without changing the layout.
 
-A remote application gets a **derived key**,
-`HMAC(ACTION_TOKEN_KEY, "application:" + app_key)`, under the same
-variable names. The kernel signs with the application's key whatever is
-meant for that application: the hand-off, claims, the logout notice, the
-kernel token for `app_roles` and shared reads, the run token the runner
-presents to that application's MCP endpoints, the action token and relay
-on posts to its handlers, the replay signature. It verifies with the same
-key what that application sends back (run facts).
+### 4. Keys: the master key now, a key per application later
 
-- The application's code does not change: it verifies with the key in its
-  environment as before.
-- A compromised application server can then forge tokens only for its own
-  application.
-- `applications.key_mode` (`shared`, `derived`): remote applications are
-  `derived` from the start; local ones stay `shared` until re-installed,
-  so nothing running breaks. The specs' statement that "an application
-  never holds the relay key" becomes true for remote applications.
+Slice 3 ships a remote application with the kernel's `ACTION_TOKEN_KEY`
+and `ACTIONS_RELAY_KEY`, exactly as a local one gets them (the owner,
+2026-11-12: master key first, tighten later). `prepare` returns them over
+the door.
+
+What that means, recorded so it is a decision and not an oversight: an
+application server holds a key that can mint a sign-on for any
+application of the estate and tokens the kernel's handlers accept. With
+plain HTTP on the LAN (section 3) the key also crosses the wire once per
+install. The servers and their network segment are therefore one trust
+boundary, as one host is today.
+
+The tightening, a later slice, changes no application code:
+
+- a **derived key** per application,
+  `HMAC(ACTION_TOKEN_KEY, "application:" + app_key)`, under the same
+  variable names; the kernel signs with it whatever is meant for that
+  application (the hand-off, claims, the logout notice, the kernel token,
+  the run token presented to that application's endpoints, the action
+  token and relay, the replay signature) and verifies with it what the
+  application sends back;
+- `applications.key_mode` (`shared`, `derived`), so running applications
+  move one at a time;
+- TLS on the door and on the applications' internal ports.
 
 ### 5. Names and the proxy
 
@@ -204,11 +252,13 @@ key what that application sends back (run facts).
 
 ### 6. The estate
 
-Nodes keep the kind `server`. The node's report carries its role
-(`kernel`, `application-server`, `database-server`) and what it runs (the
-applications and their units; the cluster), and Settings → Desks shows
-the role beside the name. New node kinds would touch about ten places in
-the kernel for a label; they can follow if a rule ever needs them.
+Nodes keep the kind `server` (the owner's decision 4). The node's report
+carries its role (`kernel`, `application-server`, `database-server`) and
+what it runs (the applications and their units; the cluster), and
+Settings → Desks shows the role beside the name.
+
+The overlay stays what it is for desks and for servers elsewhere; the
+servers of one site do not need it to work together.
 
 ### 7. Office setup
 
@@ -217,7 +267,7 @@ the kernel for a label; they can follow if a rule ever needs them.
 | On | It asks | It does |
 |---|---|---|
 | a kernel server | as today, plus where the data lives (0.1.3) and, at the end, whether application servers will join: it mints the codes and prints each server's plan fragment | today's phases; the proxy's blocks with an upstream per name |
-| an application server | the kernel's URL, the code, the applications, the database server's name and certificate | joins, checks the door and the database server, installs, reports |
+| an application server | the kernel server's LAN name, the code, the applications, the database server's name and its two files | checks the database server and the door, provisions the platform services, joins, installs, reports |
 | a database server | the clients and the names | `maluctl provision`, `maluctl db export`, the fragment for the others |
 
 The order an operator follows: database server, kernel server,
@@ -242,10 +292,14 @@ read-only, report first, findings advise.
     `/etc/maluos` and to the units, the firewall's state.
 - **What they may do**: the estate's node actions (restart a unit, apply
   updates, reboot), each through the kernel's approvals.
-- **Where it runs**: nothing but the node service on the database server
-  and the application servers. This needs the node service to run without
-  a vault and a gateway on those roles, which first boot's enrolment
-  already assumes for a database server; to be proven.
+- **Where they run**: the PostgreSQL agent on the kernel server, acting on
+  the database server through the estate, as the owner prefers; the
+  database server itself runs the node service and its collectors only.
+  An application server has its own vault and gateway (section 1), so its
+  Linux and security agents may run on it or on the kernel server; the
+  collectors are the same either way. The node service must run without a
+  vault and a gateway on a database server, which first boot's enrolment
+  already assumes; to be proven.
 
 This is its own slice, after application servers work.
 
@@ -253,10 +307,11 @@ This is its own slice, after application servers work.
 
 | Slice | Repository | Contents |
 |---|---|---|
-| 3a | kernel | the door vhost; `/api/v1/estate/apps/prepare` and `register` (the installer's second half as functions); the code naming applications; derived keys; `app_install.php --kernel`; the registry's `base_url`; `location_id` |
-| 3b | maluos | `role: application-server` in first boot, the plan and the installer; the door rendered by the kernel component; `maluctl app install`, `names --upstreams`; office setup's three interviews; `proxy-config.sh` per name |
+| 3a | kernel | the door vhost; `/api/v1/estate/apps/prepare` and `register` (the installer's second half as functions); the code naming applications; `app_install.php --kernel`; the registry's `base_url`; `location_id`; the role in the node's report |
+| 3b | maluos | `role: application-server` in first boot, the plan and the installer; per-server platform names on the database server (gap 8); the door and its address list rendered by the kernel component; `maluctl app install`, `names --upstreams`; office setup's three interviews; `proxy-config.sh` per name |
 | 3c | both | the test below, the handbook's page, the three-machine proof extended to four machines |
 | 4 | both | the collectors and the three watching agents |
+| 5 | kernel | a key per application; TLS on the door and the internal ports |
 
 **Test.** This VM has no KVM; three VMs under emulation would take most of
 a day per run. As slice 1 stood a second cluster in for the database
@@ -268,22 +323,19 @@ agent's action, an approval's replay, a sign-on, a shared read and the
 switcher across the door. The real machines are the owner's walkthrough.
 
 **Effort.** 3a is the large part (the installer's second half behind an
-API, and the keys). Each build and boot test is about two hours here. A
+API). Each build and boot test is about two hours here. A
 realistic estimate is four to six working sessions for 3a to 3c, and two
 more for slice 4.
 
-## For the owner to decide
+## The owner's decisions (2026-11-12)
 
-1. **A key per application now** (section 4), or ship remote applications
-   with the kernel's master keys first and tighten later? Recommended: now.
-   It is the difference between a breach of one application server and a
-   breach of the estate.
-2. **The overlay between application servers and the kernel** (section
-   3), or LAN addresses? Recommended: the overlay. It needs the hub's UDP
-   port open between the servers, as the three-machine proof does.
-3. **Application servers run no vault, gateway or memory face** (section
-   1), so no agent can ever run on one. Recommended: yes.
-4. **Roles shown as labels on `server` nodes** (section 6) instead of new
-   node kinds. Recommended: yes.
-5. **A join code names the applications it may install** (section 2).
-   Recommended: yes.
+1. **Keys**: the master key now, a key per application later (section 4).
+2. **LAN addresses** between the application servers and the kernel, not
+   the overlay: it has to stay understandable to existing administrators
+   (section 3).
+3. **An application server has a vault** and the platform services with
+   it: agents that support applications and act as the IT department are
+   a core premise of MaluOS (section 1; it is what makes gap 8 a part of
+   this slice).
+4. **Roles as labels** on `server` nodes, no new node kinds (section 6).
+5. **A join code names the applications** it may install (section 2).
