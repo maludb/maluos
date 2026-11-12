@@ -1,0 +1,11 @@
+# The Actions MCP reads mcp/registries/*.json at start. A registration from an application server writes one as the
+# web user, who cannot restart a unit; this path unit does it (MaluOS Phase 14 slice 3; db/194).
+[Unit]
+Description=MaluDB OS: reload the Actions MCP when an application's action registry changes
+
+[Path]
+PathChanged=/var/www/mcp/registries
+Unit=maludb-os-actions-reload.service
+
+[Install]
+WantedBy=multi-user.target

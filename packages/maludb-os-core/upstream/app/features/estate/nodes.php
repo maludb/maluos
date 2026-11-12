@@ -84,6 +84,8 @@ function node_join(PDO $pdo, array $code, array $body, ?string $principal): arra
     $st->execute(['m' => (int) $code['member_id'], 'l' => 'Node: ' . $name, 'h' => hash('sha256', $raw), 'loc' => $nodeId]);
     $tokenId = (int) $st->fetchColumn();
     $pdo->prepare('UPDATE locations SET enrollment_token_id = :t WHERE id = :id')->execute(['t' => $tokenId, 'id' => $nodeId]);
+    // db/194: the applications the code named are the node's allowance as an application server
+    $pdo->prepare('UPDATE locations SET node_apps = :a WHERE id = :id')->execute(['a' => (string) ($code['apps'] ?? '{}'), 'id' => $nodeId]);
     $pdo->prepare('UPDATE desk_enrollment_codes SET used_at = now(), location_id = :loc WHERE id = :id')->execute(['loc' => $nodeId, 'id' => $code['id']]);
     return ['node' => node_row($pdo, $nodeId), 'token' => $raw];
 }

@@ -7,12 +7,13 @@ declare(strict_types=1);
  *   sudo maluctl office enroll https://app.<domain> --code XXXX-XXXX
  * within fifteen minutes.
  *   php bin/mint_desk_code.php --email you@example.com [--name "Ed's desk"]
+ *   php bin/mint_desk_code.php --email op@example.com --kind server --name app-1 --apps hr,projects   (an application server)
  */
 if (PHP_SAPI !== 'cli') { fwrite(STDERR, "CLI only.\n"); exit(1); }
 require_once dirname(__DIR__) . '/app/bootstrap.php';
 require_once dirname(__DIR__) . '/app/features/estate/desks.php';
 
-$opts = getopt('', ['email:', 'name:', 'kind:']);
+$opts = getopt('', ['email:', 'name:', 'kind:', 'apps:']);   // db/194: --kind server --apps hr,projects: an application server's code
 $kind = (string) ($opts['kind'] ?? 'desk');   // db/188: server or inference mints a node code (the person must be an operator)
 $email = isset($opts['email']) ? normalize_email((string) $opts['email']) : '';
 if ($email === '') {
@@ -26,7 +27,8 @@ if (($member['member_kind'] ?? 'human') !== 'human' || !empty($member['is_extern
 if (!in_array($kind, ['desk', 'server', 'inference'], true)) { fwrite(STDERR, "--kind is desk, server or inference.\n"); exit(1); }
 require_once dirname(__DIR__) . '/app/features/estate/nodes.php';
 if ($kind !== 'desk' && !estate_operator($member)) { fwrite(STDERR, "{$email} is not an operator (super-admin); only an operator mints a node code.\n"); exit(1); }
-$c = desk_code_mint($pdo, (int) $member['id'], trim((string) ($opts['name'] ?? '')), (int) $member['id'], $kind);
+$c = desk_code_mint($pdo, (int) $member['id'], trim((string) ($opts['name'] ?? '')), (int) $member['id'], $kind,
+    preg_split('/[\s,]+/', (string) ($opts['apps'] ?? ''), -1, PREG_SPLIT_NO_EMPTY));
 log_activity($pdo, 'desk.code.mint', 'desk_enrollment_code', $c['id'], ['source' => 'cron', 'after' => ['member' => $email, 'desk_name' => $opts['name'] ?? null, 'kind' => $kind]]);
 if ($kind === 'desk') {
     echo "Desk enrolment code for {$email} — shown once, valid until {$c['expires_at']}:\n\n  {$c['code']}\n\n";

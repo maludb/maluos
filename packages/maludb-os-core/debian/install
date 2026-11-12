@@ -27,3 +27,5 @@ upstream/docs/deploy/maludb-os-agent-runner.service usr/lib/systemd/system
 upstream/docs/deploy/maludb-os-channels.service usr/lib/systemd/system
 upstream/docs/deploy/maludb-os-activity-ingest.service usr/lib/systemd/system
 upstream/docs/deploy/maludb-os-activity-ingest.timer usr/lib/systemd/system
+upstream/docs/deploy/maludb-os-actions-reload.path usr/lib/systemd/system
+upstream/docs/deploy/maludb-os-actions-reload.service usr/lib/systemd/system

@@ -32,7 +32,7 @@ def provision(ctx):
     ccfg = (ctx["cfg"].get("components") or {}).get("maluos-gateway") or {}
 
     # 1. role, schema, grants
-    ensure_schema(psql, exists, qi, ql, db, tenant, psql_file=ctx.get("psql_file"))
+    ensure_schema(psql, exists, qi, ql, db, tenant, role=ctx["db_role"](ROLE) if ctx.get("db_role") else ROLE, psql_file=ctx.get("psql_file"))
     log(f"gateway: schema in {tenant}, grants to {ROLE}")
 
     # 2. catalogue seed (only when empty) and the engine's principal

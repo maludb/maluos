@@ -31,8 +31,11 @@ function desk_code_normalize(string $raw): string
  * Mint a code for $memberId: eight characters, fifteen minutes, one use. A person has one live code
  * at a time — minting again expires the earlier one. @return array{code:string,expires_at:string,id:int}
  */
-function desk_code_mint(PDO $pdo, int $memberId, ?string $deskName, int $createdBy, string $kind = 'desk'): array
+function desk_code_mint(PDO $pdo, int $memberId, ?string $deskName, int $createdBy, string $kind = 'desk', array $apps = []): array
 {
+    // db/194: a server code may name the applications the joining server may install (catalog keys); none by default.
+    $apps = $kind === 'server' ? array_values(array_unique(array_filter(array_map(static fn ($k) => strtolower(trim((string) $k)), $apps),
+        static fn (string $k): bool => preg_match('/^[a-z][a-z0-9_]{1,31}$/', $k) === 1))) : [];
     // db/188: a code is minted for a kind; a node code (server, inference) is the operator's, and they may hold one per kind.
     $pdo->prepare('UPDATE desk_enrollment_codes SET expires_at = now() WHERE member_id = :m AND kind = :k AND used_at IS NULL AND expires_at > now()')
         ->execute(['m' => $memberId, 'k' => $kind]);
@@ -41,13 +44,14 @@ function desk_code_mint(PDO $pdo, int $memberId, ?string $deskName, int $created
         $code .= DESK_CODE_ALPHABET[random_int(0, strlen(DESK_CODE_ALPHABET) - 1)];
     }
     $st = $pdo->prepare(<<<'SQL'
-        INSERT INTO desk_enrollment_codes (member_id, code_hash, desk_name, expires_at, created_by, kind)
-        VALUES (:m, :h, :n, now() + make_interval(secs => :ttl), :b, :k)
+        INSERT INTO desk_enrollment_codes (member_id, code_hash, desk_name, expires_at, created_by, kind, apps)
+        VALUES (:m, :h, :n, now() + make_interval(secs => :ttl), :b, :k, :apps)
         RETURNING id, expires_at
     SQL);
-    $st->execute(['m' => $memberId, 'h' => hash('sha256', $code), 'n' => $deskName !== '' ? $deskName : null, 'ttl' => DESK_CODE_TTL_S, 'b' => $createdBy, 'k' => $kind]);
+    $st->execute(['m' => $memberId, 'h' => hash('sha256', $code), 'n' => $deskName !== '' ? $deskName : null, 'ttl' => DESK_CODE_TTL_S, 'b' => $createdBy, 'k' => $kind,
+        'apps' => '{' . implode(',', $apps) . '}']);
     $row = $st->fetch();
-    return ['code' => substr($code, 0, 4) . '-' . substr($code, 4), 'expires_at' => (string) $row['expires_at'], 'id' => (int) $row['id']];
+    return ['code' => substr($code, 0, 4) . '-' . substr($code, 4), 'expires_at' => (string) $row['expires_at'], 'id' => (int) $row['id'], 'apps' => $apps];
 }
 
 /** The live, unused, unexpired code row for $raw of one of $kinds (db/188: a desk code enrols only a desk), locked for this transaction, or null. */

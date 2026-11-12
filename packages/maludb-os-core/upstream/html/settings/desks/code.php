@@ -25,10 +25,12 @@ if ($kind !== 'desk' && !estate_operator($m)) {
     emit_action_status(false, ['errors' => ['Only an operator (super-admin) mints a node code.']]);
     respond_invalid(['Only an operator (super-admin) mints a node code.']);
 }
-$c = desk_code_mint($pdo, $me, $name, $me, $kind);
-log_activity($pdo, 'desk.code.mint', 'desk_enrollment_code', $c['id'], ['after' => ['desk_name' => $name !== '' ? $name : null, 'kind' => $kind]]);
+// db/194: a server code may name the applications that server may install ("hr, projects")
+$apps = $kind === 'server' ? preg_split('/[\s,]+/', request_string('apps'), -1, PREG_SPLIT_NO_EMPTY) : [];
+$c = desk_code_mint($pdo, $me, $name, $me, $kind, $apps);
+log_activity($pdo, 'desk.code.mint', 'desk_enrollment_code', $c['id'], ['after' => ['desk_name' => $name !== '' ? $name : null, 'kind' => $kind] + ($c['apps'] !== [] ? ['apps' => $c['apps']] : [])]);
 emit_action_status(true, ['did' => 'Enrolment code created']);
 if (wants_json()) {
-    respond_saved(['did' => 'Enrolment code created', 'code' => $c['code'], 'expires_at' => json_ts($c['expires_at']), 'enroll_url' => app_url('/'), 'kind' => $kind]);
+    respond_saved(['did' => 'Enrolment code created', 'code' => $c['code'], 'expires_at' => json_ts($c['expires_at']), 'enroll_url' => app_url('/'), 'kind' => $kind, 'apps' => $c['apps']]);
 }
 echo settings_section_html($pdo, $me, 'desks', ['newCode' => $c['code']]);

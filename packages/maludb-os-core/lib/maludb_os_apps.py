@@ -188,6 +188,112 @@ def install_apps(cfg, admin_email, domain, scheme, state_dir, www=WWW, run=subpr
     return result
 
 
+def remote_install_command(key, kernel, token_file, ref=None, hire=True, source=GIT_SOURCE, address=None, database=None, proxy_address=None):
+    """The installer's command line on an APPLICATION SERVER (docs/phase14-application-servers.md): its host half
+    here, the rest asked of the kernel server at its applications' door. `database`: the database server
+    ({host, port, admin, passfile, sslmode, ca}) or None for this server's own cluster."""
+    cmd = ["php", "bin/app_install.php", "apply", repo_url(key, source), "--kernel", kernel.rstrip("/"),
+           "--node-token-file", token_file, "--grant-standing-departments"]
+    if hire:
+        cmd.append("--hire-agents")
+    if ref:
+        cmd += ["--ref", ref]
+    if address:
+        cmd += ["--address", address]
+    if proxy_address:
+        cmd += ["--proxy-address", proxy_address]
+    if database:
+        cmd += ["--db-host", str(database["host"]), "--db-port", str(database.get("port") or 5432),
+                "--db-admin", str(database["admin"]), "--db-passfile", str(database["passfile"])]
+        if database.get("sslmode"):
+            cmd += ["--db-sslmode", str(database["sslmode"])]
+        if database.get("ca"):
+            cmd += ["--db-ca", str(database["ca"])]
+    return cmd
+
+
+def node_token_file(path="/run/maluos/app-install-node.token"):
+    """This server's estate node token (the vault holds it; root may read it) in a root-only file for the installer.
+    The caller removes it."""
+    import sys
+    sys.path.insert(0, "/usr/lib/maluos")
+    from maluos_estate import client as C
+    conf = C.read_conf()
+    if not conf:
+        raise RuntimeError("this server is not a node of an estate (sudo maluctl estate join URL --code CODE)")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as fh:
+        fh.write(C.token(conf) + "\n")
+    return path
+
+
+def prepare_apache(run=subprocess.run):
+    """An application server has no kernel component to do it: the modules every application's vhost and the
+    kernel's relay use, and Apache running."""
+    run(["a2enmod", "-q", "rewrite", "proxy", "proxy_http", "headers"], check=False, capture_output=True)
+    run(["systemctl", "enable", "--now", "--quiet", "apache2"], check=False, capture_output=True)
+    run(["systemctl", "reload-or-restart", "apache2"], check=False, capture_output=True)
+
+
+def install_remote_apps(blk, state_dir, www=WWW, run=subprocess.run, log=print, wait=wait_for_network,
+                        timeout=APP_TIMEOUT, source=GIT_SOURCE, database=None, token_file=None):
+    """role: application-server. `blk` is firstboot.yaml's application_server block: kernel (the kernel server's
+    applications' door, http://HOST:8081), apps (the catalog keys, in order), and optionally ref, propose_agents,
+    address (this server's address as the kernel reaches it) and proxy_address. Markers and logs as install_apps
+    keeps them. Returns {installed, failed, errors}."""
+    cfg = apps_config({"install": blk.get("apps") or [], "ref": blk.get("ref"), "propose_agents": blk.get("propose_agents")})
+    result = {"installed": [], "failed": [], "errors": {}}
+    keys = cfg["install"]
+    if not keys:
+        return result
+    kernel = str(blk.get("kernel") or "")
+    if not re.match(r"^https?://[A-Za-z0-9.\[\]:-]+$", kernel):
+        raise ValueError(f"application_server.kernel: {kernel!r} is not the kernel server's door (http://HOST:8081)")
+    os.makedirs(state_dir, exist_ok=True)
+    pending = [k for k in keys if not os.path.exists(os.path.join(state_dir, k))]
+    result["installed"] = [k for k in keys if k not in pending]
+    if not pending:
+        return result
+    if wait is not None:
+        host = repo_url(pending[0], source).split("//", 1)[-1].split("/", 1)[0]
+        if not wait(host):
+            log(f"warning: {host} is not reachable; the applications' clones will likely fail")
+    prepare_apache(run)
+    made = token_file is None
+    token_file = token_file or node_token_file()
+    env = dict(os.environ, HOME="/root", COMPOSER_ALLOW_SUPERUSER="1", COMPOSER_NO_INTERACTION="1",
+               GIT_TERMINAL_PROMPT="0", PATH=os.environ.get("PATH", "") + ":/usr/local/bin:/usr/bin:/bin")
+    try:
+        for key in pending:
+            hire = key not in cfg["propose_agents"]
+            cmd = remote_install_command(key, kernel, token_file, ref=cfg["ref"].get(key), hire=hire, source=source,
+                                         address=blk.get("address"), database=database, proxy_address=blk.get("proxy_address"))
+            logf = os.path.join(state_dir, key + ".log")
+            log(f"application {key}: {' '.join(cmd)}")
+            try:
+                with open(logf, "w") as fh:
+                    r = run(cmd, cwd=www, stdout=fh, stderr=subprocess.STDOUT, env=env, timeout=timeout)
+                if r.returncode != 0:
+                    raise RuntimeError(f"exit {r.returncode}: " + tail(logf))
+            except subprocess.TimeoutExpired:
+                result["failed"].append(key); result["errors"][key] = f"timed out after {timeout}s (see {logf})"
+                log(f"application {key}: FAILED: {result['errors'][key]}"); continue
+            except Exception as e:
+                result["failed"].append(key); result["errors"][key] = str(e)[:400]
+                log(f"application {key}: FAILED: {result['errors'][key]} (see {logf})"); continue
+            with open(os.path.join(state_dir, key), "w") as fh:
+                json.dump({"installed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "source": cmd[3], "kernel": kernel,
+                           "ref": cfg["ref"].get(key), "agents": "hired" if hire else "proposed"}, fh); fh.write("\n")
+            result["installed"].append(key)
+            log(f"application {key}: installed here and registered with the kernel at {kernel}")
+    finally:
+        if made:
+            try: os.remove(token_file)
+            except OSError: pass
+    result["installed"] = [k for k in keys if k in result["installed"]]
+    return result
+
+
 def tail(path, n=600):
     try:
         s = open(path, errors="replace").read()

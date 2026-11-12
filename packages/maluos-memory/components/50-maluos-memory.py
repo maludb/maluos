@@ -25,7 +25,7 @@ def provision(ctx):
         pwd.getpwnam(ROLE)
     except KeyError:
         raise RuntimeError(f"system user {ROLE} missing (package postinst did not run?)")
-    ensure_schema(psql, exists, qi, ql, db, tenant)
+    ensure_schema(psql, exists, qi, ql, db, tenant, role=ctx["db_role"](ROLE) if ctx.get("db_role") else ROLE)
     ensure_principals(psql, qi, ql, db, tenant)
     log(f"memory: role {ROLE} with the tenant's memory facades; principals {GUEST} (shares nothing yet) and {SYNC}")
     import yaml
