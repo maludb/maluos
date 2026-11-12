@@ -480,12 +480,18 @@ servers.
    answered by the owner 2026-11-12. The office keeps the LAN name for its
    own connection for good; TLS with the certificate verified protects it,
    and the overlay stays for the other members.
-2. **Agents on the database server** (gap 7): what a "database support
-   agent" and a "Linux support agent" are (new shipped agents, or the
-   operator's own through `maluctl agent create`), and whether they run on
-   the database server (it then needs a tenant, a vault and a gateway of its
-   own, in a database apart from the estate's) or on the kernel's server
-   acting through the estate's node actions.
+2. **Agents on the database server** (gap 7): answered by the owner
+   2026-11-12. The database server is watched by three background agents:
+   PostgreSQL, Linux and security. They run on the kernel's server and
+   act on the database server through the estate if that can be achieved,
+   which is the preferred design; the database server keeps what belongs
+   with the data (the engine and its memory listener: memories are stored
+   in PostgreSQL, so the memory service's data is there). To design with
+   slice 3: what each agent reads (the node's report and its `database`
+   part, logs and metrics over a read-only channel, `pg_stat_*` through a
+   monitoring role), what it may do (the estate's node actions, each
+   approved), and which of this needs a small collector on the database
+   server that is not an agent.
 
 The earlier planning questions: none were left open. The kernel-side design of application servers
 (decision 4, slice 3) is written as its own note before slice 3 starts.
