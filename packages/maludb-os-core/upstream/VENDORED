@@ -1,5 +1,5 @@
 repository: https://github.com/maludb/maludb-os-core
 ref: phase14/application-servers
-commit: b6fa86d
+commit: dd9a1f5
 version: 2026.11.12
 vendored: 2026-11-12

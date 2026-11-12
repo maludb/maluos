@@ -318,7 +318,33 @@ def manifests(apps_dir=APPS_DIR):
     return out
 
 
-def office_names(domain, apps_dir=APPS_DIR):
+def remote_apps(www=WWW, run=subprocess.run):
+    """The applications the kernel knows on servers of their own (docs/phase14-application-servers.md), from the
+    kernel's bin/app_names.php: [{key, name, address, node}]. [] where there is no kernel here, the kernel is not
+    provisioned, or this user cannot read its configuration (the names of /srv/apps still answer)."""
+    script = os.path.join(www, "bin", "app_names.php")
+    if not os.path.exists(script) or not os.path.exists(os.path.join(www, "config", ".env")):
+        return []
+    cmd = ["php", script, "--json"]
+    if os.geteuid() == 0:
+        cmd = ["runuser", "-u", "www-data", "--"] + cmd
+    try:
+        r = run(cmd, cwd=www, capture_output=True, text=True, timeout=30)
+        rows = json.loads(r.stdout.strip().splitlines()[-1]) if r.returncode == 0 and r.stdout.strip() else []
+    except Exception:
+        return []
+    return [x for x in rows if isinstance(x, dict) and x.get("address") not in (None, "kernel")]
+
+
+def office_upstreams(domain, apps_dir=APPS_DIR, remote=None):
+    """[(name, upstream)] for the proxy: every name of office_names with where it is served, "kernel" for this
+    server (the kernel's four names and the applications beside it) or an application server's address."""
+    remote = remote_apps() if remote is None else remote
+    far = {x["name"]: (x.get("address") or "?") for x in remote}
+    return [(n, far.get(n, "kernel")) for n in office_names(domain, apps_dir, remote=remote)]
+
+
+def office_names(domain, apps_dir=APPS_DIR, remote=None):
     """The DNS names an office needs, in the order the proxy's operator reads them: the bare domain, www,
     app, os, and <vhost.label>.<domain> for every installed application (the label is the manifest's
     vhost.label, else its catalog_key, else the directory's name)."""
@@ -326,6 +352,10 @@ def office_names(domain, apps_dir=APPS_DIR):
     for key, m in manifests(apps_dir):
         label = (m.get("vhost") or {}).get("label") or m.get("catalog_key") or key
         names.append(f"{label}.{domain}")
+    # the applications on servers of their own: the kernel knows their names
+    for x in (remote_apps() if remote is None else remote):
+        if str(x.get("name") or "").endswith("." + domain):
+            names.append(x["name"])
     seen, out = set(), []
     for n in names:
         if n not in seen:
