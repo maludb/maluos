@@ -1080,7 +1080,28 @@ sudo -n env $DBS maluctl db export /root/dbs-export > /tmp/p14-export.log 2>&1
 sudo -n test -s /root/dbs-export/db-admin.txt && sudo -n grep -q 'BEGIN CERTIFICATE' /root/dbs-export/db-ca.pem && [ "$(sudo -n stat -c %a /root/dbs-export/db-admin.txt)" = 600 ] \
   && echo "  ok   maluctl db export wrote the admin credential (0600) and the certificate for the office" || { echo "  FAIL db export: $(cat /tmp/p14-export.log | cut -c1-200)"; fail=1; }
 # the office: the block in firstboot.yaml, the kernel's local ledger and markers cleared (its database is a new one), then the real provisioning
+# through the office-setup plugin when it has the script (0.1.3): the check with the certificate verified, a wrong password and a
+# dead port explained, the refusal on a kernel already provisioned locally, then the block written; by hand otherwise
+DSS=/usr/share/maluos/claude-plugins/maluos-office-setup/scripts/database-server.py
+if [ -x "$DSS" ]; then
+  DA="--host localhost --port $DP --credential /root/dbs-export/db-admin.txt --ca /root/dbs-export/db-ca.pem"
+  out=$(sudo -n maluctl office-setup database --check $DA 2>&1); rc=$?
+  [ $rc = 0 ] && echo "$out" | grep -q 'PASS  connected to localhost.*the certificate verified' && echo "$out" | grep -q 'PASS  the server has the template' \
+    && echo "  ok   office-setup database --check: the admin role over TLS with the certificate verified, the template there" || { echo "  FAIL database --check (rc=$rc): $(echo "$out" | tail -3 | tr '\n' ' ' | cut -c1-300)"; fail=1; }
+  echo wrong | sudo -n tee /root/dbs-export/bad.txt >/dev/null
+  out=$(sudo -n maluctl office-setup database --check --host localhost --port $DP --credential /root/dbs-export/bad.txt --ca /root/dbs-export/db-ca.pem 2>&1); rc=$?
+  out2=$(sudo -n maluctl office-setup database --check --host localhost --port 5999 --credential /root/dbs-export/db-admin.txt --ca /root/dbs-export/db-ca.pem 2>&1); rc2=$?
+  [ $rc != 0 ] && echo "$out" | grep -q "is not the role maluos_admin's" && [ $rc2 != 0 ] && echo "$out2" | grep -q 'nothing answers at localhost:5999' && ! echo "$out$out2" | grep -q "$(sudo -n cat /root/dbs-export/db-admin.txt)" \
+    && echo "  ok   database --check says which side to fix (a wrong password, nothing listening) and shows no password" || { echo "  FAIL database --check on failures: $(echo "$out" | tail -1 | cut -c1-200) | $(echo "$out2" | tail -1 | cut -c1-200)"; fail=1; }
+  out=$(sudo -n maluctl office-setup database --apply $DA 2>&1); rc=$?
+  [ $rc != 0 ] && echo "$out" | grep -q 'data-not-moved' && ! sudo -n grep -q '^database_server:' /etc/maluos/firstboot.yaml \
+    && echo "  ok   database --apply refuses a kernel already provisioned on its own cluster and writes nothing" || { echo "  FAIL database --apply without --data-not-moved (rc=$rc)"; fail=1; }
+  out=$(sudo -n maluctl office-setup database --apply $DA --data-not-moved 2>&1); rc=$?
+  [ $rc = 0 ] && sudo -n python3 -c "import yaml; c=yaml.safe_load(open('/etc/maluos/firstboot.yaml')); d=c['database_server']; assert d['host']=='localhost' and d['port']==$DP and d['sslmode']=='verify-full' and c['components'], d" 2>/dev/null \
+    && echo "  ok   database --apply wrote the database_server block and kept the rest of firstboot.yaml" || { echo "  FAIL database --apply (rc=$rc): $(echo "$out" | tail -2 | tr '\n' ' ' | cut -c1-300)"; fail=1; }
+else
 sudo -n python3 -c "import yaml; p='/etc/maluos/firstboot.yaml'; c=yaml.safe_load(open(p)) or {}; c['database_server']={'host': 'localhost', 'port': $DP, 'admin': 'maluos_admin', 'credential': 'file:/root/dbs-export/db-admin.txt', 'sslmode': 'verify-full', 'ca': 'file:/root/dbs-export/db-ca.pem'}; open(p, 'w').write(yaml.safe_dump(c, sort_keys=False))"
+fi
 sudo -n rm -f /var/lib/maluos/business-os/migrations-applied /var/lib/maluos/business-os/hire-installer /var/lib/maluos/business-os/hire-jev
 sudo -n maluctl provision --force > /tmp/p14-office.log 2>&1
 sudo -n python3 -c "
@@ -1092,6 +1113,10 @@ bad = {k: v for k, v in d['components'].items() if v is not None and ('error' in
 assert not bad, bad
 assert d['listener'] is None, d['listener']
 " 2>/tmp/p14-done.err && echo "  ok   the office provisioned against the database server: every component healthy, the summary says where the data is" || { echo "  FAIL office provisioning: $(tail -2 /tmp/p14-done.err | cut -c1-300) | $(grep -i 'FAILED\|warning' /tmp/p14-office.log | tail -3 | cut -c1-300)"; systemctl is-active maludb-api apache2 | tr '\n' ' '; echo "health: $(curl -sS -m 60 -o /tmp/p14-health.out -w '%{http_code} in %{time_total}s' http://127.0.0.1:8080/api/v1/health 2>&1) $(head -c 300 /tmp/p14-health.out 2>/dev/null)"; sudo -n tail -n 12 /var/log/apache2/error.log | cut -c1-400; sudo -n grep -h 'FATAL\|ERROR' /var/log/postgresql/postgresql-18-dbs.log | tail -8 | cut -c1-300; sudo -n grep -h 'maludb-os-core\|kernel' /tmp/p14-office.log | tail -6 | cut -c1-300; fail=1; }
+if [ -x "$DSS" ]; then
+  sudo -n maluctl office-setup database --show 2>&1 | tr '\n' ' ' | grep -q "provisioned: against localhost:$DP.*PASS  reached:" && sudo -n maluctl office-setup status 2>&1 | grep -q "^data: .*configured: the database server localhost:$DP; provisioned: the database server localhost:$DP" \
+    && echo "  ok   office-setup database --show and status: configured and provisioned on the database server, reached" || { echo "  FAIL office-setup database --show: $(sudo -n maluctl office-setup database --show 2>&1 | tr '\n' ' ' | cut -c1-300)"; fail=1; }
+fi
 sudo -n maluctl status | grep -q "data:        on the database server localhost:$DP (verify-full) as maluos_admin" && echo "  ok   maluctl status: data on the database server" || { echo "  FAIL status line: $(sudo -n maluctl status | sed -n 2,4p)"; fail=1; }
 sudo -n maluctl db status | tr '\n' ' ' | grep -q "reached:   yes, as maluos_admin (not a superuser).*TLSv1.3.*maludb_os" && echo "  ok   maluctl db status: reached as the admin role, not a superuser, TLS 1.3, the kernel's database there" || { echo "  FAIL db status: $(sudo -n maluctl db status 2>&1 | tr '\n' ' ' | cut -c1-300)"; fail=1; }
 [ "$(stat -c '%a %U' /var/lib/maluos/secrets/db-admin.pgpass 2>/dev/null || sudo -n stat -c '%a %U' /var/lib/maluos/secrets/db-admin.pgpass)" = '600 root' ] && cmp -s <(sudo -n cat /root/dbs-export/db-ca.pem) /etc/maluos/database-server-ca.pem \
