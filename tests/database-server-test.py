@@ -141,11 +141,26 @@ class Plan(unittest.TestCase):
                 ("{role: database-server, database_server: {host: db-1}}", "this host is the server"),
                 ("{role: database-server, database_server: {clients: [nonsense]}}", "is not an address or a network"),
                 ("{role: database-server, components: {maludb-os-core: {enabled: true, domain: x.local}}}", "runs no Business OS kernel"),
-                ("{role: application-server}", "expected one of")):
+                ("{role: file-server}", "expected one of"),
+                # an application server (docs/phase14-application-servers.md)
+                ("{role: application-server, components: {maludb-os-core: {enabled: true, domain: x.local}}}", "runs no Business OS kernel"),
+                ("{role: application-server, application_server: {apps: [hr]}}", "applications' door"),
+                ("{role: application-server, application_server: {kernel: 'http://k.lan:8081', apps: [hr]}}", "needs firstboot.enroll"),
+                ("{role: application-server, application_server: {kernel: 'http://k.lan:8081', apps: ['Bad Key']}, enroll: {kind: estate, url: 'https://app.x.com', code: ABCD-EFGH}}", "is not an application key"),
+                ("{role: application-server, database_server: {host: db-1, credential: x, suffix: 'App 1'}}", "suffix"),
+                ("{application_server: {kernel: 'http://k.lan:8081', apps: [hr]}}", "role is not application-server")):
             with self.subTest(body=body):
                 with self.assertRaises(P.PlanError) as cm:
                     P.load(MINIMAL + "  firstboot: " + body + "\n")
                 self.assertIn(needle, str(cm.exception))
+
+    def test_application_server(self):
+        p = P.load(MINIMAL + "  firstboot: {role: application-server, application_server: {kernel: 'http://kernel.lan:8081', apps: [hr, projects]}, "
+                   "enroll: {kind: estate, url: 'https://app.example.com', code: ABCD-EFGH}, "
+                   "database_server: {host: db-1.example.com, credential: 'file:plans/db-admin.txt', ca: 'file:plans/db-ca.pem', suffix: app_1}}\n")
+        fb = p["firstboot"]
+        self.assertEqual((fb["role"], fb["application_server"]["apps"], fb["database_server"]["suffix"]), ("application-server", ["hr", "projects"], "app_1"))
+        P.load(MINIMAL + "  firstboot: {role: application-server}\n")        # the platform services and nothing installed yet
 
     def test_server(self):
         p = P.load(MINIMAL + "  firstboot: {role: database-server, database_server: {listen: 0.0.0.0, clients: [192.168.100.0/24]}}\n")

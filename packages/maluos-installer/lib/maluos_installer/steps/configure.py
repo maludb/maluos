@@ -381,7 +381,14 @@ def sub_firstboot(ctx):
             ctx.write("/etc/maluos/database-server-ca.pem", ds["ca"].strip() + "\n", mode=0o644)
             blk["ca"] = "file:/etc/maluos/database-server-ca.pem"
         blk["sslmode"] = ds.get("sslmode") or ("verify-full" if ds.get("ca") else "require")
+        if ds.get("suffix"):
+            blk["suffix"] = ds["suffix"]
         doc["database_server"] = blk
+    if fb.get("role") == "application-server":
+        # docs/phase14-application-servers.md: the platform services and applications here, the kernel elsewhere
+        doc["role"] = "application-server"
+        ap = fb.get("application_server") or {}
+        doc["application_server"] = {k: ap[k] for k in ("kernel", "apps", "address") if ap.get(k)}
     text = (yaml.safe_dump(doc, sort_keys=False) if yaml else json.dumps(doc, indent=2))
     header = ("# MaluOS first-boot provisioning, written by the MaluOS installer from the\n"
               "# install plan. Read once by maluos-firstboot.service. The keys the plan did\n"
