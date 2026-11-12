@@ -1,3 +1,21 @@
+maluos-firstboot (0.1.19) resolute; urgency=medium
+
+  * role: application-server (docs/phase14-application-servers.md): the
+    platform services (the tenant, the vault, the gateway, the memory face)
+    and applications, no kernel and no MaluDB API of its own. After the
+    components it joins the estate (enroll: kind estate, through maluctl
+    estate join, without the overlay unless enroll.overlay) and installs
+    application_server.apps through the kernel server's applications' door
+    (maludb-os-core's install_remote_apps).
+  * Two servers on one database server: an application server whose data is
+    on a database server uses names of its own there, the database
+    maludb_<suffix> and the roles maluos-vault-<suffix>, -gateway-, -memory-
+    (platform_suffix, platform_db, db_role; database_server.suffix or the
+    host's name). A kernel server and a single host keep the plain names.
+  * The summary carries role, application_server and platform_suffix.
+
+ -- Edward Honour <ed@maludb.org>  Thu, 12 Nov 2026 18:00:00 +0000
+
 maluos-firstboot (0.1.18) resolute; urgency=medium
 
   * maluctl db export names the database server by a name the other

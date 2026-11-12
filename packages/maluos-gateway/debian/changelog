@@ -1,3 +1,12 @@
+maluos-gateway (0.6.3) resolute; urgency=medium
+
+  * The component makes the gateway's database role under the name first
+    boot gives it (ctx db_role): its own name, or with the server's suffix
+    on an application server whose data is on a database server
+    (maluos-firstboot 0.1.19). The system user is unchanged.
+
+ -- Edward Honour <ed@maludb.org>  Thu, 12 Nov 2026 18:00:00 +0000
+
 maluos-gateway (0.6.2) resolute; urgency=medium
 
   * Phase 14 slice 1: the database on a database server. The daemon reads

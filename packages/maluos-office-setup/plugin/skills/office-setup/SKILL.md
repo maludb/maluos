@@ -76,6 +76,9 @@ Read the assessment line and act on it:
 - `domain_chosen=True`: the office is already configured for a domain. Summarize what is in place and
   ask whether to **check** (go to Phase 9), **change** the configuration (continue from Phase 1 with the
   current values offered as defaults), or **continue** from the first phase whose assessment is false.
+- If `application-server.py --show` says this server is configured as an application server, or the
+  operator says this server is to run applications for a kernel on another server, this skill's kernel
+  phases do not apply: follow `references/application-server.md`, "On an application server".
 - The `data:` line says where this server keeps its data and what first boot provisioned against.
   If it says `THIS HOST IS A DATABASE SERVER`, stop: a database server runs no kernel and this skill
   has nothing to configure on it (its own steps are in `references/database-server.md`).
@@ -292,6 +295,14 @@ sudo ${CLAUDE_PLUGIN_ROOT}/scripts/vm-guest.sh
 
 Installs the QEMU guest agent on a KVM/QEMU guest (Proxmox then shows the address), does nothing on
 physical hardware or another hypervisor, and says which.
+
+## Phase 8b: application servers (only when the business separates them)
+
+Ask whether applications will run on servers of their own. If not, skip this phase. If so, read
+`references/application-server.md` and do "On the kernel server: admit the application servers": the
+addresses, `configure-kernel.py --application-servers`, `provision.sh`, then the command that mints a
+join code per server for the operator to run. The proxy's blocks (Phase 5) are rendered again once the
+application servers have installed their applications, so each name gets its own upstream.
 
 ## Phase 9: the summary
 

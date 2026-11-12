@@ -1,6 +1,6 @@
 {
   "name": "maluos-office-setup",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Configures a freshly installed MaluOS office (the Business OS kernel) after first boot: an interview that asks for the deployment topology, the business domain and the first administrator, then provisions the kernel, points the office's names at the proxy, hands over the first sign-in, takes provider keys through a protected prompt and reports one topology-aware summary. Every step is a small reviewed script; the whole thing is resumable.",
   "author": {
     "name": "Edward Honour"

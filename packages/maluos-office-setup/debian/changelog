@@ -1,3 +1,19 @@
+maluos-office-setup (0.1.4) resolute; urgency=medium
+
+  * Application servers (MaluOS Phase 14 slice 3).
+    scripts/application-server.py: --show, --check the kernel's
+    applications' door and say which side to fix, --apply writes role:
+    application-server, the application_server block and the estate
+    enrolment into firstboot.yaml (the join code from a file).
+    configure-kernel.py --application-servers sets the kernel's list of
+    admitted servers. proxy-config.sh gives an application on a server of
+    its own that server as its upstream (maluctl app names --upstreams).
+  * references/application-server.md: the three kinds of server, the order
+    they are set up in, what each interview asks; the skill follows it.
+  * maluctl office-setup application-server.
+
+ -- Edward Honour <ed@maludb.org>  Thu, 12 Nov 2026 18:00:00 +0000
+
 maluos-office-setup (0.1.3) resolute; urgency=medium
 
   * /office-website: the public page at the bare name. The skill turns the

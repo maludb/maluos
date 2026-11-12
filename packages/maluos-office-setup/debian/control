@@ -9,7 +9,7 @@ Rules-Requires-Root: no
 
 Package: maluos-office-setup
 Architecture: all
-Depends: ${misc:Depends}, maluos-firstboot (>= 0.1.15), maludb-os-core, python3, python3-yaml, curl, ca-certificates, sudo, iproute2
+Depends: ${misc:Depends}, maluos-firstboot (>= 0.1.19), maludb-os-core (>= 2026.11.12maluos2), python3, python3-yaml, curl, ca-certificates, sudo, iproute2
 Recommends: tmux
 Description: MaluOS office setup: the Business OS configuration interview for Claude Code
  The Claude Code plugin that configures a freshly installed MaluOS office

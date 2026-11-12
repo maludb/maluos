@@ -84,6 +84,8 @@ def nested_extent(lines, i, end):
 
 
 def yaml_scalar(v):
+    if isinstance(v, list):                      # a flow list of plain items (addresses, networks)
+        return "[" + ", ".join(yaml_scalar(x) for x in v) + "]"
     if isinstance(v, bool):
         return "true" if v else "false"
     s = str(v)
@@ -158,6 +160,9 @@ def main():
     ap.add_argument("--admin-email"); ap.add_argument("--admin-name")
     ap.add_argument("--proxy-address"); ap.add_argument("--no-proxy-address", action="store_true")
     ap.add_argument("--apps", help="comma-separated keys, 'none', or 'keep' (default keep)", default="keep")
+    ap.add_argument("--application-servers", default="keep",
+                    help="the addresses or networks of the application servers that may use this kernel's applications' door "
+                         "(comma-separated), 'none', or 'keep' (default keep): docs/phase14-application-servers.md")
     g = ap.add_mutually_exclusive_group()
     g.add_argument("--preview", action="store_true"); g.add_argument("--apply", action="store_true"); g.add_argument("--show", action="store_true")
     a = ap.parse_args()
@@ -208,6 +213,15 @@ def main():
         if bad:
             die("not application keys: " + ", ".join(bad))
 
+    appservers = None
+    if a.application_servers.strip().lower() == "none":
+        appservers = []
+    elif a.application_servers.strip().lower() != "keep":
+        appservers = [x.strip() for x in a.application_servers.split(",") if x.strip()]
+        bad = [x for x in appservers if not re.fullmatch(r"[0-9A-Fa-f:.]+(/\d{1,3})?", x)]
+        if bad:
+            die("not addresses or networks (like 192.168.100.21 or 192.168.100.0/24): " + ", ".join(bad))
+
     # ---- edit
     if comp is None:
         lines = [l for l in lines]
@@ -236,6 +250,8 @@ def main():
         end = remove_key(lines, start, end, "proxy_address")
     if apps is not None:
         end = set_apps(lines, start, end, apps)
+    if appservers is not None:
+        end = set_key(lines, start, end, "application_servers", appservers) if appservers else remove_key(lines, start, end, "application_servers")
     new_text = "\n".join(lines)
     if not new_text.endswith("\n"):
         new_text += "\n"

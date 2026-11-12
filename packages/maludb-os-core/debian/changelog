@@ -1,3 +1,25 @@
+maludb-os-core (2026.11.12maluos2) resolute; urgency=medium
+
+  * Application servers, the kernel half. Vendored at the kernel's branch
+    phase14/application-servers (dd9a1f5): db/194, the installer in two
+    halves, /api/v1/estate/apps/{prepare,register,job}, the applications'
+    door, the registry's reload path unit, bin/app_names.php. To be
+    re-vendored at main once the branch is merged.
+  * The component renders the applications' door (the kernel server's LAN
+    address, port 8081, admitted by address) when
+    components.maludb-os-core.application_servers lists the application
+    servers (door_address overrides the address); makes mcp/registries and
+    storage/app-installs the web user's; enables
+    maludb-os-actions-reload.path; writes OS_PROXY_ADDRESS. The summary
+    carries door.
+  * maludb_os_apps: install_remote_apps (an application server's
+    applications, the installer's host half), remote_apps, office_upstreams;
+    office_names includes the applications on servers of their own.
+  * maluctl app install KEY… (on an application server) and
+    maluctl app names --upstreams.
+
+ -- Edward Honour <ed@maludb.org>  Thu, 12 Nov 2026 18:00:00 +0000
+
 maludb-os-core (2026.11.12maluos1) resolute; urgency=medium
 
   * The landing page is a starter. Vendored at the kernel's branch

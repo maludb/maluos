@@ -18,6 +18,9 @@
   maluctl office-setup database [--show | --check … | --apply …]
                                         where this server keeps its data, and a MaluOS database server tested and set
                                         (scripts/database-server.py; --help there for the arguments)
+  maluctl office-setup application-server [--show | --check --kernel URL | --apply …]
+                                        this server as an application server of a kernel on another server
+                                        (scripts/application-server.py; --help there)
   maluctl office-setup website          the office's public page (the bare name): Claude Code with /office-website,
                                         which turns the starter page into the business's own on a working copy
   maluctl office-setup website status | checkout DIR | publish DIR | restore [BACKUP]
@@ -109,6 +112,8 @@ def main(args):
             print("warning: /etc/maluos/firstboot.yaml is missing; this does not look like a MaluOS office", file=sys.stderr)
         cmd = [c, "--plugin-dir", ROOT] + ([] if verb == "shell" else [rest[0] if rest else "/office-setup"])
         os.execv(c, cmd)
+    if verb == "application-server":
+        return as_root([os.path.join(scripts, "application-server.py"), *(rest or ["--show"])])
     if verb == "database":
         return as_root([os.path.join(scripts, "database-server.py"), *(rest or ["--show"])])
     if verb == "website":
