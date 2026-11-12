@@ -25,6 +25,9 @@ As root it also runs `admin-login.py --check`: whether the first sign-in can wor
 member, the stored password against it, the session cookie, one real sign-in on the office), with no
 password shown.
 
+The report says where the data lives (this server's own PostgreSQL or a database server) and `verify.sh`
+checks that it answers; `sudo ${CLAUDE_PLUGIN_ROOT}/scripts/database-server.py --show` gives the detail.
+
 Use `--external` only when the operator says the proxy (https) or the LAN DNS (http) is in place; it
 tests the names as a client would, from the office.
 

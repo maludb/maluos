@@ -1,3 +1,14 @@
+maluos-firstboot (0.1.18) resolute; urgency=medium
+
+  * maluctl db export names the database server by a name the other
+    servers' own network resolves and its certificate carries (the first of
+    database_server.names, else the host's full name), not the overlay name:
+    an office cannot reach its own database over the overlay at first boot
+    (the owner's answer 2026-11-12: the LAN name). The listener's URL the
+    same.
+
+ -- Edward Honour <ed@maludb.org>  Thu, 12 Nov 2026 16:00:00 +0000
+
 maluos-firstboot (0.1.17) resolute; urgency=medium
 
   * service_login takes the grant's level: use for a broker (the gateway),

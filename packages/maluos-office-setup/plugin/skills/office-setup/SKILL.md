@@ -46,6 +46,7 @@ check fails. `references/firstboot-keys.md` says what the kernel's component rea
 | Input | Ask | Validation | Used by |
 |---|---|---|---|
 | Topology | A: external HTTPS proxy, B: private network over HTTP, C: direct TLS on the office (not supported, see below) | one of A/B | everything below |
+| Where the data lives | this server's own PostgreSQL (the default), or a MaluOS database server (one installed with `role: database-server`) | for a database server: its name on the LAN, and the two files its `maluctl db export` wrote | `database-server.py` |
 | Business domain | `example.com`, no scheme, no `www`, no path | lowercase labels with a dot | `--domain` |
 | Administrator email and display name | the Business OS super-admin; not the Linux user `maluos` | an email; a one-line name | `--admin-email`, `--admin-name` |
 | Proxy address (A only) | the TLS proxy's address **as the office reaches it** (LAN address, e.g. `192.168.100.1`) | IPv4 or hostname, not loopback | `--proxy-address` |
@@ -75,6 +76,9 @@ Read the assessment line and act on it:
 - `domain_chosen=True`: the office is already configured for a domain. Summarize what is in place and
   ask whether to **check** (go to Phase 9), **change** the configuration (continue from Phase 1 with the
   current values offered as defaults), or **continue** from the first phase whose assessment is false.
+- The `data:` line says where this server keeps its data and what first boot provisioned against.
+  If it says `THIS HOST IS A DATABASE SERVER`, stop: a database server runs no kernel and this skill
+  has nothing to configure on it (its own steps are in `references/database-server.md`).
 - Note `component.supports_proxy_address` and `supports_apps`: they decide Phase 4 and the applications
   question. Note `virt.type` for Phase 8.
 - On the 26.04.20261102 ISO (`maluos-firstboot` below 0.1.16) `proxy_address` is not native: say so once;
@@ -94,6 +98,51 @@ this plugin does not configure it (no certificate issuance or listener on the of
 release); offer A (put a TLS proxy in front, on the LAN or on the same host as a separate service) or B
 (HTTP on a private network), and record the choice in the summary as "direct TLS requested, not
 supported". Do not configure https without a proxy.
+
+## Phase 1b: where the data lives
+
+Ask whether this server keeps its data in **its own PostgreSQL** (one server does everything: the
+default, and nothing to do in this phase) or on a **MaluOS database server** (a separate machine
+installed with `role: database-server`; this server then runs the kernel and the applications and
+holds no database). Read `references/database-server.md` before answering questions about it.
+
+If preflight's `data:` line already names a database server (it was given at install time, in the plan
+or the installer's Database group), say so and only run the check below against the configured values.
+
+For a database server, collect:
+
+1. Its **name as this server resolves it on the LAN** (not an address typed from memory, and not the
+   estate's overlay name ending in `.internal`: an office cannot reach its own database over the
+   overlay). The name must be one the server's certificate carries.
+2. The paths **on this server** of `db-admin.txt` and `db-ca.pem`, which `sudo maluctl db export DIR`
+   on the database server wrote and the operator copied here (for example with `scp`). Never read,
+   print or copy `db-admin.txt` yourself: it is the admin role's password. Refer to it by path only.
+
+Check before writing anything:
+
+```bash
+sudo ${CLAUDE_PLUGIN_ROOT}/scripts/database-server.py --check --host <name> --credential <path>/db-admin.txt --ca <path>/db-ca.pem
+```
+
+Show its lines as they are. On a FAIL its NOTE says which side to fix (the name is not in the
+certificate: `database_server.names` on the database server; this server's address is not admitted:
+`database_server.clients` there; a wrong password; nothing listening). Those fixes are made on the
+database server by its operator; wait and run the check again. Do not continue past a failed check and
+do not fall back to the local cluster without asking.
+
+When it passes:
+
+```bash
+sudo ${CLAUDE_PLUGIN_ROOT}/scripts/database-server.py --apply --host <name> --credential <path>/db-admin.txt --ca <path>/db-ca.pem
+```
+
+If it refuses because the kernel was already provisioned on this server's own cluster, explain what
+`--data-not-moved` means (the next provisioning starts empty on the database server: a new kernel
+database, a new administrator password, nothing carried over) and add the flag only when the operator
+says this server holds nothing to keep. An office with real data is not moved by this skill.
+
+Provisioning (Phase 4) then creates this server's databases and roles on the database server. The two
+files must stay where they are until Phase 4 has run once.
 
 ## Phase 2: the domain, the administrator, the applications
 

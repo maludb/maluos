@@ -9,6 +9,17 @@ maluos-office-setup (0.1.3) resolute; urgency=medium
     publish DIR (refuses symlinks, dot files, server-side code, a missing
     index.html; backs the live page up, replaces it whole), restore.
   * maluctl office-setup website [status|checkout|publish|restore].
+  * Where the data lives (MaluOS Phase 14). The interview asks (Phase 1b):
+    this server's own PostgreSQL, or a MaluOS database server. For a
+    database server, scripts/database-server.py --check connects as the
+    admin role over TLS with the certificate verified and says which side
+    to fix when it cannot; --apply writes the database_server block of
+    firstboot.yaml (nothing is moved; refused on a kernel already
+    provisioned locally without --data-not-moved). preflight.py and
+    verify.sh report where the data is and that it answers;
+    references/database-server.md says what is supported: one kernel
+    server per database server, no separate application servers yet.
+    maluctl office-setup database.
   * plugin.json says the package's version.
 
  -- Edward Honour <ed@maludb.org>  Thu, 12 Nov 2026 15:00:00 +0000

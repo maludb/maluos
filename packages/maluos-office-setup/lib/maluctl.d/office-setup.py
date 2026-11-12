@@ -15,6 +15,9 @@
                                         throttle, the session cookie, a real sign-in on the office. No password shown.
   maluctl office-setup admin reset      a new generated password for the administrator, stored root-only
                                         (/var/lib/maluos/secrets/business-os/admin-password); then the same checks
+  maluctl office-setup database [--show | --check … | --apply …]
+                                        where this server keeps its data, and a MaluOS database server tested and set
+                                        (scripts/database-server.py; --help there for the arguments)
   maluctl office-setup website          the office's public page (the bare name): Claude Code with /office-website,
                                         which turns the starter page into the business's own on a working copy
   maluctl office-setup website status | checkout DIR | publish DIR | restore [BACKUP]
@@ -106,6 +109,8 @@ def main(args):
             print("warning: /etc/maluos/firstboot.yaml is missing; this does not look like a MaluOS office", file=sys.stderr)
         cmd = [c, "--plugin-dir", ROOT] + ([] if verb == "shell" else [rest[0] if rest else "/office-setup"])
         os.execv(c, cmd)
+    if verb == "database":
+        return as_root([os.path.join(scripts, "database-server.py"), *(rest or ["--show"])])
     if verb == "website":
         if not rest:
             c = ensure_claude()

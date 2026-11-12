@@ -71,6 +71,7 @@ Each is one step, idempotent, and elevates itself with `sudo -n` when it needs r
 | `proxy-config.sh` | renders the proxy's nginx server blocks from `maluctl app names` (or the four kernel names) |
 | `set-provider-key.sh` | a provider key through a no-echo prompt or a mode-600 file; probes where possible; restarts the unit; `--status` |
 | `landing-site.sh` | the public page: `status`, `checkout DIR` (a working copy), `publish DIR` (checked, the live page backed up and replaced), `restore` |
+| `database-server.py` | where this server keeps its data: `--show`; `--check` a MaluOS database server (TLS with the certificate verified, the admin role, the template) and say which side to fix; `--apply` writes the `database_server` block (nothing is moved) |
 | `vm-guest.sh` | the QEMU guest agent on a KVM/QEMU guest; nothing elsewhere |
 
 ## What it refuses or leaves to the operator

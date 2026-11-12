@@ -180,6 +180,30 @@ def apps_state():
     return out
 
 
+def database():
+    """Where this server keeps its data (Phase 14): its own cluster, or a MaluOS database server named by the
+    database_server block of firstboot.yaml; what first boot provisioned against; this host's own role."""
+    out = {"configured": "local", "provisioned": None, "role": ""}
+    try:
+        import yaml
+        cfg = yaml.safe_load(read(FIRSTBOOT_YAML) or "") or {}
+    except Exception:
+        cfg = {}
+    out["role"] = str(cfg.get("role") or "").strip()
+    blk = cfg.get("database_server") if isinstance(cfg.get("database_server"), dict) else {}
+    if out["role"] != "database-server" and blk.get("host"):
+        out["configured"] = {"host": str(blk["host"]), "port": int(blk.get("port") or 5432), "admin": str(blk.get("admin") or "maluos_admin"),
+                             "sslmode": str(blk.get("sslmode") or "verify-full")}
+    try:
+        st = json.loads(read("/var/lib/maluos/firstboot/done") or "{}")
+        ds = st.get("database_server")
+        if st:
+            out["provisioned"] = ({"host": ds.get("host"), "port": ds.get("port")} if isinstance(ds, dict) and ds.get("host") else "local")
+    except Exception:
+        pass
+    return out
+
+
 def assess(cfg, fb, hosts, hc, svc, prov):
     a = {}
     k = (fb.get("summary") or {}).get("kernel") if fb.get("summary") else None
@@ -224,6 +248,7 @@ def collect():
         "hosts": hosts, "services": svc, "health": hc, "providers": prov,
         "admin_password_file": os.path.exists(ADMIN_PW) if os.geteuid() == 0 else "unknown (not root)",
         "apps_installed": apps_state(), "virt": virt(), "network": network(), "root": os.geteuid() == 0,
+        "database": database(),
     }
     data["assessment"] = assess(cfg or {}, fb, hosts, hc, svc, prov)
     return data
@@ -244,6 +269,10 @@ def human(d):
     print(f"configuration:   enabled={c.get('enabled')} domain={c.get('domain')} scheme={c.get('scheme')} proxy_address={c.get('proxy_address')}")
     print(f"                 admin {c.get('admin_email')} / {c.get('admin_name')}; apps {c.get('apps')}; secrets in yaml: "
           + ", ".join(k for k, v in (c.get('secrets_set') or {}).items() if v) if c else "configuration: unreadable")
+    db = d.get("database") or {}
+    where = lambda v: "this server's own cluster" if v == "local" else ("nothing yet" if v is None else f"the database server {v.get('host')}:{v.get('port')}")
+    print(f"data:            configured: {where(db.get('configured'))}; provisioned: {where(db.get('provisioned'))}"
+          + ("; THIS HOST IS A DATABASE SERVER (role: database-server): it runs no kernel" if db.get("role") == "database-server" else ""))
     print(f"names:           app.{c.get('domain')} -> {d['hosts']['app_resolves_to']}; loopback lines {len(d['hosts']['loopback_lines'])}; plugin block {d['hosts']['plugin_block']}")
     inactive = [k for k, v in d["services"].items() if v != "active"]
     print(f"services:        {len(d['services']) - len(inactive)}/{len(d['services'])} active" + (f"; not active: {', '.join(inactive)}" if inactive else ""))
@@ -269,7 +298,16 @@ def report(d):
         print(f"| {name} | {ok(good)} | {detail} |")
     print(f"# Office configuration summary\n")
     print(f"Topology: **{topo}**. Domain: `{domain}`. Kernel URLs: `{scheme}://app.{domain}`, `{scheme}://os.{domain}`.\n")
+    db = d.get("database") or {}
+    conf, prov = db.get("configured"), db.get("provisioned")
+    where = lambda v: "this server's own PostgreSQL" if v == "local" else ("nothing yet" if v is None else f"the database server `{v.get('host')}:{v.get('port')}`")
+    print(f"Data: **{where(conf)}**.\n")
+    if db.get("role") == "database-server":
+        print("This host is a database server (role: database-server). It runs no Business OS kernel; the rows below do not apply to it.\n")
     print("| Check | State | Detail |\n|---|---|---|")
+    same = (conf == "local" and prov == "local") or (isinstance(conf, dict) and isinstance(prov, dict) and conf.get("host") == prov.get("host") and int(conf.get("port") or 0) == int(prov.get("port") or 0))
+    row("Data where the configuration says", same if prov is not None else None,
+        f"provisioned on {where(prov)}" + ("" if same or prov is None else "; re-run provision.sh (data is not moved: database-server.py --help)"))
     row("First boot finished", a["firstboot_finished"], f"unit {d['firstboot']['unit']['sub_state']}")
     row("No failed first-boot component", not a["firstboot_failed_components"], ", ".join(a["firstboot_failed_components"]) or "")
     row("Kernel configured for the domain", a["kernel_enabled"] and a["domain_chosen"], f"enabled={c.get('enabled')}")

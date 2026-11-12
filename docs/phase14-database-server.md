@@ -426,13 +426,66 @@ What the boot test found on the way, each fixed before the passing run:
   tenant's, an instant of pg_stat_activity instead of the server's
   connection log, a health route that never touches the database).
 
+## The split topology: what holds and what does not (2026-11-12)
+
+The owner's target layout, stated 2026-11-12 after the first walkthrough: one
+database server; one application server running the kernel (`os.`, `app.`,
+the public page); further application servers each running one or more
+applications and no kernel; on the database server no agents but database
+and Linux support agents, if any. The walkthrough waits for application
+servers.
+
+| # | Gap | State |
+|---|---|---|
+| 1 | An application on a server of its own. The kernel's installer clones into `/srv/apps` of the kernel's host, registers `http://127.0.0.1:<port>`, writes `OS_INTERNAL_URL=http://127.0.0.1:8080` (the internal API listens on loopback only), enables units and a vhost locally | open: slice 3, design below |
+| 2 | Office setup did not know the database server | **closed** in maluos-office-setup 0.1.3: Phase 1b of the interview, `database-server.py --show/--check/--apply`, the data in `preflight.py` and `verify.sh`, `references/database-server.md` |
+| 3 | An office that already holds data cannot be moved | open (difference 5); `--apply` refuses a provisioned kernel without `--data-not-moved` |
+| 4 | `proxy-config.sh` renders one upstream for every name | open: with slice 3 |
+| 5 | No `application-server` role in the installer, no node kinds `database` and `application` | open: slices 2 and 3 |
+| 6 | The overlay name in `maluctl db export` | **closed** in maluos-firstboot 0.1.18: the export names the server by `database_server.names[0]` or its full name; open question 1 answered by the owner 2026-11-12 (the LAN name, for good); the plugin's check explains a name the certificate does not carry |
+| 7 | Agents on the database server | open, a design gap: `role: database-server` provisions the cluster and nothing else (no tenant, vault, gateway or memory face), and `maluos-agent@` needs all three, so no agent can run there today. No database or Linux support agent ships either: the kernel's Sysadmin agent watches its own host. What the office has is the server's node report (its `database` part) and the estate's node actions |
+| 8 | Two servers on one database server. Every MaluOS server's first boot makes the roles `maluos-vault`, `maluos-gateway`, `maluos-memory` and the database `maludb` under fixed names; against a database server `service_login()` sets each role's password, so a second server resets the first one's | open: must be settled by slice 3 (found 2026-11-12; one database server serves one kernel server until then) |
+
+### Slice 3, the owner's choices (2026-11-12)
+
+- **Registration through the kernel's API.** The installer runs on the
+  application server and registers the application with the kernel using an
+  operator token; the application server never holds the kernel's `app_rw`
+  credential. (The alternative, the kernel's host installing onto the other
+  host, was declined: it needs root from the kernel's host on every
+  application server.)
+- **The layout** above.
+
+### Slice 3, what the design note has to settle
+
+1. The kernel's side: an API for what `app_install.php` does through
+   `app_rw` today (the application row, its endpoints, roles, registry,
+   token, the agents' hires), under an operator token; `base_url` and the MCP
+   endpoints as addresses the kernel's host reaches (`http://<app-host>:<port>`
+   over the overlay, or the public https name), never loopback.
+2. The application's way back: `OS_INTERNAL_URL` at the kernel's host
+   (the internal API on the overlay address, admitted by address and by the
+   application's token), `MALUDB_API_URL`, the hand-off token's check.
+3. The application server's own platform services (gap 8): per-server role
+   and database names on the database server, or a small local cluster for
+   the vault and the gateway only.
+4. `role: application-server` in first boot and the installer (no kernel
+   units, the installer's host tools, enrolment before the install), the
+   node kind, `proxy-config.sh` with an upstream per name, the boot test with
+   three VMs.
+
 ## Open questions
 
-1. **The office on the overlay after its first boot** (difference 1). Keep
-   the LAN name for the office's own connection for good (the simple
-   answer: TLS with the certificate verified is what protects it, and the
-   overlay stays for the other members), or build the switch (the overlay
-   up from local state before the kernel)? Recommended: keep the LAN name.
+1. **The office on the overlay after its first boot** (difference 1):
+   answered by the owner 2026-11-12. The office keeps the LAN name for its
+   own connection for good; TLS with the certificate verified protects it,
+   and the overlay stays for the other members.
+2. **Agents on the database server** (gap 7): what a "database support
+   agent" and a "Linux support agent" are (new shipped agents, or the
+   operator's own through `maluctl agent create`), and whether they run on
+   the database server (it then needs a tenant, a vault and a gateway of its
+   own, in a database apart from the estate's) or on the kernel's server
+   acting through the estate's node actions.
 
 The earlier planning questions: none were left open. The kernel-side design of application servers
 (decision 4, slice 3) is written as its own note before slice 3 starts.

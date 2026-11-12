@@ -23,6 +23,14 @@ units=(apache2 maludb-api maludb-os-web maludb-os-records-mcp maludb-os-activity
 inactive=(); for u in "${units[@]}"; do systemctl is-active --quiet "$u" || inactive+=("$u"); done
 if [ ${#inactive[@]} -eq 0 ]; then pass "${#units[@]} units active"; else fail "not active: ${inactive[*]}"; fi
 
+say "## the data"
+if [ "$(id -u)" -eq 0 ]; then
+  dbs=$(maluctl db status 2>&1 || true)
+  printf '%s\n' "$dbs" | grep -E '^data:' | sed 's/^data: */NOTE  data: /' || true
+  if printf '%s\n' "$dbs" | grep -q '^reached: *yes'; then pass "the database answers ($(printf '%s\n' "$dbs" | sed -n 's/^reached: *yes, //p'))"
+  else fail "the database does not answer: $(printf '%s\n' "$dbs" | sed -n 's/^reached: *//p')"; fi
+else note "not root: where the data is and whether it answers is not checked"; fi
+
 say "## the kernel"
 c=$(http_code http://127.0.0.1:8080/api/v1/health); [ "$c" = 200 ] && pass "API health 200" || fail "API health HTTP $c"
 c=$(curl -s -o /dev/null -w '%{http_code}' -m 10 -H "Host: app.$DOMAIN" http://127.0.0.1/login 2>/dev/null || echo 000)

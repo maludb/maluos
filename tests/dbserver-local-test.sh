@@ -61,7 +61,7 @@ check "a second run changes nothing (one block, the same password, no restart lo
 sudo env $SRV MALUCTL_PLUGIN_DIR=/nonexistent python3 "$W/lib/maluctl" db export "$W/export" > "$W/srv/export.log" 2>&1
 sudo chown -R "$(id -un)" "$W/export"
 check "maluctl db export: the credential (0600), the certificate, the office's block" \
-  "[ \"\$(stat -c %a $W/export/db-admin.txt)\" = 600 ] && grep -q 'BEGIN CERTIFICATE' $W/export/db-ca.pem && grep -q 'credential: file:' $W/export/database-server.yaml"
+  "[ \"\$(stat -c %a $W/export/db-admin.txt)\" = 600 ] && grep -q 'BEGIN CERTIFICATE' $W/export/db-ca.pem && grep -q 'host: db-1.example.com' $W/export/database-server.yaml && grep -q 'credential: file:' $W/export/database-server.yaml"
 check "maluctl status names the role and the certificate" "sudo env $SRV MALUCTL_PLUGIN_DIR=/nonexistent python3 $W/lib/maluctl status | grep -q 'role:        database server'"
 
 echo "== the office, provisioned against it as the admin role"

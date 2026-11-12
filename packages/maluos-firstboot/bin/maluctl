@@ -176,11 +176,19 @@ def cmd_db(args):
             f.write(open(ds["credential"]).read().strip() + "\n")
         shutil.copyfile(ds["certificate"], ca); os.chmod(ca, 0o644)
         host = socket.gethostname().split(".")[0]
+        # the name the other servers connect to: one their own network resolves and this server's certificate carries.
+        # Not the overlay name: the overlay's members are rows of the kernel's database, which is on this server
+        # (docs/phase14-database-server.md, "Where it differs from the plan", 1; the owner's answer 2026-11-12: the LAN name)
+        blk = cfg.get("database_server") if isinstance(cfg.get("database_server"), dict) else {}
+        fqdn = socket.getfqdn()
+        lan = next((str(n) for n in (blk.get("names") or []) if n), None) or (fqdn if "." in fqdn and not fqdn.startswith("localhost") else host)
         frag = os.path.join(out, "database-server.yaml")
         with open(frag, "w") as f:
             f.write("# for the office's /etc/maluos/firstboot.yaml (or its install plan): the paths are where the two\n"
                     "# files beside this one will be on the office at first boot (the plan's medium)\n"
-                    f"database_server:\n  host: {host}.internal\n  port: {ds.get('port')}\n  admin: {ds.get('admin')}\n"
+                    "# host: a name the office resolves on its own network at first boot (LAN DNS or an /etc/hosts line there) and\n"
+                    "# that this server's certificate carries; add others with database_server.names here. Not the overlay name.\n"
+                    f"database_server:\n  host: {lan}\n  port: {ds.get('port')}\n  admin: {ds.get('admin')}\n"
                     "  credential: file:/PATH/TO/db-admin.txt\n  sslmode: verify-full\n  ca: file:/PATH/TO/db-ca.pem\n")
         if st.get("listener") and st.get("token_file") and os.path.exists(st["token_file"]):
             lcfg = cfg.get("listener") or {}
@@ -191,7 +199,7 @@ def cmd_db(args):
             with open(frag, "a") as f:
                 f.write("# the engine's listener stays with the data: the office's agents reach it here" +
                         ("" if reach not in ("127.0.0.1", "localhost", "::1") else " (set listener.host on this server first: it listens on loopback only)") + "\n"
-                        f"listener:\n  url: http://{host}.internal:{lcfg.get('port', 5329)}\n  token: file:/PATH/TO/listener-token.txt\n")
+                        f"listener:\n  url: http://{lan}:{lcfg.get('port', 5329)}\n  token: file:/PATH/TO/listener-token.txt\n")
             print(f"{ltok}   the listener's bearer token")
         print(f"{cred}   the admin role's password (keep it off shared media once the office has booted)")
         print(f"{ca}     this server's certificate (public)  {ds.get('fingerprint')}")
