@@ -15,6 +15,10 @@
                                         throttle, the session cookie, a real sign-in on the office. No password shown.
   maluctl office-setup admin reset      a new generated password for the administrator, stored root-only
                                         (/var/lib/maluos/secrets/business-os/admin-password); then the same checks
+  maluctl office-setup website          the office's public page (the bare name): Claude Code with /office-website,
+                                        which turns the starter page into the business's own on a working copy
+  maluctl office-setup website status | checkout DIR | publish DIR | restore [BACKUP]
+                                        the same steps without Claude (scripts/landing-site.sh)
 
 The plugin is /usr/share/maluos/claude-plugins/maluos-office-setup (the package maluos-office-setup); its
 sudoers rule lets members of sudo run its scripts as root without a password, which check, status and
@@ -102,6 +106,14 @@ def main(args):
             print("warning: /etc/maluos/firstboot.yaml is missing; this does not look like a MaluOS office", file=sys.stderr)
         cmd = [c, "--plugin-dir", ROOT] + ([] if verb == "shell" else [rest[0] if rest else "/office-setup"])
         os.execv(c, cmd)
+    if verb == "website":
+        if not rest:
+            c = ensure_claude()
+            os.environ["PATH"] = os.environ.get("PATH", "") + ":" + os.path.join(home(), ".local", "bin")
+            os.execv(c, [c, "--plugin-dir", ROOT, "/office-website"])
+        if rest[0] not in ("status", "checkout", "publish", "restore"):
+            print(__doc__); return 2
+        return as_root([os.path.join(scripts, "landing-site.sh"), *rest])
     if verb == "check":
         return as_root([os.path.join(scripts, "preflight.py"), "--report"])
     if verb == "status":

@@ -1,5 +1,5 @@
 repository: https://github.com/maludb/maludb-os-core
-ref: integration/20261110
-commit: 46cf1d7
-version: 2026.11.10
-vendored: 2026-11-10
+ref: landing/starter-page
+commit: 020bfd0
+version: 2026.11.12
+vendored: 2026-11-12

@@ -254,5 +254,6 @@ Show the report as it is. Add the operator-confirmed items (browser sign-in, pas
 installed, LAN DNS) and the deferred items in your own words. If the report exits non-zero, the stage is
 not complete: list what is missing and how to resume (`/office-setup` again, which detects the state).
 When complete, the stable address, the domain and the names list are what stage 2 and the estate need;
+say that the bare name shows a starter page until `/office-website` replaces it with the business's own; and
 point to `12-applications.md` (or straight to `11-gpu-server.md` / `13-estate.md` when the applications
 were installed at first boot).

@@ -1,3 +1,18 @@
+maluos-office-setup (0.1.3) resolute; urgency=medium
+
+  * /office-website: the public page at the bare name. The skill turns the
+    starter page of first boot (Bootstrap 5.3 and htmx, static files) into
+    the business's own on a working copy in the operator's home, shows what
+    will go live and publishes on their word; references/bootstrap-htmx.md
+    is the house style for the markup.
+  * scripts/landing-site.sh, the one privileged step: status, checkout DIR,
+    publish DIR (refuses symlinks, dot files, server-side code, a missing
+    index.html; backs the live page up, replaces it whole), restore.
+  * maluctl office-setup website [status|checkout|publish|restore].
+  * plugin.json says the package's version.
+
+ -- Edward Honour <ed@maludb.org>  Thu, 12 Nov 2026 15:00:00 +0000
+
 maluos-office-setup (0.1.2) resolute; urgency=medium
 
   * The sign-in name is said plainly. The owner's first sign-in was refused

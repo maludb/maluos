@@ -1,3 +1,21 @@
+maludb-os-core (2026.11.12maluos1) resolute; urgency=medium
+
+  * The landing page is a starter. Vendored at the kernel's branch
+    landing/starter-page (020bfd0, main 46cf1d7 and one commit): the page
+    for the bare name is landing-starter/ (Bootstrap 5.3.9 and htmx 2.0.11
+    beside it, nothing from another site), a page that says it is a starter
+    and how to replace it with Claude (/office-website). To be re-vendored
+    at main once the branch is merged.
+  * The package ships /var/www/landing-starter and no longer owns
+    /var/www/landing: the component copies the starter there with the
+    office's domain (render_landing), again only while the directory is
+    exactly what it wrote (the digest in the state directory), so a domain
+    set after first boot reaches an untouched page and an edited page is
+    never overwritten, by a re-run or by an upgrade. The summary carries
+    landing: starter | kept | absent.
+
+ -- Edward Honour <ed@maludb.org>  Thu, 12 Nov 2026 15:00:00 +0000
+
 maludb-os-core (2026.11.10maluos1) resolute; urgency=medium
 
   * Vendored at the kernel's integration/20261110 (46cf1d7: main 9e931ca

@@ -152,9 +152,9 @@ Any edit to one must be applied to the others in the same session.
 `/launcher`, `/settings`) — `config/.env` for PHP, the `maludb-os-web` drop-in for React; both empty = one face.
 `web/lib/face.ts` + `web/middleware.ts` decide the face by Host and stamp `x-face`; `app/bootstrap.php`
 `os_face_gate()` refuses a non-super-admin under the os name (403; `/api/v1/session.php` and `/logout.php`
-exempt; action-token callers not judged). The bare name (`subello.com`, `www.`) is a static landing page, `/var/www/landing/` on its own
-Apache vhost, a public page (what Subello is, sign in, the two doors); should the bare name or `www.` reach React, the middleware
-serves the same file (`web/public/landing` → `/var/www/landing`) and never sends it to `app.` (2026-09-25); any other name
+exempt; action-token callers not judged). The bare name (`subello.com`, `www.`) is the business's own static page, `/var/www/landing/` on its own
+Apache vhost: untracked, copied once at install from `landing-starter/` (a starter on Bootstrap 5.3 and htmx that says it is a starter and how to replace it with Claude, `__DOMAIN__` filled in; 2026-11-12) and never overwritten by an update; should the bare name or `www.` reach React, the middleware
+serves the same files (`web/public/landing` → `/var/www/landing`, the page and anything with an extension beside it) and never sends it to `app.` (2026-09-25); any other name
 reaching React is sent to `app.` with a temporary 307 — never a cached 308. Spec:
 `docs/build-specs/kernel-hosts.md`. DNS and proxy entries for the two names are the owner's.
 **Default application (2026-09-26):** on the app face `/` → `/home` (`web/app/home/route.ts` ← `html/home.php`, `app_home_destination()`): a non-super-admin goes into their default application (`members.default_application_id`/`default_scope_id`, db/142, set by them or an admin via `member_default_application_set`), else the only one they hold, else `/launcher`; the launcher never redirects. Spec: `docs/build-specs/kernel-default-application.md`.

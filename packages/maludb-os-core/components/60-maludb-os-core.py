@@ -38,6 +38,47 @@ UNITS = ["maludb-os-web", "maludb-os-records-mcp", "maludb-os-activity-mcp", "ma
          "maludb-os-memory-mcp", "maludb-os-agent-runner", "maludb-os-activity-ingest.timer"]
 
 
+
+def landing_digest(root):
+    """One digest over the landing directory's files (paths and contents)."""
+    import hashlib
+    h = hashlib.sha256()
+    for base, dirs, files in os.walk(root):
+        dirs.sort()
+        for f in sorted(files):
+            p = os.path.join(base, f)
+            h.update(os.path.relpath(p, root).encode() + b"\0")
+            with open(p, "rb") as fh: h.update(fh.read())
+            h.update(b"\0")
+    return h.hexdigest()
+
+
+def render_landing(domain):
+    """The business's public page, /var/www/landing: the starter (landing-starter/, shipped by the package)
+    copied with the domain filled in. It is the business's from the first edit: the directory is rendered
+    again only while it is still exactly what this step wrote (the digest kept in the state directory), so a
+    domain set after first boot reaches a page nobody has touched, and a page somebody has is left alone.
+    Returns "starter" (written or rewritten), "kept" (edited, untouched) or "absent" (no starter shipped)."""
+    starter, landing, mark = f"{WWW}/landing-starter", f"{WWW}/landing", f"{STATE}/landing.sha256"
+    if not os.path.isdir(starter):
+        return "absent"
+    have = os.path.exists(f"{landing}/index.html")
+    ours = open(mark).read().strip() if os.path.exists(mark) else ""
+    if have and (not ours or landing_digest(landing) != ours):
+        return "kept"
+    if have: shutil.rmtree(landing)
+    shutil.copytree(starter, landing)
+    for base, _, files in os.walk(landing):
+        for f in files:
+            if f.endswith((".html", ".css", ".txt")):
+                p = os.path.join(base, f); t = open(p).read()
+                if "__DOMAIN__" in t: open(p, "w").write(t.replace("__DOMAIN__", domain))
+    subprocess.run(["chown", "-R", "root:root", landing], check=False, capture_output=True)
+    subprocess.run(["chmod", "-R", "u=rwX,go=rX", landing], check=False, capture_output=True)
+    os.makedirs(STATE, exist_ok=True)
+    open(mark, "w").write(landing_digest(landing) + "\n")
+    return "starter"
+
 def provision(ctx):
     log, psql, exists, qi, ql = ctx["log"], ctx["psql"], ctx["exists"], ctx["qi"], ctx["ql"]
     set_env, read_env = ctx["set_env"], ctx["read_env_file"]
@@ -229,10 +270,7 @@ def provision(ctx):
     # ---- 7. Apache: the kernel's vhosts rendered for the domain; the web drop-in
     vhost = open(f"{WWW}/docs/deploy/apache-react-cutover.conf").read().replace("subello.com", domain)
     open("/etc/apache2/sites-available/maludb-os.conf", "w").write(vhost)
-    landing = f"{WWW}/landing/index.html"
-    if os.path.exists(landing):
-        s = open(landing).read()
-        if "subello.com" in s: open(landing, "w").write(s.replace("subello.com", domain))
+    landing_state = render_landing(domain)
     subprocess.run(["a2dissite", "-q", "000-default"], check=False, capture_output=True)
     subprocess.run(["a2ensite", "-q", "maludb-os"], check=False, capture_output=True)
     os.makedirs("/etc/systemd/system/maludb-os-web.service.d", exist_ok=True)
@@ -306,4 +344,4 @@ def provision(ctx):
             "database": DB, "memory_database": MEM_DB, "admin_email": admin_email,
             "admin_password_file": pw_file if os.path.exists(pw_file) else None,
             "apps": apps, "names": names, "healthy": True,
-            "proxy_address": proxy_address, "hosts": {"mode": hosts_mode, "address": proxy_address if hosts_mode.startswith("proxy") else ("127.0.0.1" if hosts_mode == "loopback" else None), "note": hosts_note}}
+            "landing": landing_state, "proxy_address": proxy_address, "hosts": {"mode": hosts_mode, "address": proxy_address if hosts_mode.startswith("proxy") else ("127.0.0.1" if hosts_mode == "loopback" else None), "note": hosts_note}}

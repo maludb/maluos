@@ -267,13 +267,15 @@ cd /var/www
 grep -q '^Listen 127.0.0.1:8080' /etc/apache2/ports.conf || echo 'Listen 127.0.0.1:8080' | sudo tee -a /etc/apache2/ports.conf
 sed "s/subello\.com/$DOMAIN/g" docs/deploy/apache-react-cutover.conf | sudo tee /etc/apache2/sites-available/000-default.conf >/dev/null
 sudo install -m 644 docs/deploy/php-99-business-os.ini /etc/php/8.3/apache2/conf.d/99-business-os.ini   # 25 MB uploads
-sed -i "s/subello\.com/$DOMAIN/g" landing/index.html        # the landing page's three doors; its wording is yours to edit too
+[ -e landing/index.html ] || { cp -r landing-starter landing && grep -rlZ __DOMAIN__ landing | xargs -0 sed -i "s/__DOMAIN__/$DOMAIN/g"; }   # the starter page, once
 sudo apache2ctl configtest && sudo systemctl restart apache2
 curl -s http://127.0.0.1:8080/api/v1/health                 # {"status":"ok","time":"…"}
 ```
 
-The `landing/index.html` edit is a local change to a tracked file (the page says "Subello" where it should
-say the business's name); keep it across pulls, or replace the page with your own. Until DNS exists, add the
+`landing/` is the business's own public page and is not tracked: it is copied once from `landing-starter/`
+(a starter on Bootstrap 5.3 and htmx that says it is a starter and how to replace it), and a pull never touches
+it afterwards. Edit `landing/index.html`, `landing/partials/` and `landing/static/site.css`, or replace the
+directory with your own site; Apache serves files only there (no PHP). Until DNS exists, add the
 names to loopback for the checks that follow:
 
 ```bash

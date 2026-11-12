@@ -132,6 +132,13 @@ bos-init with PostgreSQL, the engine and the MaluDB API local:
    model registry row, the cron jobs, the kernel's Installer and JEV agents.
 
 
+The bare name's page (2026-11-12): the package ships `/var/www/landing-starter`
+(the kernel's starter page, Bootstrap 5.3 and htmx) and the component copies it
+to `/var/www/landing` with the domain, again only while the directory is exactly
+what it wrote; an edited page is the business's and is left alone
+(`landing: starter | kept | absent` in the summary; docs/office-setup.md, "The
+public page").
+
 Status 2026-10-18: boot test PASS (44 checks) on the cloud image under
 QEMU/TCG: first boot provisions the kernel end to end (memory database,
 API token, kernel database with all 184 migrations, Apache vhosts, the

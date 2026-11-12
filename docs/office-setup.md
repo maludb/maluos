@@ -184,3 +184,31 @@ package 2026.11.09maluos2):
   `~/.local/bin`, which a shell opened before the install does not search.
   `maluctl office-setup` now adds the directory to `~/.bashrc` and says so;
   `/etc/profile.d/maluos-local-bin.sh` covers login shells.
+
+## The public page (0.1.3, 2026-11-12)
+
+The office's bare name used to answer with the kernel's own marketing page
+(a "Subello" page with three doors), which read as a finished website for a
+business that had not written one. From maludb-os-core 2026.11.12maluos1 it
+answers with a **starter**: Bootstrap 5.3.9 and htmx 2.0.11 as files beside
+the page, a banner and placeholder tags saying it is a starter, `noindex`,
+and instructions with example prompts for replacing it with Claude.
+
+- The kernel ships `landing-starter/`; `/var/www/landing` is no longer a
+  package file. The kernel component copies the starter there with the
+  office's domain (`render_landing`), and again only while the directory is
+  exactly what it wrote, so the domain set by `/office-setup` after first
+  boot reaches an untouched page and an edited page is never overwritten.
+  The first-boot summary carries `landing: starter | kept | absent`.
+- `/office-website` (this package) is how the page becomes the business's:
+  a working copy in the operator's home (`landing-site.sh checkout`), the
+  interview, the edit under `references/bootstrap-htmx.md`, what will go
+  live shown, then `landing-site.sh publish` on the operator's word (checked,
+  the live page backed up, replaced whole) and `restore` as the way back.
+  `maluctl office-setup website [status|checkout|publish|restore]` are the
+  same steps without Claude.
+- The site is files only: no PHP on that name, so htmx loads fragments from
+  `partials/` and a form has nowhere to post.
+- The boot test reads the starter and its files through Apache, publishes an
+  edited copy through the plugin, checks the component leaves it alone and
+  restores the starter.

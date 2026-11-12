@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en" data-bs-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Starter page for __DOMAIN__ (replace this)</title>
+<meta name="description" content="Starter page: replace this description with one sentence about your business.">
+<!-- STARTER: while this line is here, search engines are asked not to list the page. Remove it when the page is yours. -->
+<meta name="robots" content="noindex">
+<!-- STARTER: the marker the office's checks read to tell a starter page from a finished one. Remove it with the banner. -->
+<meta name="maluos-landing" content="starter">
+<!--
+  The public page for the bare name (__DOMAIN__) and www.
+  This is a STARTER, not a finished website: Bootstrap 5.3 and htmx, static files only, nothing loaded
+  from another site. Everything between "STARTER" comments is meant to be replaced or removed.
+
+  Layout of this directory (the office serves it from /var/www/landing):
+    index.html                    this page
+    partials/*.html               fragments htmx loads into the page (hx-get)
+    static/bootstrap.min.css      Bootstrap 5.3 (do not edit; put your own styles in static/site.css)
+    static/bootstrap.bundle.min.js
+    static/htmx.min.js            htmx 2
+    static/site.css               your styles
+  The server behind this name serves files only: no PHP, no forms posted here. A form needs somewhere to
+  post to (an application of the office, or a service you choose).
+-->
+<link href="static/bootstrap.min.css" rel="stylesheet">
+<link href="static/site.css" rel="stylesheet">
+</head>
+<body>
+
+<!-- STARTER: banner. Remove this whole block when the page is yours. -->
+<div class="starter-banner text-center py-2 px-3" role="status">
+  <strong>This is a starter page.</strong>
+  The website for <span class="font-monospace">__DOMAIN__</span> has not been written yet.
+  <a href="#customise" class="link-dark fw-semibold">How to make it yours</a>
+</div>
+<!-- /STARTER -->
+
+<nav class="navbar navbar-expand-md border-bottom bg-body">
+  <div class="container">
+    <!-- STARTER: your name or logo -->
+    <a class="navbar-brand fw-bold" href="/">Your Company</a>
+    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#nav" aria-controls="nav" aria-expanded="false" aria-label="Menu">
+      <span class="navbar-toggler-icon"></span>
+    </button>
+    <div class="collapse navbar-collapse" id="nav">
+      <ul class="navbar-nav ms-auto align-items-md-center gap-md-2">
+        <li class="nav-item"><a class="nav-link" href="#about">About</a></li>
+        <li class="nav-item"><a class="nav-link" href="#services">Services</a></li>
+        <li class="nav-item"><a class="nav-link" href="#contact">Contact</a></li>
+        <!-- Keep this link: it is how your people reach the office's sign-in. -->
+        <li class="nav-item"><a class="btn btn-primary btn-sm" href="https://app.__DOMAIN__/">Sign in</a></li>
+      </ul>
+    </div>
+  </div>
+</nav>
+
+<main>
+  <!-- STARTER: hero. One sentence on what you do, one on who it is for. -->
+  <section class="hero py-5">
+    <div class="container py-md-4">
+      <p class="placeholder-tag mb-2">Placeholder headline</p>
+      <h1 class="display-5 fw-bold">Say what your business does, in one line.</h1>
+      <p class="lead text-body-secondary col-lg-8 px-0">Placeholder text. Replace it with who you serve and why they should
+        choose you. Keep it to two sentences.</p>
+      <div class="d-flex flex-wrap gap-2">
+        <a class="btn btn-primary btn-lg" href="#contact">Get in touch</a>
+        <a class="btn btn-outline-secondary btn-lg" href="#services">What we do</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- STARTER: instructions. Remove this whole section when the page is yours. -->
+  <section id="customise" class="py-5 border-top border-bottom starter-instructions">
+    <div class="container">
+      <h2 class="h3">How to make this page yours</h2>
+      <p class="text-body-secondary col-lg-9 px-0">This page was put here when the office was installed so that
+        <span class="font-monospace">__DOMAIN__</span> answers with something. It is built on Bootstrap 5.3 and htmx so that
+        you, or Claude working for you, can turn it into your website in an afternoon.</p>
+
+      <div class="row g-4 mt-1">
+        <div class="col-lg-6">
+          <h3 class="h5">With Claude, on the office</h3>
+          <ol class="ps-3">
+            <li class="mb-2">Sign in to the office over SSH as the operator and run:
+              <pre class="starter-code mt-2 mb-0"><code>maluos-office-setup /office-website</code></pre>
+            </li>
+            <li class="mb-2">Tell Claude about the business. It works on a copy in your home directory, shows you
+              what it changed, and publishes only when you say so.</li>
+            <li class="mb-2">Ask for the banner and this section to be removed when you are happy with the page.</li>
+          </ol>
+        </div>
+        <div class="col-lg-6">
+          <h3 class="h5">Things to ask for</h3>
+          <ul class="list-unstyled starter-prompts mb-0">
+            <li>"We are a family bakery in Leeds. Rewrite the headline, the About section and the three services for us."</li>
+            <li>"Use our colours: dark green and cream. Here is our logo file."</li>
+            <li>"Add an opening hours table and a map link to the Contact section."</li>
+            <li>"Add a second page for our menu and link it in the navigation."</li>
+            <li>"Remove the starter banner and the instructions, and let search engines list the page."</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3 class="h5 mt-4">By hand</h3>
+      <p class="text-body-secondary col-lg-9 px-0 mb-0">The files are in <span class="font-monospace">/var/www/landing</span>
+        on the office: <span class="font-monospace">index.html</span>, the fragments in
+        <span class="font-monospace">partials/</span>, and your styles in <span class="font-monospace">static/site.css</span>.
+        Everything marked <span class="font-monospace">STARTER</span> in the source is meant to be replaced or removed.
+        The office's updates do not overwrite this directory.</p>
+    </div>
+  </section>
+  <!-- /STARTER -->
+
+  <!-- STARTER: about. -->
+  <section id="about" class="py-5">
+    <div class="container">
+      <div class="row g-4 align-items-center">
+        <div class="col-md-6">
+          <p class="placeholder-tag mb-2">Placeholder section</p>
+          <h2 class="h3">About us</h2>
+          <p class="text-body-secondary">Two or three sentences about the business: when it started, where it is,
+            what it is known for.</p>
+        </div>
+        <div class="col-md-6">
+          <div class="placeholder-image ratio ratio-16x9"><div class="d-flex align-items-center justify-content-center">Your photo here</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- STARTER: services. Three cards; add or remove columns as needed. -->
+  <section id="services" class="py-5 bg-body-tertiary">
+    <div class="container">
+      <p class="placeholder-tag mb-2">Placeholder section</p>
+      <h2 class="h3 mb-4">What we do</h2>
+      <div class="row g-3">
+        <div class="col-md-4"><div class="card h-100"><div class="card-body">
+          <h3 class="h5 card-title">First service</h3>
+          <p class="card-text text-body-secondary">One sentence on what the customer gets.</p>
+        </div></div></div>
+        <div class="col-md-4"><div class="card h-100"><div class="card-body">
+          <h3 class="h5 card-title">Second service</h3>
+          <p class="card-text text-body-secondary">One sentence on what the customer gets.</p>
+        </div></div></div>
+        <div class="col-md-4"><div class="card h-100"><div class="card-body">
+          <h3 class="h5 card-title">Third service</h3>
+          <p class="card-text text-body-secondary">One sentence on what the customer gets.</p>
+        </div></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- STARTER: contact. The details live in partials/contact.html and htmx loads them when the button is
+       pressed: the pattern for any content you would rather keep in its own file. -->
+  <section id="contact" class="py-5">
+    <div class="container">
+      <p class="placeholder-tag mb-2">Placeholder section</p>
+      <h2 class="h3">Contact</h2>
+      <p class="text-body-secondary">How people reach you.</p>
+      <div id="contact-details">
+        <button class="btn btn-outline-primary" hx-get="partials/contact.html" hx-target="#contact-details" hx-swap="innerHTML">
+          Show contact details
+        </button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="border-top py-4">
+  <div class="container d-flex flex-wrap justify-content-between gap-2 small text-body-secondary">
+    <!-- STARTER: your name -->
+    <span>&copy; <span id="year">2026</span> Your Company</span>
+    <span><a href="https://app.__DOMAIN__/">Sign in</a></span>
+  </div>
+</footer>
+
+<script src="static/bootstrap.bundle.min.js"></script>
+<script src="static/htmx.min.js"></script>
+<script>
+  document.getElementById("year").textContent = new Date().getFullYear();
+  // Follow the visitor's light or dark setting (Bootstrap's colour modes).
+  (function () {
+    var q = window.matchMedia("(prefers-color-scheme: dark)");
+    function set() { document.documentElement.setAttribute("data-bs-theme", q.matches ? "dark" : "light"); }
+    set(); q.addEventListener("change", set);
+  })();
+</script>
+</body>
+</html>

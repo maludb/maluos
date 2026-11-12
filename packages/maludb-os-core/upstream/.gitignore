@@ -8,6 +8,9 @@
 # Composer dependencies (composer.lock IS committed to pin versions)
 /vendor/
 
+# The business's own public page: copied once from landing-starter/ at install, theirs from then on
+/landing/
+
 # Scratch
 *.log
 

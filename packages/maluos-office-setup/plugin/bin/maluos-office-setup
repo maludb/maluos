@@ -5,6 +5,7 @@
 #   maluos-office-setup                 the setup interview (/office-setup)
 #   maluos-office-setup /office-check   the state report only
 #   maluos-office-setup /office-providers
+#   maluos-office-setup /office-website   the public page at the bare name
 #   maluos-office-setup --shell         Claude Code with the plugin loaded, no skill started
 set -euo pipefail
 ROOT=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)

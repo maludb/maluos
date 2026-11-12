@@ -96,7 +96,7 @@ bin/         CLI tools: installer, agent hiring, token minting, channel setup, c
 skills/      skills shipped with the kernel's own agents
 config/      config/.env.example (the real config/.env is gitignored)
 docs/        requirements, build plan, integration design, per-feature specs (docs/build-specs/), deployment files (docs/deploy/)
-landing/     static landing page for the bare domain
+landing-starter/  the starter page for the bare domain (Bootstrap 5.3 + htmx), copied once to landing/ at install
 ```
 
 ## Tech stack

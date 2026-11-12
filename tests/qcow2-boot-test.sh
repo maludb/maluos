@@ -403,7 +403,15 @@ curl -fsS --max-time 10 http://127.0.0.1:8080/api/v1/health | grep -q '"ok"' && 
 # next start takes minutes under emulation; give the front end time to come up behind Apache
 for i in $(seq 1 40); do code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 60 -H "Host: app.$bosdom" http://127.0.0.1/login); [ "$code" = 200 ] && break; sleep 10; done
 [ "$code" = 200 ] && echo "  ok   kernel web /login via Apache (200)" || { echo "  FAIL kernel web /login: HTTP $code"; sudo -n journalctl -u maludb-os-web --no-pager | tail -8; fail=1; }
-code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -H "Host: $bosdom" http://127.0.0.1/); [ "$code" = 200 ] && echo "  ok   landing page (200)" || echo "  warn landing page: HTTP $code"
+# the bare name: the starter page (kernel landing-starter/, rendered once by the component), with the office's domain
+# in it, saying it is a starter, and its own Bootstrap, htmx and fragment beside it (nothing from another site)
+lp=$(curl -s --max-time 10 -H "Host: $bosdom" http://127.0.0.1/)
+echo "$lp" | grep -q '<meta name="maluos-landing" content="starter">' && echo "$lp" | grep -q 'This is a starter page' && echo "$lp" | grep -q "app.$bosdom" && ! echo "$lp" | grep -q '__DOMAIN__\|subello' \
+  && echo "  ok   landing page: the starter, marked as one, with the office's domain" || { echo "  FAIL landing page is not the starter for $bosdom: $(echo "$lp" | head -c 300 | tr '\n' ' ')"; fail=1; }
+lok=1; for f in static/bootstrap.min.css static/bootstrap.bundle.min.js static/htmx.min.js static/site.css partials/contact.html; do
+  [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -H "Host: $bosdom" http://127.0.0.1/$f)" = 200 ] || { lok=0; echo "  FAIL landing page file $f"; fail=1; }; done
+[ $lok = 1 ] && ! echo "$lp" | grep -qE '(src|href)="https?://[^"]*\.(js|css)' && echo "  ok   landing page: Bootstrap, htmx, site.css and the fragment served from the office, no script or style from another site" || { echo "  FAIL landing page assets"; fail=1; }
+sudo -n grep -q '"landing": "starter"' /var/lib/maluos/firstboot/done && echo "  ok   the component reports landing: starter" || { echo "  FAIL landing state in the done file"; fail=1; }
 for i in $(seq 1 12); do curl -fsS --max-time 10 http://127.0.0.1:8815/health 2>/dev/null | grep -q '"ok"' && break; sleep 10; done
 curl -fsS --max-time 10 http://127.0.0.1:8815/health 2>/dev/null | grep -q '"ok"' && echo "  ok   agent runner /health" || { echo "  warn agent runner /health not ok"; sudo -n journalctl -u maludb-os-agent-runner --no-pager | tail -6; }
 sudo -n -u postgres psql -Atd maludb_os -c "select count(*) from members where business_role='super_admin'" | grep -qE '^[1-9]' && echo "  ok   super-admin exists in maludb_os" || { echo "  FAIL super-admin"; fail=1; }
@@ -465,6 +473,24 @@ if installed maluos-office-setup; then
   out=$(sudo -n maluctl office-setup admin check 2>&1); rc=$?
   [ $rc = 0 ] && echo "$out" | grep -q 'PASS  a sign-in on this host with the stored password succeeds' && ! echo "$out" | grep -q '^FAIL' \
     && echo "  ok   maluctl office-setup admin check: the first sign-in works with the generated password" || { echo "  FAIL office-setup admin check: $(echo "$out" | grep '^FAIL\|^ERROR' | head -3 | cut -c1-260)"; fail=1; }
+  # the public page through the plugin (0.1.3): a working copy, a refused publish, a real one, the component leaving an
+  # edited page alone, and the starter restored
+  ws=$(mktemp -d)/site
+  out=$(sudo -n maluctl office-setup website status 2>&1); echo "$out" | grep -q '^page: *starter' && echo "  ok   office-setup website status: the starter" || { echo "  FAIL website status: $(echo "$out" | head -3 | tr '\n' ' ')"; fail=1; }
+  sudo -n maluctl office-setup website checkout "$ws" >/dev/null 2>&1 && [ -w "$ws/index.html" ] && echo "  ok   website checkout: a working copy the operator owns" || { echo "  FAIL website checkout"; fail=1; }
+  echo '<?php echo 1;' > "$ws/x.php"
+  out=$(sudo -n maluctl office-setup website publish "$ws" 2>&1); rc=$?
+  [ $rc != 0 ] && echo "$out" | grep -q 'x.php' && curl -s --max-time 10 -H "Host: $bosdom" http://127.0.0.1/ | grep -q 'content="starter"' && echo "  ok   website publish refuses server-side code and publishes nothing" || { echo "  FAIL publish accepted x.php (rc=$rc)"; fail=1; }
+  rm -f "$ws/x.php"; sed -i '/maluos-landing/d; s/<title>.*<\/title>/<title>Boot test bakery<\/title>/' "$ws/index.html"
+  out=$(sudo -n maluctl office-setup website publish "$ws" 2>&1); rc=$?
+  [ $rc = 0 ] && curl -s --max-time 10 -H "Host: $bosdom" http://127.0.0.1/ | grep -q '<title>Boot test bakery</title>' && sudo -n maluctl office-setup website status 2>&1 | grep -q '^page: *customised' \
+    && echo "  ok   website publish: the edited copy is live and reads as customised" || { echo "  FAIL website publish (rc=$rc): $(echo "$out" | tail -3 | tr '\n' ' ')"; fail=1; }
+  kept=$(sudo -n python3 -c "
+import importlib.util
+sp=importlib.util.spec_from_file_location('c','/usr/lib/maluos/components/60-maludb-os-core.py'); m=importlib.util.module_from_spec(sp); sp.loader.exec_module(m)
+print(m.render_landing('$bosdom'))" 2>&1 | tail -1)
+  [ "$kept" = kept ] && curl -s --max-time 10 -H "Host: $bosdom" http://127.0.0.1/ | grep -q 'Boot test bakery' && echo "  ok   the component leaves an edited landing page alone" || { echo "  FAIL the component's landing step on an edited page: $kept"; fail=1; }
+  sudo -n maluctl office-setup website restore >/dev/null 2>&1 && curl -s --max-time 10 -H "Host: $bosdom" http://127.0.0.1/ | grep -q 'content="starter"' && echo "  ok   website restore: the page before the publish is back" || { echo "  FAIL website restore"; fail=1; }
 fi
 elif installed maluos-business-os; then
 echo "  (the kernel component is off in firstboot.yaml: nothing provisioned, as shipped)"

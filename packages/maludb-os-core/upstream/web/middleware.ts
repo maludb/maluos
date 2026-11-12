@@ -38,6 +38,12 @@ export function middleware(req: NextRequest) {
       landing.pathname = "/landing/index.html";
       return NextResponse.rewrite(landing);
     }
+    // The page's own files (static/site.css, partials/contact.html, an image): anything with an extension.
+    if (/\.[a-z0-9]+$/i.test(pathname) && !pathname.includes("..")) {
+      const file = req.nextUrl.clone();
+      file.pathname = `/landing${pathname}`;
+      return NextResponse.rewrite(file);
+    }
     return NextResponse.redirect(`https://${appHost()}${pathname}${search}`, 307);
   }
   if (face === null && hostsConfigured()) {

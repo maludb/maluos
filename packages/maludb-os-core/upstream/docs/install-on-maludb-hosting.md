@@ -210,7 +210,7 @@ written, with these substitutions:
 ## 6. Apache — the kernel's site replaces the default site (§6)
 
 Run **§6** as written. It overwrites `/etc/apache2/sites-available/000-default.conf` (a copy is beside it from
-§4 above), adds `Listen 127.0.0.1:8080`, installs the PHP ini, puts `$DOMAIN` into the landing page and the
+§4 above), adds `Listen 127.0.0.1:8080`, installs the PHP ini, copies the starter landing page once with `$DOMAIN` in it and puts the
 loopback names into `/etc/hosts`. Then start what §4 stopped:
 
 ```bash

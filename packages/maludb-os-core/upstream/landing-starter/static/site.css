@@ -1,0 +1,18 @@
+/* Your styles. Bootstrap's own file (bootstrap.min.css) stays untouched; change the look here.
+   Bootstrap 5.3 reads its colours from CSS variables, so a brand colour is a few lines:
+
+   :root { --bs-primary: #1f6f4a; --bs-primary-rgb: 31, 111, 74; --bs-link-color-rgb: 31, 111, 74; }
+   .btn-primary { --bs-btn-bg: #1f6f4a; --bs-btn-border-color: #1f6f4a; --bs-btn-hover-bg: #185a3c; --bs-btn-hover-border-color: #185a3c; }
+*/
+
+.hero { background: linear-gradient(160deg, var(--bs-primary-bg-subtle) 0%, var(--bs-body-bg) 65%); }
+
+/* ---- STARTER: everything below marks the page as a starter. Remove it with the banner and the instructions. ---- */
+.starter-banner { background: #ffc107; color: #1f2430; font-size: .95rem; }
+.starter-instructions { background: repeating-linear-gradient(135deg, var(--bs-warning-bg-subtle) 0 18px, var(--bs-body-bg) 18px 36px); }
+.starter-instructions .container { background: var(--bs-body-bg); border: 2px dashed var(--bs-warning-border-subtle); border-radius: .75rem; padding: 1.5rem; }
+.starter-code { background: var(--bs-tertiary-bg); border: 1px solid var(--bs-border-color); border-radius: .5rem; padding: .6rem .8rem; font-size: .9rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.starter-prompts li { border-left: 3px solid var(--bs-warning-border-subtle); padding: .15rem 0 .15rem .75rem; margin-bottom: .6rem; color: var(--bs-secondary-color); font-style: italic; }
+.placeholder-tag { display: inline-block; font-size: .75rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--bs-warning-text-emphasis); background: var(--bs-warning-bg-subtle); border: 1px dashed var(--bs-warning-border-subtle); border-radius: .35rem; padding: .1rem .5rem; }
+.placeholder-image > div { border: 2px dashed var(--bs-border-color); border-radius: .75rem; color: var(--bs-secondary-color); background: var(--bs-tertiary-bg); }

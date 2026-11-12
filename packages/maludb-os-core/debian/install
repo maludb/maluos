@@ -4,7 +4,7 @@ upstream/config         var/www
 upstream/db             var/www
 upstream/docs           var/www
 upstream/html           var/www
-upstream/landing        var/www
+upstream/landing-starter var/www
 upstream/mcp            var/www
 upstream/skills         var/www
 upstream/web            var/www

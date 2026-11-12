@@ -55,6 +55,7 @@ marketplace (`/plugin marketplace add maludb/maluos-office-setup`, then
 | `/office-setup` | The interview: preflight, topology, domain and administrator, preview and apply, provision, the names, the proxy's blocks, the first sign-in hand-off, provider keys, VM integration, summary. Resumable: it detects what is already in place |
 | `/office-providers` | The provider keys alone (Anthropic, OpenRouter, MaluMail, OpenAI), entered by the operator in their own terminal, confirmed through the runner's health |
 | `/office-check` | The state report and the live checks, changing nothing |
+| `/office-website` | The public page at the bare name: the starter from first boot (Bootstrap 5.3 + htmx) turned into the business's own on a working copy, shown, then published |
 
 ## Scripts (`scripts/`)
 
@@ -69,6 +70,7 @@ Each is one step, idempotent, and elevates itself with `sudo -n` when it needs r
 | `hosts-proxy.sh` | on releases before `proxy_address` (maluos-firstboot 0.1.16), the marked `/etc/hosts` block that points the office's names at the proxy |
 | `proxy-config.sh` | renders the proxy's nginx server blocks from `maluctl app names` (or the four kernel names) |
 | `set-provider-key.sh` | a provider key through a no-echo prompt or a mode-600 file; probes where possible; restarts the unit; `--status` |
+| `landing-site.sh` | the public page: `status`, `checkout DIR` (a working copy), `publish DIR` (checked, the live page backed up and replaced), `restore` |
 | `vm-guest.sh` | the QEMU guest agent on a KVM/QEMU guest; nothing elsewhere |
 
 ## What it refuses or leaves to the operator
