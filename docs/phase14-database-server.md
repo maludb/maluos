@@ -456,6 +456,9 @@ servers.
   application server.)
 - **The layout** above.
 
+The design note is docs/phase14-application-servers.md (2026-11-12, a draft
+for the owner).
+
 ### Slice 3, what the design note has to settle
 
 1. The kernel's side: an API for what `app_install.php` does through
