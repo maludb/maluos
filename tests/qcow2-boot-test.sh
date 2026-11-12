@@ -1059,6 +1059,103 @@ sudo -n maluctl agent remove desk --purge >/dev/null 2>&1 || true
 fi
 # --- Phase 14 slice 1: the office with its database on a MaluOS database server (a second cluster of this VM stands in
 # for the server). Last, because it moves the office's data: nothing after it may assume the first cluster.
+# ---- application servers (docs/phase14-application-servers.md, slice 3): this VM stands in for both servers. The kernel's
+# applications' door is opened on the VM's LAN address for that address; a fixture application is installed by the
+# installer's HOST half (--kernel, a node token, no access to the kernel's database), which hands the rest to the kernel
+# through the door. BOOT_TEST_APPSERVER=0 skips it.
+if installed maluos-business-os && bos_on && [ "${BOOT_TEST_APPSERVER:-1}" = 1 ] && [ -f /var/www/app/features/applications/remote_install.php ]; then
+echo "== application servers: the door, the installer's two halves (one VM standing in for two servers)"
+LANIP=$(ip -o route get 192.0.2.1 2>/dev/null | sed -n 's/.*src \([^ ]*\).*/\1/p')
+ADM=$(sudo -n python3 -c "import yaml; print(yaml.safe_load(open('/etc/maluos/firstboot.yaml'))['components']['maludb-os-core'].get('admin_email',''))" 2>/dev/null)
+DOOR="http://$LANIP:8081"
+[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 $DOOR/api/v1/health)" = 000 ] && echo "  ok   no door before the kernel has a list of application servers" || { echo "  FAIL something answers on $DOOR before the list is set"; fail=1; }
+sudo -n python3 -c "
+import importlib.util, yaml
+p = '/etc/maluos/firstboot.yaml'; c = yaml.safe_load(open(p)); k = c['components']['maludb-os-core']; k['application_servers'] = ['$LANIP']
+open(p, 'w').write(yaml.safe_dump(c, sort_keys=False))
+sp = importlib.util.spec_from_file_location('c', '/usr/lib/maluos/components/60-maludb-os-core.py'); m = importlib.util.module_from_spec(sp); sp.loader.exec_module(m)
+v = open('/var/www/docs/deploy/apache-react-cutover.conf').read().replace('subello.com', '$bosdom')
+t, d = m.render_door(v, k); assert d and d['address'] == '$LANIP', d
+open('/etc/apache2/sites-available/maludb-os.conf', 'w').write(t)
+" 2>/tmp/as-door.err && sudo -n apache2ctl configtest >/tmp/as-apache.log 2>&1 && sudo -n systemctl reload apache2 && sleep 3
+[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 $DOOR/api/v1/health)" = 200 ] && echo "  ok   the applications' door answers the kernel's health on $LANIP:8081" || { echo "  FAIL the door: $(cat /tmp/as-door.err /tmp/as-apache.log 2>/dev/null | tail -3 | cut -c1-300)"; fail=1; }
+dc() { curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$@"; }
+[ "$(dc $DOOR/login)" = 403 ] && [ "$(dc $DOOR/settings/desks/code.php)" = 403 ] && [ "$(dc $DOOR/api/v1/session.php)" = 403 ] && [ "$(dc -X POST $DOOR/api/v1/estate/apps/prepare)" = 401 ] \
+  && echo "  ok   the door serves its allow-list only (the sign-in page and a kernel handler 403; prepare without a token 401)" || { echo "  FAIL the door's allow-list: login $(dc $DOOR/login), handler $(dc $DOOR/settings/desks/code.php), prepare $(dc -X POST $DOOR/api/v1/estate/apps/prepare)"; fail=1; }
+systemctl is-active --quiet maludb-os-actions-reload.path && [ "$(stat -c %U /var/www/mcp/registries)" = www-data ] && echo "  ok   the registries are the web user's and the reload path unit is active" || { echo "  FAIL registries owner or the reload path unit"; fail=1; }
+# the join: a server code that names the fixture application, then the node token
+CODE=$(sudo -n -u www-data php /var/www/bin/mint_desk_code.php --email "$ADM" --kind server --name boot-app-1 --apps boottest_app 2>/dev/null | grep -oE '^ +[A-Z0-9]{4}-[A-Z0-9]{4}$' | tr -d ' ')
+NTOK=$(curl -s --max-time 30 -H 'Content-Type: application/json' -d "{\"code\":\"$CODE\",\"kind\":\"server\",\"name\":\"boot-app-1\",\"facts\":{\"hostname\":\"boot-app-1\"}}" http://127.0.0.1:8080/api/v1/estate/join | python3 -c "import json,sys; print(json.load(sys.stdin).get('token',''))" 2>/dev/null)
+[ -n "$CODE" ] && [ -n "$NTOK" ] && echo "  ok   a server code naming the application was minted and a node joined with it" || { echo "  FAIL the code or the join (code ${CODE:+minted}, token ${NTOK:+got})"; fail=1; }
+sudo -n install -d -m 700 /run/maluos; printf '%s\n' "$NTOK" | sudo -n tee /run/maluos/boot-app.token >/dev/null; sudo -n chmod 600 /run/maluos/boot-app.token
+# the fixture: a manifest, a public and an internal vhost, a handler, a migration, an action registry, a skill
+F=/tmp/boottest_app; rm -rf $F; mkdir -p $F/html $F/deploy $F/db $F/mcp $F/skills/boottest-basics
+cat > $F/maludb-os.json <<'JSON'
+{"schema": "maludb-os.application/1", "catalog_key": "boottest_app", "name": "Boot test application", "description": "The boot test's fixture application.",
+ "business_area": "Operations", "category": "other", "version": "0.0.1",
+ "vhost": {"label": "boottest", "document_root": "html", "internal_port_env": "APP_INTERNAL_PORT"},
+ "database": {"suffix": "boottest", "migrations": "db"},
+ "env": {"required": ["APP_URL", "DB_HOST", "DB_NAME", "DB_USER", "DB_PASSWORD", "APP_INTERNAL_PORT", "ACTION_TOKEN_KEY", "OS_INTERNAL_URL"]},
+ "services": [], "endpoints": [], "actions": {"registry": "mcp/action_registry.json"}, "skills": ["skills/boottest-basics"],
+ "sso": {"path": "/sso", "logout_path": "/sso/logout"}, "agents": []}
+JSON
+cat > $F/deploy/apache-boottest_app.conf <<'CONF'
+<VirtualHost *:80>
+	ServerName {{APP_FQDN}}
+	DocumentRoot {{APP_DIR}}/html
+	<Directory {{APP_DIR}}/html>
+		Require all granted
+	</Directory>
+	RewriteEngine On
+	RewriteRule ^/sso$ /sso.php [L,QSA]
+</VirtualHost>
+Listen 127.0.0.1:{{APP_INTERNAL_PORT}}
+<VirtualHost 127.0.0.1:{{APP_INTERNAL_PORT}}>
+	DocumentRoot {{APP_DIR}}/html
+	<Directory {{APP_DIR}}/html>
+		Require all granted
+	</Directory>
+</VirtualHost>
+CONF
+echo '<?php header("Content-Type: application/json"); echo json_encode(["ok" => true, "action_token" => isset($_SERVER["HTTP_X_ACTION_TOKEN"])]);' > $F/html/ping.php
+echo '<?php http_response_code(204);' > $F/html/sso.php
+echo 'CREATE TABLE IF NOT EXISTS boottest_note (id serial PRIMARY KEY, note text);' > $F/db/001_note.sql
+echo '{"actions": {"boottest_ping": {"built": true, "endpoint": "/ping.php", "method": "POST", "params": []}}}' > $F/mcp/action_registry.json
+printf -- '---\nname: boottest-basics\ndescription: The boot test fixture skill.\n---\n\n# Boot test basics\n\nNothing to know.\n' > $F/skills/boottest-basics/SKILL.md
+MCPSTART=$(systemctl show -p ActiveEnterTimestampMonotonic --value maludb-os-actions-mcp)
+( cd /var/www && sudo -n env HOME=/root php bin/app_install.php apply $F --kernel $DOOR --node-token-file /run/maluos/boot-app.token --address $LANIP ) > /tmp/as-install.log 2>&1; rc=$?
+[ $rc = 0 ] && grep -q "the kernel registered Boot test application" /tmp/as-install.log && grep -q "^---- the kernel's half" /tmp/as-install.log \
+  && echo "  ok   the installer's host half ran here and the kernel's half through the door: registered" || { echo "  FAIL the two-halves install (rc=$rc): $(grep -E 'STOP|Fatal|FAIL|refused|Stopped' /tmp/as-install.log | head -4 | cut -c1-300)"; tail -25 /tmp/as-install.log | cut -c1-200; fail=1; }
+! grep -q "$NTOK" /tmp/as-install.log && ! sudo -n grep -q "$(sudo -n sed -n 's/^ACTION_TOKEN_KEY=//p' /var/www/config/.env)" /tmp/as-install.log && echo "  ok   the install's output shows no token and no key" || { echo "  FAIL a secret in the install's output"; fail=1; }
+AE=/srv/apps/boottest_app/config/.env
+sudo -n grep -q "^OS_INTERNAL_URL=$DOOR\$" $AE && sudo -n grep -q "^MALUDB_API_URL=$DOOR/maludb\$" $AE && sudo -n grep -q '^OS_APPLICATION_TOKEN=osapp_' $AE \
+  && echo "  ok   the application's config points at the door and carries its application token" || { echo "  FAIL the application's config/.env: $(sudo -n grep -E '^(OS_INTERNAL_URL|MALUDB_API_URL)=' $AE | tr '\n' ' ')"; fail=1; }
+APORT=$(sudo -n sed -n 's/^APP_INTERNAL_PORT=//p' $AE); RPORT=$((APORT + 1000))
+row=$(sudo -n -u postgres psql -Atd maludb_os -c "select a.status || '|' || coalesce(a.internal_base_url,'') || '|' || l.name || '|' || coalesce(l.node_role,'') || '|' || coalesce(l.node_address,'') from applications a join locations l on l.id = a.location_id where a.app_key = 'boottest_app'")
+[ "$row" = "active|http://$LANIP:$RPORT|boot-app-1|application-server|$LANIP" ] && echo "  ok   the kernel has the application active at its node, with the address it posts to ($LANIP:$RPORT)" || { echo "  FAIL the application's row: $row"; fail=1; }
+sudo -n python3 -c "import json; r = json.load(open('/var/www/mcp/registries/boottest_app.json')); assert r['base_url'] == 'http://$LANIP:$RPORT' and 'boottest_ping' in r['registry']['actions'], r['base_url']" 2>/dev/null \
+  && echo "  ok   the action registry on the kernel carries the application server's relay address" || { echo "  FAIL the registry file"; fail=1; }
+for i in $(seq 1 20); do [ "$(systemctl show -p ActiveEnterTimestampMonotonic --value maludb-os-actions-mcp)" != "$MCPSTART" ] && systemctl is-active --quiet maludb-os-actions-mcp && break; sleep 3; done
+[ "$(systemctl show -p ActiveEnterTimestampMonotonic --value maludb-os-actions-mcp)" != "$MCPSTART" ] && systemctl is-active --quiet maludb-os-actions-mcp \
+  && echo "  ok   the Actions MCP was restarted for the new registry by the path unit (the kernel's half ran as the web user)" || { echo "  FAIL the Actions MCP was not reloaded"; fail=1; }
+[ "$(curl -s --max-time 10 -X POST -H 'X-Action-Token: x' http://$LANIP:$RPORT/ping.php)" = '{"ok":true,"action_token":true}' ] && [ "$(dc http://127.0.0.1:$RPORT/ping.php)" = 000 ] \
+  && echo "  ok   the relay passes the kernel's address to the application's internal port and listens nowhere else" || { echo "  FAIL the relay: $(curl -s --max-time 10 -X POST http://$LANIP:$RPORT/ping.php | cut -c1-120)"; fail=1; }
+ATOK=$(sudo -n sed -n 's/^OS_APPLICATION_TOKEN=//p' $AE)
+[ "$(dc -H "Authorization: Bearer $ATOK" $DOOR/api/v1/directory/departments)" = 200 ] && [ "$(dc -H "Authorization: Bearer wrong" $DOOR/api/v1/directory/departments)" = 401 ] \
+  && echo "  ok   the application reads the kernel's directory through the door with its token (and not without)" || { echo "  FAIL the directory through the door: $(dc -H "Authorization: Bearer $ATOK" $DOOR/api/v1/directory/departments)"; fail=1; }
+[ "$(sudo -n -u postgres psql -Atc "select count(*) from pg_database where datname like '%_boottest'")" = 1 ] && echo "  ok   the application's database was made by the host half" || { echo "  FAIL the application's database"; fail=1; }
+sudo -n maluctl app names --upstreams 2>/dev/null | grep -q "^boottest\.$bosdom	$LANIP\$" && sudo -n maluctl app names --upstreams 2>/dev/null | grep -q "^app\.$bosdom	kernel\$" \
+  && echo "  ok   maluctl app names --upstreams: the application at its server, the kernel's names at the kernel" || { echo "  FAIL names --upstreams: $(sudo -n maluctl app names --upstreams 2>&1 | tr '\n' ' ' | cut -c1-300)"; fail=1; }
+out=$(cd /var/www && sudo -n env HOME=/root php bin/app_install.php apply $F --kernel $DOOR --node-token-file /run/maluos/boot-app.token --address $LANIP 2>&1); rc=$?
+[ $rc = 0 ] && [ "$(sudo -n -u postgres psql -Atd maludb_os -c "select count(*) from mcp_access_tokens t join applications a on a.id = t.application_id where a.app_key = 'boottest_app' and t.scope = 'application' and t.revoked_at is null" 2>/dev/null)" = 1 ] \
+  && echo "  ok   a second run reconciles: still one application token" || { echo "  FAIL the second run (rc=$rc): $(echo "$out" | grep -E 'STOP|Fatal' | head -2 | cut -c1-200)"; fail=1; }
+sed -i 's/"catalog_key": "boottest_app"/"catalog_key": "boottest_other"/' $F/maludb-os.json
+out=$(cd /var/www && sudo -n env HOME=/root php bin/app_install.php apply $F --kernel $DOOR --node-token-file /run/maluos/boot-app.token --address $LANIP 2>&1); rc=$?
+[ $rc != 0 ] && echo "$out" | grep -q "join code does not name boottest_other" && ! sudo -n test -d /srv/apps/boottest_other \
+  && echo "  ok   an application the join code did not name is refused before anything is installed" || { echo "  FAIL an unnamed application was not refused (rc=$rc)"; fail=1; }
+sudo -n rm -f /run/maluos/boot-app.token
+fi
+
 p14_on() { sudo -n python3 -c "import yaml,sys; c=yaml.safe_load(open('/etc/maluos/firstboot.yaml')) or {}; sys.exit(0 if (c.get('boot_test') or {}).get('database_server') else 1)" 2>/dev/null; }
 if installed maluos-business-os && bos_on && p14_on; then
 echo "  -- Phase 14: a database server (cluster 18/dbs, port 5433) and the office provisioned against it"
