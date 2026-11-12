@@ -327,6 +327,99 @@ API). Each build and boot test is about two hours here. A
 realistic estimate is four to six working sessions for 3a to 3c, and two
 more for slice 4.
 
+## As built (2026-11-12)
+
+Slices 3a and 3b are written. 3a is proven against the local test kernel; 3b has its unit and scratch-cluster
+tests and a boot-test section that has **not run yet** (it waits for the 2026-11-12 release's artefacts to
+be finished, because the local package repository is shared).
+
+### Where it differs from the design
+
+1. **One call fewer needs privilege.** The application's roles and database are made by the host half on
+   the application server, as the database server's admin role (it holds that credential anyway, for its
+   own platform services), not by the kernel in `prepare`. `prepare` only hands over what an application's
+   `config/.env` carries.
+2. **The kernel's half runs as the web user**, started by `register` and followed through `job`. It
+   cannot restart a unit, so a path unit (`maludb-os-actions-reload.path`) restarts the Actions MCP when
+   `mcp/registries` changes.
+3. **A relay, not a rebound vhost.** Every application's own deploy file binds its internal vhost to
+   loopback. Rather than rewrite twenty repositories' files, the host half writes
+   `<key>-kernel-relay.conf`: a vhost on the server's LAN address, port = the internal port + 1000,
+   admitting the kernel server's address only, passing to the internal port. That is the `base_url` the
+   kernel posts to.
+4. **The tenant role is shared.** Per-server names cover the database (`maludb_<suffix>`) and the three
+   service roles. The tenant role (`maluos`) and the principals' login roles keep their names on the
+   database server: they carry no password, so nothing collides, and each server's schemas are in its
+   own database.
+5. **Joining the estate needs the vault and the gateway** on the joining server (`maluctl estate join`
+   makes the host principal and keeps the node's keys there). An application server has both. A database
+   server has neither, so it **cannot join the estate today**: the watching agents' design (slice 4) has to
+   give it a way to report that does not need them.
+
+### What was built
+
+- **Kernel** (branch `phase14/application-servers`, `docs/build-specs/application-servers.md` there):
+  db/194; the join code's applications (`desk_enrollment_codes.apps`, `locations.node_apps`, the field on
+  Settings → Desks, `bin/mint_desk_code.php --apps`); `bin/app_install.php` in two halves;
+  `/api/v1/estate/apps/{prepare,register,job}`; the door as a template in the Apache file; the reload path
+  unit; `bin/app_names.php`. Proof `bin/test_application_servers.php`, 33 checks.
+- **maluos-firstboot 0.1.19**: `role: application-server`; `platform_suffix`, `platform_db`, `db_role`;
+  `enroll: {kind: estate}`; the applications step; `maluctl status` says the role.
+- **maluos-vault 0.4.4, maluos-gateway 0.6.3, maluos-memory 0.2.3**: the component makes the service's
+  database role under the name first boot gives it.
+- **maludb-os-core 2026.11.12maluos2**: the kernel vendored at the branch; the component renders the door
+  from `components.maludb-os-core.application_servers` (and `door_address`), makes the registries and the
+  staging directory the web user's, enables the path unit, writes `OS_PROXY_ADDRESS`;
+  `maludb_os_apps.install_remote_apps`, `office_upstreams`; `maluctl app install`, `maluctl app names
+  --upstreams`.
+- **maluos-installer 0.3.8**: the plan's `firstboot.role application-server`,
+  `firstboot.application_server {kernel, apps, address}`, `firstboot.database_server.suffix`.
+- **maluos-office-setup 0.1.4**: `application-server.py` (`--show`, `--check` the door, `--apply`),
+  `configure-kernel.py --application-servers`, `proxy-config.sh` with an upstream per application,
+  `references/application-server.md`, Phase 8b of the interview.
+
+### The operator's steps
+
+```
+# 1. the database server (docs/phase14-database-server.md): clients must admit the kernel server and every application server
+sudo maluctl db export /root/db-export            # db-admin.txt and db-ca.pem, copied to the other servers
+
+# 2. the kernel server: as today, then admit the application servers and mint a code for each
+components.maludb-os-core.application_servers: [192.168.100.21]          # then: sudo maluctl provision --force
+sudo -u www-data php /var/www/bin/mint_desk_code.php --email admin@example.com --kind server --name app-1 --apps hr
+
+# 3. an application server (the plan, or /office-setup there)
+role: application-server
+database_server: {host: db-1.example.com, credential: 'file:…/db-admin.txt', ca: 'file:…/db-ca.pem'}
+enroll: {kind: estate, url: https://app.example.com, code: ABCD-EFGH}
+application_server: {kernel: 'http://kernel.example.lan:8081', apps: [hr]}
+sudo maluctl status                               # role, the applications, its suffix on the database server
+sudo maluctl app install projects                 # later, for another application its code named
+
+# 4. the proxy
+maluctl app names --upstreams                     # on the kernel server: hr.example.com<tab>192.168.100.21
+```
+
+### Test
+
+- Kernel: `bin/test_application_servers.php` (33 checks: the scoped code, every refusal, a registration, the
+  token once, a re-run), three earlier estate proofs, the one-host path in `plan` mode, the host half in
+  `plan` mode against the test kernel.
+- `tests/database-server-test.py` (the plan's new keys), `tests/dbserver-local-test.sh` (35 checks: an
+  application server beside the office on one scratch database server, names of its own, the office's
+  logins untouched, no reach into the office's vault).
+- Apache accepts the rendered door (`apache2 -t`).
+- `tests/qcow2-boot-test.sh`, "application servers" (written, not run): one VM standing in for both
+  servers, a fixture application installed through `--kernel` and the door, the relay, the reload, the
+  upstreams, a re-run, an application the code did not name. `BOOT_TEST_APPSERVER=0` skips it.
+
+### Not built
+
+- Removing an application from a server, or moving it to another.
+- `role: application-server` on the installer's First boot screen (the plan takes it).
+- The node's report setting `node_role` for a kernel or a database server.
+- The watching agents (slice 4); a key per application and TLS on the door and the relay (slice 5).
+
 ## The owner's decisions (2026-11-12)
 
 1. **Keys**: the master key now, a key per application later (section 4).

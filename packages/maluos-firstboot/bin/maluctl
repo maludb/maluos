@@ -35,7 +35,14 @@ def cmd_status(_):
     ds = st.get("database_server")
     if st.get("role") == "database-server":
         print("role:        database server (Phase 14: the estate's data; an office provisions against it)")
-    print(f"database:    {st['database']}  (maludb_core {st.get('maludb_core')})")
+    ap = st.get("application_server")
+    if st.get("role") == "application-server" and isinstance(ap, dict):
+        print(f"role:        application server (the kernel is on another server: {ap.get('kernel') or 'no door set'})")
+        apps = ", ".join(ap.get("installed") or []) or "none"
+        print(f"applications: {apps}" + (f"; FAILED: {', '.join(ap.get('failed') or [])}" if ap.get("failed") else "")
+              + (f"; {ap.get('error')}" if ap.get("error") else ""))
+    print(f"database:    {st['database']}  (maludb_core {st.get('maludb_core')})"
+          + (f"  this server's own names on the database server: suffix {st['platform_suffix']}" if st.get("platform_suffix") else ""))
     if st.get("role") == "database-server" and ds:
         print(f"serves:      {ds.get('listen')} port {ds.get('port')}, TLS {ds.get('tls')}, clients {', '.join(ds.get('clients') or []) or 'none'}")
         print(f"admin role:  {ds.get('admin')}  (not a superuser; `sudo maluctl db export DIR` writes its credential for an office's plan)")

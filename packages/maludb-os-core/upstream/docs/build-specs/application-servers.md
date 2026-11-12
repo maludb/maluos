@@ -68,7 +68,7 @@ port are the `base_url` it reports.
 
 ## Not built here
 
-- The field for applications on Settings → Desks' code form (the handler takes `apps`; the CLI mints).
+- (built) Settings → Desks: the code form has the applications field for a server code.
 - The node's report setting `node_role` for a kernel or a database server.
 - `maluctl app names --upstreams`, the proxy's upstream per name (MaluOS).
 - A key per application, TLS on the door and the relay (a later slice).

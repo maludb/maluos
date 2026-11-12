@@ -286,6 +286,7 @@ function Desks({ data, timeZone }: { data: Data; timeZone: string }) {
   const [answer, setAnswer] = useState<SecretAnswer | null>(null);
   const [name, setName] = useState("");
   const [kind, setKind] = useState("desk");
+  const [apps, setApps] = useState("");       // db/194: a server code may name the applications that server may install
   const [pending, startTransition] = useTransition();
   const presence = (p: string) => p === "online" ? <span className="badge bg-success">online</span>
     : p === "offline" ? <span className="badge bg-secondary">offline</span> : <span className="badge bg-light text-dark">unknown</span>;
@@ -308,7 +309,7 @@ function Desks({ data, timeZone }: { data: Data; timeZone: string }) {
             : `sudo maluctl office enroll ${officeUrl} --code ${answer.code}`}</code></small>
         </div>
       )}
-      <form className="mb-3" onSubmit={(e) => { e.preventDefault(); startTransition(async () => { setAnswer(await settingsSecret("deskCode", { name, kind })); setName(""); }); }}>
+      <form className="mb-3" onSubmit={(e) => { e.preventDefault(); startTransition(async () => { setAnswer(await settingsSecret("deskCode", kind === "server" && apps.trim() !== "" ? { name, kind, apps } : { name, kind })); setName(""); setApps(""); }); }}>
         <div className="input-group">
           {data.estate && (
             <select name="kind" className="form-select flex-grow-0 w-auto" value={kind} onChange={(e) => setKind(e.target.value)} id="desk-code-kind">
@@ -319,8 +320,17 @@ function Desks({ data, timeZone }: { data: Data; timeZone: string }) {
           )}
           <input type="text" name="name" className="form-control" placeholder={kind === "desk" ? "Desk name (optional, e.g. Ed's laptop)" : "Node name (optional; the hostname otherwise)"}
                  value={name} onChange={(e) => setName(e.target.value)} />
+          {data.estate && kind === "server" && (
+            <input type="text" name="apps" className="form-control" id="desk-code-apps" aria-label="Applications this server may install"
+                   placeholder="Applications it may install (optional, e.g. hr, projects)" value={apps} onChange={(e) => setApps(e.target.value)} />
+          )}
           <button type="submit" className="btn btn-primary" disabled={pending}><i className="feather-plus me-1"></i>{kind === "desk" ? "Enrol a desk" : "Make a node code"}</button>
         </div>
+        {data.estate && kind === "server" && (
+          <div className="form-text">
+            Name applications only for an <strong>application server</strong>: a server that runs them apart from the kernel. It may install those and no others.
+          </div>
+        )}
       </form>
       <div className="table-responsive">
         <table className="table table-hover mb-0">

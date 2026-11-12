@@ -1,7 +1,7 @@
 maludb-os-core (2026.11.12maluos2) resolute; urgency=medium
 
   * Application servers, the kernel half. Vendored at the kernel's branch
-    phase14/application-servers (dd9a1f5): db/194, the installer in two
+    phase14/application-servers (761e957): db/194, the installer in two
     halves, /api/v1/estate/apps/{prepare,register,job}, the applications'
     door, the registry's reload path unit, bin/app_names.php. To be
     re-vendored at main once the branch is merged.
