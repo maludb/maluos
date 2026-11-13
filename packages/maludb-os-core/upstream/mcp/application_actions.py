@@ -128,6 +128,11 @@ def register(mcp, app_post, action_token, taken: set[str]) -> int:
         for action in reg["registry"]["actions"].values():
             if not action.get("built"):
                 continue
+            if not isinstance(action, dict) or not (action.get("tool_name") or action.get("action")):
+                # One registry with a nameless action must not stop this server for every agent (found by the MaluOS
+                # boot test, 2026-11-13: a KeyError here at import left the Actions MCP restarting forever).
+                log.error("%s: a built action has neither 'action' nor 'tool_name' — NOT registered", reg["_file"])
+                continue
             name = tool_name(action)
             if name in taken:
                 # Never quietly: an agent granted this name would be handed another application's tool (K55). The registry

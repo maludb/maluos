@@ -1,3 +1,13 @@
+maluos-estate (0.10.1) resolute; urgency=medium
+
+  * Depends on polkitd. The node service starts its helper units (the
+    updates unit, an agent's unit, the restart helper) through the polkit
+    rule this package ships; the server image carries no polkit, so on a
+    server every such start was refused with "Access denied". Found by
+    the first boot test of the restart helper.
+
+ -- Edward Honour <ed@maludb.org>  Fri, 13 Nov 2026 09:10:00 +0000
+
 maluos-estate (0.10.0) resolute; urgency=medium
 
   * Phase 14 slice 4d (docs/phase14-watching-agents.md): three more node

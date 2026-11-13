@@ -1078,6 +1078,8 @@ v = open('/var/www/docs/deploy/apache-react-cutover.conf').read().replace('subel
 t, d = m.render_door(v, k); assert d and d['address'] == '$LANIP', d
 open('/etc/apache2/sites-available/maludb-os.conf', 'w').write(t)
 " 2>/tmp/as-door.err && sudo -n apache2ctl configtest >/tmp/as-apache.log 2>&1 && sudo -n systemctl reload apache2 && sleep 3
+# a reload that adds a Listen takes its time under emulation: wait for the door instead of a fixed pause
+for i in $(seq 1 20); do [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 $DOOR/api/v1/health)" = 200 ] && break; sleep 3; done
 [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 $DOOR/api/v1/health)" = 200 ] && echo "  ok   the applications' door answers the kernel's health on $LANIP:8081" || { echo "  FAIL the door: $(cat /tmp/as-door.err /tmp/as-apache.log 2>/dev/null | tail -3 | cut -c1-300)"; fail=1; }
 dc() { curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$@"; }
 [ "$(dc $DOOR/login)" = 403 ] && [ "$(dc $DOOR/settings/desks/code.php)" = 403 ] && [ "$(dc $DOOR/api/v1/session.php)" = 403 ] && [ "$(dc -X POST $DOOR/api/v1/estate/apps/prepare)" = 401 ] \
@@ -1120,7 +1122,7 @@ CONF
 echo '<?php header("Content-Type: application/json"); echo json_encode(["ok" => true, "action_token" => isset($_SERVER["HTTP_X_ACTION_TOKEN"])]);' > $F/html/ping.php
 echo '<?php http_response_code(204);' > $F/html/sso.php
 echo 'CREATE TABLE IF NOT EXISTS boottest_note (id serial PRIMARY KEY, note text);' > $F/db/001_note.sql
-echo '{"actions": {"boottest_ping": {"built": true, "endpoint": "/ping.php", "method": "POST", "params": []}}}' > $F/mcp/action_registry.json
+echo '{"actions": {"boottest_ping": {"action": "boottest_ping", "built": true, "endpoint": "/ping.php", "method": "POST", "params": []}}}' > $F/mcp/action_registry.json
 printf -- '---\nname: boottest-basics\ndescription: The boot test fixture skill.\n---\n\n# Boot test basics\n\nNothing to know.\n' > $F/skills/boottest-basics/SKILL.md
 MCPSTART=$(systemctl show -p ActiveEnterTimestampMonotonic --value maludb-os-actions-mcp)
 ( cd /var/www && sudo -n env HOME=/root php bin/app_install.php apply $F --kernel $DOOR --node-token-file /run/boot-app.token --address $LANIP ) > /tmp/as-install.log 2>&1; rc=$?
@@ -1138,6 +1140,9 @@ sudo -n python3 -c "import json; r = json.load(open('/var/www/mcp/registries/boo
 for i in $(seq 1 20); do [ "$(systemctl show -p ActiveEnterTimestampMonotonic --value maludb-os-actions-mcp)" != "$MCPSTART" ] && systemctl is-active --quiet maludb-os-actions-mcp && break; sleep 3; done
 [ "$(systemctl show -p ActiveEnterTimestampMonotonic --value maludb-os-actions-mcp)" != "$MCPSTART" ] && systemctl is-active --quiet maludb-os-actions-mcp \
   && echo "  ok   the Actions MCP was restarted for the new registry by the path unit (the kernel's half ran as the web user)" || { echo "  FAIL the Actions MCP was not reloaded"; fail=1; }
+for i in $(seq 1 40); do MCPC=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -X POST http://127.0.0.1:8813/mcp); [ "$MCPC" = 401 ] && break; sleep 3; done
+[ "$MCPC" = 401 ] && [ "$(systemctl show -p NRestarts --value maludb-os-actions-mcp)" = 0 ] \
+  && echo "  ok   the Actions MCP answers with the application's registry loaded (401 without a token, no crash restart)" || { echo "  FAIL the Actions MCP after the reload: http $MCPC, $(systemctl show -p NRestarts --value maludb-os-actions-mcp) restarts"; sudo -n journalctl -u maludb-os-actions-mcp --no-pager -n 8 | cut -c1-220; fail=1; }
 [ "$(curl -s --max-time 10 -X POST -H 'X-Action-Token: x' http://$LANIP:$RPORT/ping.php)" = '{"ok":true,"action_token":true}' ] && [ "$(dc http://127.0.0.1:$RPORT/ping.php)" = 000 ] \
   && echo "  ok   the relay passes the kernel's address to the application's internal port and listens nowhere else" || { echo "  FAIL the relay: $(curl -s --max-time 10 -X POST http://$LANIP:$RPORT/ping.php | cut -c1-120)"; fail=1; }
 ATOK=$(sudo -n sed -n 's/^OS_APPLICATION_TOKEN=//p' $AE)
@@ -1203,22 +1208,65 @@ out=$(sudo -n env $BENV maluctl estate join http://127.0.0.1:8080 --code "$BCODE
 [ $rc != 0 ] && echo "$out" | grep -q 'has no vault.*--bare' && echo "  ok   a join without --bare on a server with no vault is refused with the reason (the code is not used)" || { echo "  FAIL the plain join without a vault (rc=$rc): $(echo "$out" | tail -2 | cut -c1-200)"; fail=1; }
 out=$(sudo -n env $BENV maluctl estate join http://127.0.0.1:8080 --code "$BCODE" --bare --name boot-db-1 2>&1); rc=$?
 BTOK=$(sudo -n cat $BD/node.token 2>/dev/null)
+# The kernel answers a join with its public endpoints (APP_URL). This VM is seeded as an office behind a proxy and has no
+# proxy, so those URLs reach nothing from here. A forwarder on loopback stands in for the proxy: it passes each call to
+# the kernel's internal port, and does the one rewrite only the public vhost has (an inbox item's result).
+cat > /tmp/bare-proxy.py <<'PY'
+import re, urllib.error, urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+
+class H(BaseHTTPRequestHandler):
+    def log_message(self, *a):
+        pass
+
+    def fwd(self):
+        path = re.sub(r"^/api/v1/estate/inbox/([a-z0-9_]+)/result/?$", r"/api/v1/estate/inbox.php?id=\1&sub=result", self.path)
+        n = int(self.headers.get("Content-Length") or 0)
+        req = urllib.request.Request("http://127.0.0.1:8080" + path, data=self.rfile.read(n) if n else None, method=self.command)
+        for h in ("Authorization", "Content-Type", "Accept"):
+            if self.headers.get(h):
+                req.add_header(h, self.headers[h])
+        try:
+            r = urllib.request.urlopen(req, timeout=90); code, body, ct = r.status, r.read(), r.headers.get("Content-Type")
+        except urllib.error.HTTPError as e:
+            code, body, ct = e.code, e.read(), e.headers.get("Content-Type")
+        self.send_response(code); self.send_header("Content-Type", ct or "application/json"); self.send_header("Content-Length", str(len(body)))
+        self.end_headers(); self.wfile.write(body)
+
+    do_GET = do_POST = fwd
+
+
+ThreadingHTTPServer(("127.0.0.1", 18099), H).serve_forever()
+PY
+( python3 /tmp/bare-proxy.py >/dev/null 2>&1 & echo $! > /tmp/bare-proxy.pid )
+sudo -n python3 -c "
+import yaml
+from urllib.parse import urlsplit
+p = '/run/bare-estate.yaml'; c = yaml.safe_load(open(p))
+c['endpoints'] = {k: ('http://127.0.0.1:18099' + urlsplit(v).path if v else v) for k, v in (c.get('endpoints') or {}).items()}
+open(p, 'w').write(yaml.safe_dump(c, sort_keys=False))"
+# The watching agents' scheduled passes (every ten minutes) would judge this node's reports between the test's own steps:
+# their duties rest while the test runs its passes by hand.
+WDUT=$(sudo -n -u postgres psql -Atd maludb_os -c "select count(*) from agent_duties d join agent_profiles p on p.member_id = d.agent_member_id where p.role_key in ('dba', 'linux_admin', 'security_officer') and d.active")
+sudo -n -u postgres psql -qAtd maludb_os -c "update agent_duties set active = false where agent_member_id in (select member_id from agent_profiles where role_key in ('dba', 'linux_admin', 'security_officer'))" >/dev/null
+for i in $(seq 1 30); do [ "$(sudo -n -u postgres psql -Atd maludb_os -c "select count(*) from agent_runs r join agent_profiles p on p.member_id = r.agent_member_id where p.role_key in ('dba', 'linux_admin', 'security_officer') and r.status in ('queued', 'running')")" = 0 ] && break; sleep 2; done
 [ $rc = 0 ] && [ -n "$BTOK" ] && echo "$out" | grep -q 'a bare node: no vault, no agents' && ! echo "$out" | grep -qF "$BTOK" \
   && echo "  ok   the bare join: a node of the kernel's estate, the token not shown" || { echo "  FAIL the bare join (rc=$rc): $(echo "$out" | tail -3 | cut -c1-240)"; fail=1; }
 [ "$(sudo -n stat -c '%a %U' $BD/node.token)" = '600 maluos-estate' ] && [ "$(sudo -n stat -c '%a %U' $BD/node.key)" = '600 maluos-estate' ] && ! sudo -n grep -qF "$BTOK" /run/bare-estate.yaml \
   && echo "  ok   the token and the key are 0600 files of the node service's user; the enrolment file carries no token" || { echo "  FAIL the bare node's files: $(sudo -n stat -c '%a %U %n' $BD/node.* 2>&1 | tr '\n' ' ')"; fail=1; }
 out=$(sudo -n -u maluos-estate env $BENV maluctl estate heartbeat --report 2>&1); rc=$?
-BROW=$(sudo -n -u postgres psql -Atd maludb_os -c "select node_role || '|' || presence || '|' || (report is not null) || '|' || coalesce((select string_agg(u->>'unit', ',') from jsonb_array_elements(report->'units') u), '') || '|' || coalesce(report->'database'->>'role', '') || '|' || (select count(*) from estate_alerts a where a.location_id = l.id and a.cleared_at is null) from locations l where name = 'boot-db-1' and status = 'active'")
+BROW=$(sudo -n -u postgres psql -Atd maludb_os -c "select node_role || '|' || presence || '|' || (report is not null) || '|' || coalesce((select string_agg(u->>'unit', ',') from jsonb_array_elements(report->'units') u), '') || '|' || coalesce(report->'database'->>'role', '') || '|' || (select count(*) from estate_alerts a where a.location_id = l.id and a.cleared_at is null and a.key not like '%maluos-estate.service%') from locations l where name = 'boot-db-1' and status = 'active'")
 [ $rc = 0 ] && echo "$BROW" | grep -q '^database-server|online|true|' && ! echo "$BROW" | grep -q 'vault\|gateway' && echo "$BROW" | grep -q '|server|0$' \
-  && echo "  ok   its heartbeat as the node service's user: labelled database-server, the report without the vault and the gateway, the database part, no alert" || { echo "  FAIL the bare node's report (rc=$rc): $BROW | $(echo "$out" | tail -2 | cut -c1-200)"; fail=1; }
+  && echo "  ok   its heartbeat as the node service's user: labelled database-server, the report without the vault and the gateway, the database part, no alert" || { echo "  FAIL the bare node's report (rc=$rc): $BROW | $(echo "$out" | tail -2 | cut -c1-200) | alerts: $(sudo -n -u postgres psql -Atd maludb_os -c "select a.kind || ' ' || a.key || ' ' || a.title from estate_alerts a join locations l on l.id = a.location_id where l.name = 'boot-db-1' and a.cleared_at is null" | tr '\n' ';' | cut -c1-400)"; fail=1; }
 BSAMP=$(sudo -n -u postgres psql -Atd maludb_os -c "select (report ? 'postgres') || '|' || (report ? 'linux') || '|' || (report ? 'security') || '|' || coalesce((select count(*) from estate_node_samples s where s.location_id = l.id and s.numbers ? 'pg.connections_pct' and s.numbers ? 'sec.listening' and s.numbers ? 'load1'), 0) from locations l where name = 'boot-db-1' and status = 'active'")
 [ "$BSAMP" = 'true|true|true|1' ] && echo "  ok   the kernel holds the bare node's postgres, linux and security parts and one sample of their numbers (db/195)" || { echo "  FAIL the parts or the sample at the kernel: $BSAMP"; fail=1; }
 sudo -n env $BENV maluctl estate status 2>&1 | grep -q 'a bare node: no vault' && echo "  ok   maluctl estate status says it is a bare node" || { echo "  FAIL bare status: $(sudo -n env $BENV maluctl estate status 2>&1 | tail -3 | cut -c1-200)"; fail=1; }
 # --- Phase 14 slice 4c: the watching agents (system_one, IT, shadow) read this node's report at the kernel
 echo "  -- the watching agents: the database administrator, the Linux administrator, the security officer (shadow)"
 KQ() { sudo -n -u postgres psql -Atd maludb_os -c "$1"; }
-[ "$(KQ "select string_agg(p.role_key || ':' || coalesce(v.runtime_config->>'mode', 'shadow') || ':' || d.instructions, ',' order by p.role_key) from agent_profiles p join department_members dm on dm.member_id = p.member_id join departments dep on dep.id = dm.department_id and dep.system_key = 'it' join agent_duties d on d.agent_member_id = p.member_id and d.active left join agent_config_versions v on v.id = p.current_config_version_id where p.role_key in ('dba', 'linux_admin', 'security_officer')")" = 'dba:shadow:playbook: watch_postgres,linux_admin:shadow:playbook: watch_linux,security_officer:shadow:playbook: watch_security' ] \
-  && echo "  ok   the three watching agents were hired into IT at provisioning, each with its playbook as a duty, in shadow mode" || { echo "  FAIL the watching agents: $(KQ "select p.role_key, p.member_id from agent_profiles p where p.role_key in ('dba', 'linux_admin', 'security_officer')" | tr '\n' ' ')"; fail=1; }
+[ "$(KQ "select string_agg(p.role_key || ':' || coalesce(v.runtime_config->>'mode', 'shadow') || ':' || d.instructions, ',' order by p.role_key) from agent_profiles p join department_members dm on dm.member_id = p.member_id join departments dep on dep.id = dm.department_id and dep.system_key = 'it' join agent_duties d on d.agent_member_id = p.member_id left join agent_config_versions v on v.id = p.current_config_version_id where p.role_key in ('dba', 'linux_admin', 'security_officer')")" = 'dba:shadow:playbook: watch_postgres,linux_admin:shadow:playbook: watch_linux,security_officer:shadow:playbook: watch_security' ] \
+  && [ "$WDUT" = 3 ] && echo "  ok   the three watching agents were hired into IT at provisioning, each with its playbook as a duty, in shadow mode" || { echo "  FAIL the watching agents: $(KQ "select p.role_key, p.member_id from agent_profiles p where p.role_key in ('dba', 'linux_admin', 'security_officer')" | tr '\n' ' ')"; fail=1; }
 BNODE=$(KQ "select id from locations where name = 'boot-db-1' and status = 'active'")
 watch_run() {   # role_key playbook: one manual run as the administrator, waited for; prints the run's status, result and error
   sudo -n -u www-data php -r 'require "/var/www/app/bootstrap.php"; require_once "/var/www/app/features/agents/render.php"; agents_require_files(); $pdo = db();
@@ -1227,7 +1275,7 @@ watch_run() {   # role_key playbook: one manual run as the administrator, waited
     [$r, $e] = start_agent_run($a, "playbook: " . $argv[2], "manual", null, $by); echo $r["run_id"] ?? ("ERR " . $e);' "$1" "$2" > /tmp/watch-run.id 2>/tmp/watch-run.err
   local id; id=$(cat /tmp/watch-run.id)
   case "$id" in ''|ERR*|*[!0-9]*) echo "not started: $id $(head -c 200 /tmp/watch-run.err)"; return 1;; esac
-  for i in $(seq 1 60); do [ "$(KQ "select status in ('succeeded', 'failed', 'cancelled') from agent_runs where id = $id")" = t ] && break; sleep 3; done
+  for i in $(seq 1 60); do [ "$(KQ "select status in ('succeeded', 'failed', 'cancelled', 'awaiting_approval') from agent_runs where id = $id")" = t ] && break; sleep 3; done
   KQ "select status || ' | ' || coalesce(result, '') || ' | ' || coalesce(error, '') from agent_runs where id = $id"
 }
 # the node's real report, made plainly healthy where this test sets nothing, then with three things wrong: connections
@@ -1287,7 +1335,7 @@ AR0=$(KQ "select coalesce(max(id), 0) from approval_requests"); ACT0=$(KQ "selec
 curl -s -o /dev/null --max-time 30 -H "Authorization: Bearer $BTOK" -H 'Content-Type: application/json' -d @/tmp/bare-idle.json http://127.0.0.1:8080/api/v1/estate/heartbeat
 RL=$(watch_run dba watch_postgres)
 AREQ=$(KQ "select id from approval_requests where id > $AR0 and action_key = 'estate_node_action' and status = 'pending' and requested_by_member_id = $DBA order by id desc limit 1")
-echo "$RL" | grep -q '^succeeded | watch_postgres (live)' && [ -n "$AREQ" ] && [ "$(KQ "select count(*) from estate_actions where location_id = $BNODE")" = "$ACT0" ] \
+echo "$RL" | grep -q '^awaiting_approval | watch_postgres (live)' && [ -n "$AREQ" ] && [ "$(KQ "select count(*) from estate_actions where location_id = $BNODE")" = "$ACT0" ] \
   && KQ "select summary from approval_requests where id = $AREQ" | grep -q "End the session of PostgreSQL backend $VPID on boot-db-1" \
   && KQ "select note from system_one_decisions where subject_id = $BNODE and playbook = 'watch_postgres' order by id desc limit 1" | grep -q "waits for approval (request $AREQ)" \
   && echo "  ok   live: the long idle transaction is an alert, and the request to end that session waits for approval; nothing is queued to the node" || { echo "  FAIL the live pass: $RL | request ${AREQ:-none} | $(KQ "select decision, acted, left(note, 200) from system_one_decisions where subject_id = $BNODE order by id desc limit 1")"; sudo -n journalctl -u maludb-os-agent-runner -u maludb-os-actions-mcp --no-pager -n 12 | cut -c1-240; fail=1; }
@@ -1313,6 +1361,7 @@ for i in $(seq 1 45); do [ "$(KQ "select state in ('completed', 'failed', 'refus
 [ "$(KQ "select state || '|' || reason from estate_actions where id = '${UID2:-none}'")" = 'refused|not_allowed' ] && systemctl is-active --quiet ssh \
   && echo "  ok   a restart of a unit that is not on the node's list is refused by the node" || { echo "  FAIL the unlisted unit: $(KQ "select state, reason, result from estate_actions where id = '${UID2:-none}'")"; fail=1; }
 # the root helper and its polkit rule: the node service may start it, and it refuses a unit of no list
+command -v pkcheck >/dev/null && systemctl is-active --quiet polkit && echo "  ok   polkit is installed and running on this server (the node service's rule needs it)" || { echo "  FAIL no polkit on this image: the node service cannot start its helper units"; fail=1; }
 out=$(sudo -n -u maluos-estate systemctl start 'maluos-estate-restart@cups.service' 2>&1); rc=$?
 [ $rc != 0 ] && ! echo "$out" | grep -qi 'access denied\|authentication\|not authorized' && sudo -n journalctl -u 'maluos-estate-restart@cups.service' --no-pager -n 5 | grep -q 'not a node of an estate\|is not in this node' \
   && echo "  ok   the node service may start the restart helper (polkit), and the helper itself refuses a unit it has no list for" || { echo "  FAIL the restart helper: rc=$rc $(echo "$out" | tail -2 | cut -c1-200) | $(sudo -n journalctl -u 'maluos-estate-restart@cups.service' --no-pager -n 3 | cut -c1-200 | tr '\n' ' ')"; fail=1; }
@@ -1323,6 +1372,7 @@ out=$(sudo -n env $BENV maluctl estate leave 2>&1); rc=$?
 [ $rc = 0 ] && echo "$out" | grep -q 'told; node retired' && ! sudo -n test -e $BD/node.token && ! sudo -n test -e /run/bare-estate.yaml \
   && [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -H "Authorization: Bearer $BTOK" http://127.0.0.1:8080/api/v1/estate/me)" = 410 ] \
   && echo "  ok   leave: the node retired at the kernel, the files removed, the old token answers 410" || { echo "  FAIL the bare leave (rc=$rc): $(echo "$out" | tail -2 | cut -c1-200)"; fail=1; }
+kill "$(cat /tmp/bare-proxy.pid 2>/dev/null)" 2>/dev/null
 sudo -n rm -rf $BD /run/bare-done
 fi
 

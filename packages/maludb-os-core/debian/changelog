@@ -1,3 +1,23 @@
+maludb-os-core (2026.11.13maluos1) resolute; urgency=medium
+
+  * The kernel at its main, commit 58dc9f5 (2026-11-13): application
+    servers (db/194), the node samples (db/195), the watching agents
+    (db/196) and their node actions (db/197), and the Actions MCP skipping
+    a nameless action. The same files as 2026.11.12maluos7, now vendored
+    from the merged main.
+
+ -- Edward Honour <ed@maludb.org>  Fri, 13 Nov 2026 15:50:00 +0000
+
+maludb-os-core (2026.11.12maluos7) resolute; urgency=medium
+
+  * The Actions MCP skips (and logs) a built action of an application's
+    registry that has neither 'action' nor 'tool_name', where it raised
+    KeyError at import and restarted forever, leaving every agent without
+    its actions. Found by the boot test: its fixture application had such
+    a registry, and the watching agents' first live pass could not connect.
+
+ -- Edward Honour <ed@maludb.org>  Fri, 13 Nov 2026 09:10:00 +0000
+
 maludb-os-core (2026.11.12maluos6) resolute; urgency=medium
 
   * Phase 14 slice 4d (docs/phase14-watching-agents.md): node actions for
