@@ -7,6 +7,11 @@ facts and, every report_s, the report (units, agents, the gateway, vault alerts,
 A desk does not enrol twice: its desk row is its node record.
 
   sudo maluctl estate join URL --code CODE [--name NAME] [--kind server|inference|desk] [--hub HOST:PORT] [--no-overlay] [--allow-actions a,b] [--force]
+  sudo maluctl estate join URL --code CODE --bare [--name NAME] [--allow-actions a,b]
+                                            a server with no vault and no gateway (a database server): no host principal, no
+                                            agents, no inference, no memory, no overlay; the node token and key are files of
+                                            the node service's user (/var/lib/maluos/estate/node.token, node.key, 0600). It
+                                            heartbeats, reports and runs the actions its list allows (apply_updates)
                                             --kind desk runs `maluctl office enroll` (the desk's enrolment is its node record)
                                             --hub: this host is the estate's hub (any member with one UDP port reachable by the others;
                                             `maluctl estate overlay hub` moves the role later)
@@ -139,6 +144,13 @@ def join(a):
     code = opt(a, "--code") or sys.exit("--code CODE: the one-time code the office minted for a node")
     kind = opt(a, "--kind", "server"); name = opt(a, "--name"); force = opt(a, "--force", flag=True)
     hub = opt(a, "--hub"); no_overlay = opt(a, "--no-overlay", flag=True)
+    bare = opt(a, "--bare", flag=True)
+    if bare:
+        if kind != "server" or hub:
+            sys.exit("--bare is a server node without a vault: it takes no --kind but server and no --hub")
+        no_overlay = True
+    elif kind != "desk" and not os.path.exists(VAULT_CONF):
+        sys.exit(f"this server has no vault ({VAULT_CONF}): a server without one (a database server) joins with --bare")
     if kind == "desk":
         print("a desk's node record is its desk row: running maluctl office enroll", flush=True)
         os.execv(sys.executable, [sys.executable, MALUCTL, "office", "enroll", url, "--code", code] + (["--name", name] if name else []) + (["--no-overlay"] if no_overlay else []) + a)
@@ -161,12 +173,14 @@ def join(a):
     hostname = socket.gethostname()
     name = name or hostname
     principal = f"host:{hostname}"
-    # 1. the host principal (kind service: the kernel's principal kinds are human, agent and service) and its identity
-    maluctl(["principal", "add", principal, "--kind", "service", "--name", hostname, "--home", principal])
-    changed = map_identity(VAULT_CONF, C.USER, principal)
-    if map_identity(GATEWAY_CONF, C.USER, principal) or changed:
-        gateway_reload()
-    allow_actions = [x for x in (opt(a, "--allow-actions") or ",".join(C.DEFAULT_ACTIONS)).split(",") if x]
+    # 1. the host principal (kind service: the kernel's principal kinds are human, agent and service) and its identity.
+    #    A bare node has no vault to hold a principal: the name is only the office's label for the node.
+    if not bare:
+        maluctl(["principal", "add", principal, "--kind", "service", "--name", hostname, "--home", principal])
+        changed = map_identity(VAULT_CONF, C.USER, principal)
+        if map_identity(GATEWAY_CONF, C.USER, principal) or changed:
+            gateway_reload()
+    allow_actions = [x for x in (opt(a, "--allow-actions") or ",".join(C.BARE_ACTIONS if bare else C.DEFAULT_ACTIONS)).split(",") if x]
     for x in allow_actions:
         if x not in ("restart_agent", "start_agent", "stop_agent", "apply_updates", "reboot"):
             sys.exit(f"--allow-actions {x}: restart_agent, start_agent, stop_agent, apply_updates or reboot")
@@ -179,12 +193,15 @@ def join(a):
         priv = open(kp).read(); pub = open(kp + ".pub").read().strip()
         for p in (kp, kp + ".pub"):
             os.remove(p)
-    run_as(C.USER, ["secret", "delete", C.SECRET_KEY], check=False)
-    run_as(C.USER, ["secret", "add", C.SECRET_KEY, "--kind", "generic", "--provider", "estate", "--stdin"], input=priv)
-    try:
-        run_as(C.USER, ["secret", "grant", C.SECRET_KEY, "--to", f"user:{MEMORY_USER}", "--level", "read"])      # slice 4: the memory face signs this host's queries with it
-    except RuntimeError as e:
-        print(f"  warn: the memory face's grant on {C.SECRET_KEY}: {e}", file=sys.stderr)
+    if bare:
+        bare_write(C.NODE_KEY_FILE, priv)
+    else:
+        run_as(C.USER, ["secret", "delete", C.SECRET_KEY], check=False)
+        run_as(C.USER, ["secret", "add", C.SECRET_KEY, "--kind", "generic", "--provider", "estate", "--stdin"], input=priv)
+        try:
+            run_as(C.USER, ["secret", "grant", C.SECRET_KEY, "--to", f"user:{MEMORY_USER}", "--level", "read"])      # slice 4: the memory face signs this host's queries with it
+        except RuntimeError as e:
+            print(f"  warn: the memory face's grant on {C.SECRET_KEY}: {e}", file=sys.stderr)
     # 3. the overlay key (slice 1b): X25519, made here; the private half goes into the vault after the join succeeds
     ov_priv = ov_pub = None
     if not no_overlay:
@@ -207,21 +224,26 @@ def join(a):
     if not token or not node.get("id"):
         sys.exit("the office answered without a node token or a node id")
     # 5. the token, into the host principal's compartment, as the node (peer identity: the ledger names the host); the overlay key beside it
-    run_as(C.USER, ["secret", "delete", C.SECRET_TOKEN], check=False)
-    run_as(C.USER, ["secret", "add", C.SECRET_TOKEN, "--kind", "token", "--provider", "estate", "--env", "MALUOS_ESTATE_TOKEN", "--stdin"], input=token + "\n")
-    secrets = {"token": C.SECRET_TOKEN, "key": C.SECRET_KEY}
+    if bare:
+        bare_write(C.NODE_TOKEN_FILE, token + "\n")
+        secrets = {}
+    else:
+        run_as(C.USER, ["secret", "delete", C.SECRET_TOKEN], check=False)
+        run_as(C.USER, ["secret", "add", C.SECRET_TOKEN, "--kind", "token", "--provider", "estate", "--env", "MALUOS_ESTATE_TOKEN", "--stdin"], input=token + "\n")
+        secrets = {"token": C.SECRET_TOKEN, "key": C.SECRET_KEY}
     if ov_priv:
         run_as(C.USER, ["secret", "delete", C.SECRET_OVERLAY], check=False)
         run_as(C.USER, ["secret", "add", C.SECRET_OVERLAY, "--kind", "generic", "--provider", "estate", "--stdin"], input=ov_priv + "\n")
         secrets["overlay"] = C.SECRET_OVERLAY
     # slice 3: the inference key, beside the token; the gateway holds a `use` grant on it (its estate rungs and the kernel's placement)
-    if r.get("inference_key"):
+    if r.get("inference_key") and not bare:
         store_inference_key(principal, r["inference_key"])
         secrets["inference"] = C.SECRET_INFERENCE
     conf = {"surface": r.get("surface", C.SURFACE), "url": url, "office": r.get("office") or {"name": None, "url": url},
             "node": {"id": node.get("id"), "kind": node.get("kind") or kind, "name": node.get("name") or name, "status": node.get("status")},
             "enrolled_by": r.get("enrolled_by") or {}, "endpoints": eps, "heartbeat_s": int(r.get("heartbeat_s") or 60), "report_s": int(r.get("report_s") or 300),
-            "principal": principal, "user": C.USER, "secrets": secrets, "public_key": pub,
+            "principal": None if bare else principal, "user": C.USER, "secrets": secrets, "public_key": pub,
+            **({"bare": True, "label": principal} if bare else {}),
             "overlay": (r.get("overlay") if ov_priv else None) if r.get("overlay") or not ov_priv else {"pending": True, "role": "hub" if hub else "spoke"},
             "actions": {"allow": allow_actions}, "joined_at": C.utc(), "maluos_estate": VERSION, "editions": list(r.get("editions") or [])}
     if ov_priv and not r.get("overlay"):
@@ -235,7 +257,13 @@ def join(a):
     unit("enable"); unit("restart")
     if ov_priv:
         unit("enable", OVERLAY_UNIT); unit("restart", OVERLAY_UNIT)
-    print(f"joined: {conf['node']['kind']} '{conf['node']['name']}' (#{conf['node']['id']}) at {conf['office'].get('name') or url} as {principal}")
+    print(f"joined: {conf['node']['kind']} '{conf['node']['name']}' (#{conf['node']['id']}) at {conf['office'].get('name') or url} as {principal}"
+          + (" (a bare node: no vault, no agents)" if bare else ""))
+    if bare:
+        print(f"  token:    {C.NODE_TOKEN_FILE}; key {C.NODE_KEY_FILE} (files of {C.USER}, 0600: this server has no vault)")
+        print(f"  reports:  every {conf['report_s']} s with the heartbeat (every {conf['heartbeat_s']} s): {UNIT}; maluctl estate report shows one")
+        print(f"  actions:  an operator may {', '.join(allow_actions) or 'do nothing'} here remotely (maluctl estate actions allow …)")
+        return 0
     print(f"  token:    vault {principal}/{C.SECRET_TOKEN}; key {principal}/{C.SECRET_KEY} (stored as {C.USER})")
     print(f"  reports:  every {conf['report_s']} s with the heartbeat (every {conf['heartbeat_s']} s): {UNIT}; maluctl estate report shows one")
     print(f"  estate:   maluctl estate nodes")
@@ -244,6 +272,17 @@ def join(a):
     print("  inference: " + (f"key {principal}/{C.SECRET_INFERENCE} (the gateway may use it); the estate's backends become rungs of this gateway (maluctl gateway estate)"
                              + (f"; editions {', '.join(conf['editions'])}" if conf.get("editions") else "") if r.get("inference_key") else "the office issued no inference key (an office before slice 3)"))
     return 0
+
+
+def bare_write(path, text):
+    """A bare node's token or key: a file of the node service's user, 0600, in its state directory (0700)."""
+    pw = pwd.getpwnam(C.USER)
+    os.makedirs(C.STATE_DIR, exist_ok=True)
+    os.chown(C.STATE_DIR, pw.pw_uid, pw.pw_gid); os.chmod(C.STATE_DIR, 0o700)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as fh:
+        fh.write(text)
+    os.chown(path, pw.pw_uid, pw.pw_gid); os.chmod(path, 0o600)
 
 
 GATEWAY_USER = os.environ.get("MALUOS_GATEWAY_USER", "maluos-gateway")
@@ -407,7 +446,10 @@ def status(a):
     n, o = conf.get("node") or {}, conf.get("office") or {}
     print(f"office:     {o.get('name') or '?'}  {conf.get('url')}  (surface {conf.get('surface')})")
     print(f"node:       {n.get('kind')} '{n.get('name')}'  (#{n.get('id')})  joined {conf.get('joined_at')}")
-    print(f"principal:  {conf.get('principal')}  (secrets stored as {conf.get('user')}: {', '.join((conf.get('secrets') or {}).values()) or C.SECRET_TOKEN + ', ' + C.SECRET_KEY})")
+    if C.is_bare(conf):
+        print(f"principal:  none (a bare node: no vault; the token and the key are files of {conf.get('user')} in {C.STATE_DIR})")
+    else:
+        print(f"principal:  {conf.get('principal')}  (secrets stored as {conf.get('user')}: {', '.join((conf.get('secrets') or {}).values()) or C.SECRET_TOKEN + ', ' + C.SECRET_KEY})")
     print(f"heartbeat:  every {conf.get('heartbeat_s')} s, the report every {conf.get('report_s')} s" + (f"  ({UNIT} {out['unit']})" if out.get("unit") else ""))
     hb = out.get("last_heartbeat")
     if hb:
@@ -513,8 +555,9 @@ def leave(a):
     conf = C.read_conf() or sys.exit(f"not joined (no {C.CONF})")
     told = "not told (no token)"
     tok = None
+    bare = C.is_bare(conf)
     try:
-        tok = run_as(C.USER, ["secret", "show", C.SECRET_TOKEN]).strip() or None
+        tok = (open(C.NODE_TOKEN_FILE).read().strip() if bare else run_as(C.USER, ["secret", "show", C.SECRET_TOKEN]).strip()) or None
     except Exception:
         tok = None
     unit("disable"); unit("stop")
@@ -531,6 +574,14 @@ def leave(a):
             told = "told; node retired" if st == 200 else f"answered {st} {r.get('error') or ''}: {r.get('message') or ''}".strip()
         except Exception as e:
             told = f"unreachable ({str(e)[:100]}); retire the node from the office's Estate"
+    if bare:
+        for p in (C.NODE_TOKEN_FILE, C.NODE_KEY_FILE, C.CONF, C.STATE):
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+        print(f"left {(conf.get('office') or {}).get('name') or conf.get('url')}: the office was {told}; the unit stopped, the token and the key removed")
+        return 0
     C.drop_caches()                                     # slice 3 and 4: the gateway's estate rungs and peers, the face's holders and peers go with the membership
     C.memory_reload()
     for s in (C.SECRET_TOKEN, C.SECRET_KEY) + ((C.SECRET_OVERLAY,) if (conf.get("secrets") or {}).get("overlay") else ()) + ((C.SECRET_INFERENCE,) if (conf.get("secrets") or {}).get("inference") else ()):

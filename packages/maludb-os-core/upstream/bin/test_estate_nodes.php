@@ -110,8 +110,16 @@ $ok($call('GET', '/api/v1/estate/me.php', 'node_notatoken')[0] === 401 && $call(
 $row = node_row($pdo, $nodeId);
 $ok($st === 200 && $j['node']['last_report_at'] !== null && (int) $row['cpu_cores'] === 32 && $row['app_version'] === 'maluos-estate 0.1.2' && is_string($row['report']) && str_contains($row['report'], '"helpdesk"'), "heartbeat with a report: facts updated, the report stored, last_report_at set ({$st})");
 $ok((int) $pdo->query("SELECT count(*) FROM estate_node_reports WHERE location_id = {$nodeId}")->fetchColumn() === 1 && (int) $pdo->query("SELECT count(*) FROM estate_alerts WHERE location_id = {$nodeId}")->fetchColumn() === 0, 'the report is kept; a healthy report raises nothing');
+// MaluOS Phase 14 slice 4a: the node says what its host is; the office labels it (locations.node_role)
+$ok(($row['node_role'] ?? null) === null, 'a node that names no role has none');
+$call('POST', '/api/v1/estate/heartbeat.php', $token, ['presence' => 'online', 'facts' => ['role' => 'database-server']]);
+$ok((node_row($pdo, $nodeId)['node_role'] ?? null) === 'database-server', 'a heartbeat naming its role labels the node (database-server)');
+$call('POST', '/api/v1/estate/heartbeat.php', $token, ['presence' => 'online', 'role' => 'root-of-everything']);
+$call('POST', '/api/v1/estate/heartbeat.php', $token, ['presence' => 'online']);
+$ok((node_row($pdo, $nodeId)['node_role'] ?? null) === 'database-server', 'an unknown role is ignored and a heartbeat without one keeps the label');
 [$st, $j, $e] = $call('GET', '/api/v1/estate/nodes.php', $token);
 $n = null; foreach ($j['nodes'] ?? [] as $x) { if ($x['id'] === $nodeId) { $n = $x; } }
+$ok(($n['role'] ?? null) === 'database-server', "the nodes answer carries the node's role");
 $ok($st === 200 && $n !== null && $n['health'] === 'ok' && $n['summary'] === '3 updates pending (1 security)' && $n['units'] === ['up' => 3, 'down' => 0] && $n['agents']['running'] === 1 && $n['gateway']['backends_healthy'] === 1 && $n['disk_max_pct'] === 41 && $n['memory_available_pct'] === 33 && $n['load1'] == 0.8 && !isset($n['report']), 'nodes as the node: health ok, the summary, the counts, no report in the list');
 [$st, $j, $e] = $call('POST', '/api/v1/estate/heartbeat.php', $token, ['presence' => 'online', 'report' => $bad()]);
 $alerts = $pdo->query("SELECT kind, key, severity, title FROM estate_alerts WHERE location_id = {$nodeId} AND cleared_at IS NULL ORDER BY kind, key")->fetchAll();

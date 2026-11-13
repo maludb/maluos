@@ -10,7 +10,18 @@ GW = os.environ.get("MALUOS_GATEWAY_SOCKET", "/run/maluos/gateway.sock")
 VAULT = os.environ.get("MALUOS_VAULT_SOCKET", "/run/maluos/vault.sock")
 AGENTS = os.environ.get("MALUOS_AGENTS_DIR", "/etc/maluos/agents")
 UNITS = ["postgresql@18-main.service", "maludb-mc2dbd.service", "maluos-vault.service", "maluos-gateway.service", "maluos-estate.service"]
+# a database server runs the cluster, the engine's listener and the node service: the vault and the gateway are
+# installed and idle there, and are not its units to report
+UNITS_DATABASE_SERVER = ["postgresql@18-main.service", "maludb-mc2dbd.service", "maluos-estate.service"]
 MAX_BYTES = 32 * 1024
+
+
+def _role():
+    try:
+        with open(os.environ.get("MALUOS_PROVISIONED", "/var/lib/maluos/firstboot/done")) as f:
+            return str(json.load(f).get("role") or "")
+    except (OSError, ValueError):
+        return ""
 
 
 class _UnixConn(http.client.HTTPConnection):
@@ -49,7 +60,7 @@ def _ok(sock, path, query=None, default=None):
 
 def units():
     """The fixed list plus every maluos-agent@ unit present, through systemctl show; units systemd does not know are left out."""
-    names = list(UNITS)
+    names = list(UNITS_DATABASE_SERVER if _role() == "database-server" else UNITS)
     try:
         r = subprocess.run(["systemctl", "list-units", "--no-legend", "--plain", "--all", "maluos-agent@*.service"], capture_output=True, text=True, timeout=10)
         for line in r.stdout.splitlines():

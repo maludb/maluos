@@ -1,3 +1,23 @@
+maluos-estate (0.8.0) resolute; urgency=medium
+
+  * Phase 14 slice 4a (docs/phase14-watching-agents.md): a bare node.
+    maluctl estate join URL --code CODE --bare joins a server that has no
+    vault and no gateway (a database server): no host principal, no agents,
+    no inference, no memory, no overlay. The node token and the node key
+    are files of the node service's user (/var/lib/maluos/estate/node.token
+    and node.key, 0600, the directory 0700) instead of vault entries. The
+    node heartbeats, reports and runs the actions its list allows
+    (apply_updates by default). leave and status know a bare node.
+  * A join without --bare on a server with no vault says so instead of
+    failing in the vault's client.
+  * The node's facts carry its role (database-server, application-server,
+    kernel) from first boot's record; the office labels the node with it.
+  * On a database server the report's units are the cluster, the engine's
+    listener and the node service: the idle vault and gateway are not
+    reported as down.
+
+ -- Edward Honour <ed@maludb.org>  Fri, 13 Nov 2026 05:20:00 +0000
+
 maluos-estate (0.7.1) resolute; urgency=medium
 
   * Phase 14 slice 1: the node's report carries a database part (a database

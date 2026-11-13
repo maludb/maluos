@@ -26,6 +26,30 @@ SECRET_OVERLAY = "estate-overlay-key"      # the WireGuard private key (slice 1b
 SECRET_INFERENCE = "estate-inference-key"  # the estate's inference credential (slice 3), beside the token; the gateway holds a `use` grant
 OFFICE_SECRET = "office-desk-token"        # the desk's token (maluos-desk), in the owner's compartment
 KINDS = ("server", "inference")
+# Phase 14 slice 4a (docs/phase14-watching-agents.md): a bare node, a server with no vault and no gateway (a database
+# server). Its token and its key are files of the node service's user, mode 0600, instead of vault entries.
+NODE_TOKEN_FILE = os.path.join(STATE_DIR, "node.token")
+NODE_KEY_FILE = os.path.join(STATE_DIR, "node.key")
+BARE_ACTIONS = ["apply_updates"]           # no agents on a bare node; reboot is off unless the node's owner allows it
+
+
+def is_bare(conf):
+    return bool((conf or {}).get("bare"))
+
+
+def role():
+    """What first boot made this host: database-server, application-server, kernel (it runs the Business OS kernel),
+    or None. The office labels the node with it (locations.node_role)."""
+    try:
+        with open(PROVISIONED) as fh:
+            p = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    r = str(p.get("role") or "").strip()
+    if r in ("database-server", "application-server"):
+        return r
+    c = (p.get("components") or {}).get("maludb-os-core") if isinstance(p.get("components"), dict) else None
+    return "kernel" if isinstance(c, dict) and c.get("domain") and not c.get("error") else None
 
 
 def utc():
@@ -96,6 +120,9 @@ def facts(app=None):
         f["machine_id"] = hashlib.sha256(open("/etc/machine-id").read().strip().encode()).hexdigest()[:32]
     except OSError:
         pass
+    r = role()
+    if r:
+        f["role"] = r
     return f
 
 
@@ -162,6 +189,9 @@ def token(conf):
     t = os.environ.get("MALUOS_ESTATE_TOKEN")
     if t:
         return t
+    if is_bare(conf):
+        with open(NODE_TOKEN_FILE) as fh:
+            return fh.read().strip()
     import sys
     sys.path.insert(0, "/usr/lib/maluos")
     from maluos_vault_client import Vault
@@ -318,7 +348,7 @@ def actions(conf_or_url, tok, action_id=None, timeout=15):
 
 def allowed_actions(conf):
     a = (conf.get("actions") or {}).get("allow")
-    return list(a) if isinstance(a, list) else list(DEFAULT_ACTIONS)
+    return list(a) if isinstance(a, list) else list(BARE_ACTIONS if is_bare(conf) else DEFAULT_ACTIONS)
 
 
 # -- Phase 13 slice 3: shared inference (docs/phase13-slice3-inference.md): the backends this member may use, the peers

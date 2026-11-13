@@ -1,3 +1,11 @@
+maluos-firstboot (0.1.20) resolute; urgency=medium
+
+  * role: database-server with enroll: {kind: estate, url, code} joins the
+    estate as a bare node (maluctl estate join --bare, maluos-estate 0.8.0;
+    docs/phase14-watching-agents.md, step 4a).
+
+ -- Edward Honour <ed@maludb.org>  Fri, 13 Nov 2026 05:20:00 +0000
+
 maluos-firstboot (0.1.19) resolute; urgency=medium
 
   * role: application-server (docs/phase14-application-servers.md): the

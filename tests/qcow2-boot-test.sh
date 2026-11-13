@@ -1087,7 +1087,7 @@ systemctl is-active --quiet maludb-os-actions-reload.path && [ "$(stat -c %U /va
 CODE=$(sudo -n -u www-data php /var/www/bin/mint_desk_code.php --email "$ADM" --kind server --name boot-app-1 --apps boottest_app 2>/dev/null | grep -oE '^ +[A-Z0-9]{4}-[A-Z0-9]{4}$' | tr -d ' ')
 NTOK=$(curl -s --max-time 30 -H 'Content-Type: application/json' -d "{\"code\":\"$CODE\",\"kind\":\"server\",\"name\":\"boot-app-1\",\"facts\":{\"hostname\":\"boot-app-1\"}}" http://127.0.0.1:8080/api/v1/estate/join | python3 -c "import json,sys; print(json.load(sys.stdin).get('token',''))" 2>/dev/null)
 [ -n "$CODE" ] && [ -n "$NTOK" ] && echo "  ok   a server code naming the application was minted and a node joined with it" || { echo "  FAIL the code or the join (code ${CODE:+minted}, token ${NTOK:+got})"; fail=1; }
-sudo -n install -d -m 700 /run/maluos; printf '%s\n' "$NTOK" | sudo -n tee /run/maluos/boot-app.token >/dev/null; sudo -n chmod 600 /run/maluos/boot-app.token
+printf '%s\n' "$NTOK" | sudo -n tee /run/boot-app.token >/dev/null; sudo -n chmod 600 /run/boot-app.token
 # the fixture: a manifest, a public and an internal vhost, a handler, a migration, an action registry, a skill
 F=/tmp/boottest_app; rm -rf $F; mkdir -p $F/html $F/deploy $F/db $F/mcp $F/skills/boottest-basics
 cat > $F/maludb-os.json <<'JSON'
@@ -1095,7 +1095,7 @@ cat > $F/maludb-os.json <<'JSON'
  "business_area": "Operations", "category": "other", "version": "0.0.1",
  "vhost": {"label": "boottest", "document_root": "html", "internal_port_env": "APP_INTERNAL_PORT"},
  "database": {"suffix": "boottest", "migrations": "db"},
- "env": {"required": ["APP_URL", "DB_HOST", "DB_NAME", "DB_USER", "DB_PASSWORD", "APP_INTERNAL_PORT", "ACTION_TOKEN_KEY", "OS_INTERNAL_URL"]},
+ "env": {"required": ["APP_URL", "DB_HOST", "DB_NAME", "DB_USER", "DB_PASSWORD", "APP_INTERNAL_PORT", "ACTION_TOKEN_KEY", "OS_INTERNAL_URL", "MALUDB_API_URL"]},
  "services": [], "endpoints": [], "actions": {"registry": "mcp/action_registry.json"}, "skills": ["skills/boottest-basics"],
  "sso": {"path": "/sso", "logout_path": "/sso/logout"}, "agents": []}
 JSON
@@ -1123,7 +1123,7 @@ echo 'CREATE TABLE IF NOT EXISTS boottest_note (id serial PRIMARY KEY, note text
 echo '{"actions": {"boottest_ping": {"built": true, "endpoint": "/ping.php", "method": "POST", "params": []}}}' > $F/mcp/action_registry.json
 printf -- '---\nname: boottest-basics\ndescription: The boot test fixture skill.\n---\n\n# Boot test basics\n\nNothing to know.\n' > $F/skills/boottest-basics/SKILL.md
 MCPSTART=$(systemctl show -p ActiveEnterTimestampMonotonic --value maludb-os-actions-mcp)
-( cd /var/www && sudo -n env HOME=/root php bin/app_install.php apply $F --kernel $DOOR --node-token-file /run/maluos/boot-app.token --address $LANIP ) > /tmp/as-install.log 2>&1; rc=$?
+( cd /var/www && sudo -n env HOME=/root php bin/app_install.php apply $F --kernel $DOOR --node-token-file /run/boot-app.token --address $LANIP ) > /tmp/as-install.log 2>&1; rc=$?
 [ $rc = 0 ] && grep -q "the kernel registered Boot test application" /tmp/as-install.log && grep -q "^---- the kernel's half" /tmp/as-install.log \
   && echo "  ok   the installer's host half ran here and the kernel's half through the door: registered" || { echo "  FAIL the two-halves install (rc=$rc): $(grep -E 'STOP|Fatal|FAIL|refused|Stopped' /tmp/as-install.log | head -4 | cut -c1-300)"; tail -25 /tmp/as-install.log | cut -c1-200; fail=1; }
 ! grep -q "$NTOK" /tmp/as-install.log && ! sudo -n grep -q "$(sudo -n sed -n 's/^ACTION_TOKEN_KEY=//p' /var/www/config/.env)" /tmp/as-install.log && echo "  ok   the install's output shows no token and no key" || { echo "  FAIL a secret in the install's output"; fail=1; }
@@ -1146,14 +1146,44 @@ ATOK=$(sudo -n sed -n 's/^OS_APPLICATION_TOKEN=//p' $AE)
 [ "$(sudo -n -u postgres psql -Atc "select count(*) from pg_database where datname like '%_boottest'")" = 1 ] && echo "  ok   the application's database was made by the host half" || { echo "  FAIL the application's database"; fail=1; }
 sudo -n maluctl app names --upstreams 2>/dev/null | grep -q "^boottest\.$bosdom	$LANIP\$" && sudo -n maluctl app names --upstreams 2>/dev/null | grep -q "^app\.$bosdom	kernel\$" \
   && echo "  ok   maluctl app names --upstreams: the application at its server, the kernel's names at the kernel" || { echo "  FAIL names --upstreams: $(sudo -n maluctl app names --upstreams 2>&1 | tr '\n' ' ' | cut -c1-300)"; fail=1; }
-out=$(cd /var/www && sudo -n env HOME=/root php bin/app_install.php apply $F --kernel $DOOR --node-token-file /run/maluos/boot-app.token --address $LANIP 2>&1); rc=$?
+out=$(cd /var/www && sudo -n env HOME=/root php bin/app_install.php apply $F --kernel $DOOR --node-token-file /run/boot-app.token --address $LANIP 2>&1); rc=$?
 [ $rc = 0 ] && [ "$(sudo -n -u postgres psql -Atd maludb_os -c "select count(*) from mcp_access_tokens t join applications a on a.id = t.application_id where a.app_key = 'boottest_app' and t.scope = 'application' and t.revoked_at is null" 2>/dev/null)" = 1 ] \
   && echo "  ok   a second run reconciles: still one application token" || { echo "  FAIL the second run (rc=$rc): $(echo "$out" | grep -E 'STOP|Fatal' | head -2 | cut -c1-200)"; fail=1; }
 sed -i 's/"catalog_key": "boottest_app"/"catalog_key": "boottest_other"/' $F/maludb-os.json
-out=$(cd /var/www && sudo -n env HOME=/root php bin/app_install.php apply $F --kernel $DOOR --node-token-file /run/maluos/boot-app.token --address $LANIP 2>&1); rc=$?
+out=$(cd /var/www && sudo -n env HOME=/root php bin/app_install.php apply $F --kernel $DOOR --node-token-file /run/boot-app.token --address $LANIP 2>&1); rc=$?
 [ $rc != 0 ] && echo "$out" | grep -q "join code does not name boottest_other" && ! sudo -n test -d /srv/apps/boottest_other \
   && echo "  ok   an application the join code did not name is refused before anything is installed" || { echo "  FAIL an unnamed application was not refused (rc=$rc)"; fail=1; }
-sudo -n rm -f /run/maluos/boot-app.token
+sudo -n rm -f /run/boot-app.token
+fi
+
+# --- Phase 14 slice 4a (docs/phase14-watching-agents.md): a server with no vault and no gateway (a database server)
+# joins the kernel's estate as a bare node. This VM stands in for it: scratch files beside the host's own (the
+# enrolment in /run, the state in its own directory, a first-boot record that says database-server), no vault named.
+if installed maluos-business-os && bos_on && installed maluos-estate && [ "${BOOT_TEST_BARE:-1}" = 1 ]; then
+echo "== a bare node: a server without a vault joins the estate (the VM standing in for a database server)"
+BADM=$(sudo -n python3 -c "import yaml; print(yaml.safe_load(open('/etc/maluos/firstboot.yaml'))['components']['maludb-os-core'].get('admin_email',''))" 2>/dev/null)
+BD=/var/lib/maluos/estate-bare; sudo -n install -d -o maluos-estate -g maluos-estate -m 700 $BD
+echo '{"role": "database-server", "components": {}, "database_server": {"port": 5432, "clients": ["192.0.2.20"], "tls": true}}' | sudo -n tee /run/bare-done >/dev/null
+BENV="MALUOS_ESTATE_CONF=/run/bare-estate.yaml MALUOS_ESTATE_STATE_DIR=$BD MALUOS_PROVISIONED=/run/bare-done MALUOS_VAULT_CONFIG=/run/no-vault.yaml MALUOS_ESTATE_NO_UNIT=1 MALUOS_VAULT_SOCKET=/run/no-vault.sock MALUOS_GATEWAY_SOCKET=/run/no-gateway.sock MALUOS_MEMORY_SOCKET=/run/no-memory.sock"
+BCODE=$(sudo -n -u www-data php /var/www/bin/mint_desk_code.php --email "$BADM" --kind server --name boot-db-1 2>/dev/null | grep -oE '^ +[A-Z0-9]{4}-[A-Z0-9]{4}$' | tr -d ' ')
+out=$(sudo -n env $BENV maluctl estate join http://127.0.0.1:8080 --code "$BCODE" --name boot-db-1 2>&1); rc=$?
+[ $rc != 0 ] && echo "$out" | grep -q 'has no vault.*--bare' && echo "  ok   a join without --bare on a server with no vault is refused with the reason (the code is not used)" || { echo "  FAIL the plain join without a vault (rc=$rc): $(echo "$out" | tail -2 | cut -c1-200)"; fail=1; }
+out=$(sudo -n env $BENV maluctl estate join http://127.0.0.1:8080 --code "$BCODE" --bare --name boot-db-1 2>&1); rc=$?
+BTOK=$(sudo -n cat $BD/node.token 2>/dev/null)
+[ $rc = 0 ] && [ -n "$BTOK" ] && echo "$out" | grep -q 'a bare node: no vault, no agents' && ! echo "$out" | grep -qF "$BTOK" \
+  && echo "  ok   the bare join: a node of the kernel's estate, the token not shown" || { echo "  FAIL the bare join (rc=$rc): $(echo "$out" | tail -3 | cut -c1-240)"; fail=1; }
+[ "$(sudo -n stat -c '%a %U' $BD/node.token)" = '600 maluos-estate' ] && [ "$(sudo -n stat -c '%a %U' $BD/node.key)" = '600 maluos-estate' ] && ! sudo -n grep -qF "$BTOK" /run/bare-estate.yaml \
+  && echo "  ok   the token and the key are 0600 files of the node service's user; the enrolment file carries no token" || { echo "  FAIL the bare node's files: $(sudo -n stat -c '%a %U %n' $BD/node.* 2>&1 | tr '\n' ' ')"; fail=1; }
+out=$(sudo -n -u maluos-estate env $BENV maluctl estate heartbeat --report 2>&1); rc=$?
+BROW=$(sudo -n -u postgres psql -Atd maludb_os -c "select node_role || '|' || presence || '|' || (report is not null) || '|' || coalesce((select string_agg(u->>'unit', ',') from jsonb_array_elements(report->'units') u), '') || '|' || coalesce(report->'database'->>'role', '') || '|' || (select count(*) from estate_alerts a where a.location_id = l.id and a.cleared_at is null) from locations l where name = 'boot-db-1' and status = 'active'")
+[ $rc = 0 ] && echo "$BROW" | grep -q '^database-server|online|true|' && ! echo "$BROW" | grep -q 'vault\|gateway' && echo "$BROW" | grep -q '|server|0$' \
+  && echo "  ok   its heartbeat as the node service's user: labelled database-server, the report without the vault and the gateway, the database part, no alert" || { echo "  FAIL the bare node's report (rc=$rc): $BROW | $(echo "$out" | tail -2 | cut -c1-200)"; fail=1; }
+sudo -n env $BENV maluctl estate status 2>&1 | grep -q 'a bare node: no vault' && echo "  ok   maluctl estate status says it is a bare node" || { echo "  FAIL bare status: $(sudo -n env $BENV maluctl estate status 2>&1 | tail -3 | cut -c1-200)"; fail=1; }
+out=$(sudo -n env $BENV maluctl estate leave 2>&1); rc=$?
+[ $rc = 0 ] && echo "$out" | grep -q 'told; node retired' && ! sudo -n test -e $BD/node.token && ! sudo -n test -e /run/bare-estate.yaml \
+  && [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -H "Authorization: Bearer $BTOK" http://127.0.0.1:8080/api/v1/estate/me)" = 410 ] \
+  && echo "  ok   leave: the node retired at the kernel, the files removed, the old token answers 410" || { echo "  FAIL the bare leave (rc=$rc): $(echo "$out" | tail -2 | cut -c1-200)"; fail=1; }
+sudo -n rm -rf $BD /run/bare-done
 fi
 
 p14_on() { sudo -n python3 -c "import yaml,sys; c=yaml.safe_load(open('/etc/maluos/firstboot.yaml')) or {}; sys.exit(0 if (c.get('boot_test') or {}).get('database_server') else 1)" 2>/dev/null; }
@@ -1239,8 +1269,8 @@ echo on-the-database-server | sudo -n maluctl secret add system/p14-proof --kind
   && echo "  ok   the office's own cluster stopped: the vault stores and returns a secret" || { echo "  FAIL vault without the local cluster: $(sudo -n maluctl secret show system/p14-proof 2>&1 | tail -1 | cut -c1-200)"; fail=1; }
 maluctl gateway status 2>/dev/null | grep -qi 'gateway\|backend' && maluctl memory whoami 2>/dev/null | grep -q 'principal: user:maluos' \
   && echo "  ok   the office's own cluster stopped: the gateway and the memory face answer" || { echo "  FAIL gateway or memory face without the local cluster: $(maluctl gateway status 2>&1 | tail -1 | cut -c1-160) | $(maluctl memory whoami 2>&1 | tail -2 | tr '\n' ' ' | cut -c1-300)"; sudo -n journalctl -u maluos-memory --no-pager -n 12 | cut -c1-260; fail=1; }
-tok=$(sudo -n cat /var/lib/maluos/secrets/api.token 2>/dev/null); curl -fsS --max-time 20 -H "Authorization: Bearer $tok" http://127.0.0.1:8000/v1/whoami >/dev/null 2>&1 \
-  && echo "  ok   the office's own cluster stopped: the MaluDB API answers for the tenant" || { echo "  FAIL MaluDB API without the local cluster: $(curl -s --max-time 20 -H "Authorization: Bearer $tok" http://127.0.0.1:8000/v1/whoami | cut -c1-200)"; fail=1; }
+tok=$(sudo -n cat /var/lib/maluos/secrets/api.token 2>/dev/null); t0=$(date +%s); api_ok=1; for i in 1 2 3 4 5 6; do curl -fsS --max-time 40 -H "Authorization: Bearer $tok" http://127.0.0.1:8000/v1/whoami >/dev/null 2>/tmp/p14-api.err && { api_ok=0; break; }; sleep 5; done; echo "  (the MaluDB API's first answer against the database server: try $i, $(( $(date +%s) - t0 )) s)"
+[ $api_ok = 0 ] && echo "  ok   the office's own cluster stopped: the MaluDB API answers for the tenant" || { echo "  FAIL MaluDB API without the local cluster: $(cut -c1-200 /tmp/p14-api.err) | $(curl -s --max-time 40 -o /dev/null -w '%{http_code} %{time_total}s' -H "Authorization: Bearer $tok" http://127.0.0.1:8000/v1/whoami) | health $(curl -s --max-time 10 -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/health)"; sudo -n journalctl -u maludb-api --no-pager -n 25 | cut -c1-260; fail=1; }
 [ "$(sudo -n runuser -u www-data -- php -r 'require "/var/www/app/bootstrap.php"; echo db()->query("SELECT current_user || chr(58) || (SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid())")->fetchColumn();' 2>/dev/null)" = 'app_rw:true' ] \
   && echo "  ok   the office's own cluster stopped: the kernel reads its database as app_rw over TLS" || { echo "  FAIL kernel without the local cluster: $(sudo -n runuser -u www-data -- php -r 'require "/var/www/app/bootstrap.php"; echo db()->query("SELECT current_user")->fetchColumn();' 2>&1 | tail -1 | cut -c1-200)"; fail=1; }
 sudo -n maluctl estate report 2>/dev/null | grep -q "database: on localhost:$DP (verify-full)" && echo "  ok   the node's report says where its data is" || echo "  warn no database line in the estate report (the node is not enrolled on this boot)"

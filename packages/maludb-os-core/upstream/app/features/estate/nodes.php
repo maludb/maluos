@@ -38,6 +38,17 @@ function node_facts(array $body): array
 }
 
 /**
+ * What the node says its host is (MaluOS first boot's role): the office's label for the node, locations.node_role
+ * (db/194). A server that says nothing keeps what it had. MaluOS Phase 14 slice 4a: the watching agents choose a
+ * node's checks by it.
+ */
+function node_role_fact(array $body): ?string
+{
+    $r = $body['role'] ?? (is_array($body['facts'] ?? null) ? ($body['facts']['role'] ?? null) : null);
+    return is_string($r) && in_array($r, ['kernel', 'application-server', 'database-server'], true) ? $r : null;
+}
+
+/**
  * Make the node for the code and mint its token, in one transaction. The code's kind is the node's unless the body
  * names the other node kind, which is a code minted for another kind (the caller answers 403). A previous active
  * node with the same machine_id is retired first. @return array{node:array,token:string}
@@ -86,6 +97,9 @@ function node_join(PDO $pdo, array $code, array $body, ?string $principal): arra
     $pdo->prepare('UPDATE locations SET enrollment_token_id = :t WHERE id = :id')->execute(['t' => $tokenId, 'id' => $nodeId]);
     // db/194: the applications the code named are the node's allowance as an application server
     $pdo->prepare('UPDATE locations SET node_apps = :a WHERE id = :id')->execute(['a' => (string) ($code['apps'] ?? '{}'), 'id' => $nodeId]);
+    if (($role = node_role_fact($body)) !== null) {
+        $pdo->prepare('UPDATE locations SET node_role = :r WHERE id = :id')->execute(['r' => $role, 'id' => $nodeId]);
+    }
     $pdo->prepare('UPDATE desk_enrollment_codes SET used_at = now(), location_id = :loc WHERE id = :id')->execute(['loc' => $nodeId, 'id' => $code['id']]);
     return ['node' => node_row($pdo, $nodeId), 'token' => $raw];
 }
@@ -131,6 +145,10 @@ function node_heartbeat(PDO $pdo, array $node, string $presence, array $body): v
     foreach ($facts as $col => $v) {
         $sets[] = "{$col} = :{$col}";
         $params[$col] = $v;
+    }
+    if (($role = node_role_fact($body)) !== null) {
+        $sets[] = 'node_role = :node_role';
+        $params['node_role'] = $role;
     }
     $report = is_array($body['report'] ?? null) ? $body['report'] : null;
     if ($report !== null) {
@@ -374,6 +392,7 @@ function present_node_row(array $n, array $openAlerts, bool $full = false): arra
     $row = [
         'id' => (int) $n['id'], 'kind' => (string) $n['kind'], 'name' => (string) $n['name'], 'hostname' => $n['hostname'] ?? null,
         'presence' => (string) $n['presence'], 'last_seen_at' => json_ts($n['last_seen_at'] ?? null), 'last_report_at' => json_ts($n['last_report_at'] ?? null),
+        'role' => $n['node_role'] ?? null,      // db/194: kernel, application-server, database-server, or null
         'health' => node_health($n, $openAlerts), 'summary' => node_summary($n, $rep),
         'units' => ['up' => count(array_filter($units, static fn ($u) => ($u['active'] ?? null) === 'active')), 'down' => count(array_filter($units, static fn ($u) => ($u['active'] ?? null) !== 'active'))],
         'agents' => ['count' => count($agents), 'running' => count(array_filter($agents, static fn ($a) => ($a['active'] ?? null) === 'active')), 'failed' => count(array_filter($agents, static fn ($a) => ($a['active'] ?? null) === 'failed'))],

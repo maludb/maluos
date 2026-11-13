@@ -764,7 +764,9 @@ def run_enroll(cfg):
         argv = ["maluctl", "estate", "join", url, "--code", code, "--kind", "server"]
         if name:
             argv += ["--name", name]
-        if not e.get("overlay", not is_application_server(cfg)):
+        if is_database_server(cfg):
+            argv += ["--bare"]            # no vault and no gateway here (docs/phase14-watching-agents.md, step 4a)
+        elif not e.get("overlay", not is_application_server(cfg)):
             argv += ["--no-overlay"]
         log(f"enroll: estate {url} as {name or 'this host'}")
         try:

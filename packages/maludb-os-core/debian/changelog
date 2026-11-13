@@ -1,3 +1,14 @@
+maludb-os-core (2026.11.12maluos3) resolute; urgency=medium
+
+  * Phase 14 slice 4a (docs/phase14-watching-agents.md): a node that names
+    its role (kernel, application-server, database-server) at its join or
+    in a heartbeat is labelled with it (locations.node_role); the nodes
+    answer carries role. Vendored from the kernel's working tree on
+    phase14/application-servers (app/features/estate/nodes.php and its
+    proof); to be re-vendored at the commit.
+
+ -- Edward Honour <ed@maludb.org>  Fri, 13 Nov 2026 05:30:00 +0000
+
 maludb-os-core (2026.11.12maluos2) resolute; urgency=medium
 
   * Application servers, the kernel half. Vendored at the kernel's branch

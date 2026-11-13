@@ -1,0 +1,88 @@
+#!/bin/bash
+# Phase 14 slice 4a (docs/phase14-watching-agents.md): a server with no vault and no gateway (a database server)
+# joins the estate as a bare node. Against the mock office, from the source tree, with scratch files; needs sudo
+# (maluctl estate join and leave are root's). Nothing of the host's own enrolment is touched.
+#   tests/estate-bare-local-test.sh
+set -u
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+D=$(mktemp -d /tmp/estate-bare.XXXXXX); PORT=${PORT:-18093}; fail=0
+LIB=$D/lib; mkdir -p "$LIB/maluctl.d" "$D/state" "$D/etc"
+cp -r "$ROOT/packages/maluos-estate/lib/maluos_estate" "$LIB/"
+cp "$ROOT/packages/maluos-estate/lib/maluctl.d/estate.py" "$LIB/maluctl.d/"
+echo '{"role": "database-server", "components": {}, "database_server": {"port": 5432, "clients": ["192.0.2.20"], "tls": true}}' > "$D/done"
+ME=$(id -un)
+ENVV=(MALUOS_ESTATE_CONF=$D/etc/estate.yaml MALUOS_ESTATE_STATE_DIR=$D/state MALUOS_ESTATE_USER=$ME MALUOS_ESTATE_NO_UNIT=1
+      MALUOS_PROVISIONED=$D/done MALUOS_VAULT_CONFIG=$D/etc/vault.yaml MALUOS_GATEWAY_CONFIG=$D/etc/gateway.yaml
+      MALUOS_VAULT_SOCKET=$D/no-vault.sock MALUOS_GATEWAY_SOCKET=$D/no-gateway.sock MALUOS_MEMORY_SOCKET=$D/no-memory.sock PYTHONPATH=$LIB PYTHONDONTWRITEBYTECODE=1)
+estate() { env "${ENVV[@]}" python3 -c 'import sys, runpy; sys.argv = ["maluctl-estate"] + sys.argv[1:]; m = runpy.run_path(sys.argv.pop(1)); sys.exit(m["main"](sys.argv[1:]))' "$LIB/maluctl.d/estate.py" "$@"; }
+sestate() { sudo -n env "${ENVV[@]}" python3 -c 'import sys, runpy; sys.argv = ["maluctl-estate"] + sys.argv[1:]; m = runpy.run_path(sys.argv.pop(1)); sys.exit(m["main"](sys.argv[1:]))' "$LIB/maluctl.d/estate.py" "$@"; }
+ok() { echo "  ok   $1"; }; bad() { echo "  FAIL $1"; fail=1; }
+cleanup() { [ -n "${MOCK:-}" ] && kill "$MOCK" 2>/dev/null; [ -n "${DAEMON:-}" ] && kill "$DAEMON" 2>/dev/null; sudo -n rm -rf "$D"; }
+trap cleanup EXIT
+
+PYTHONPATH=$LIB PYTHONDONTWRITEBYTECODE=1 python3 -m maluos_estate.mock_office --port "$PORT" --node-code bare-code --node-code full-code --name "Mock Estate" --node-heartbeat-s 5 --report-s 5 >"$D/mock.log" 2>&1 & MOCK=$!
+for i in $(seq 1 30); do curl -fsS "http://127.0.0.1:$PORT/api/v1/health" >/dev/null 2>&1 && break; sleep 0.3; done
+URL=http://127.0.0.1:$PORT
+
+out=$(sestate join "$URL" --code full-code --name plain 2>&1); rc=$?
+[ $rc != 0 ] && echo "$out" | grep -q 'has no vault.*--bare' && [ ! -e "$D/etc/estate.yaml" ] && ok "a server without a vault is told to join with --bare, and nothing is written" || bad "join without a vault: rc=$rc $out"
+out=$(sestate join "$URL" --code bare-code --bare --kind inference 2>&1); rc=$?
+[ $rc != 0 ] && echo "$out" | grep -q 'no --kind but server' && ok "--bare takes no other kind" || bad "--bare --kind inference: rc=$rc $out"
+
+out=$(sestate join "$URL" --code bare-code --bare --name db-1 2>&1); rc=$?
+TOK=$(sudo -n cat "$D/state/node.token" 2>/dev/null)
+[ $rc = 0 ] && echo "$out" | grep -q "a bare node: no vault, no agents" && [ -n "$TOK" ] && ok "joined bare" || bad "bare join: rc=$rc $out"
+! echo "$out" | grep -qF "$TOK" && ok "the join's output does not show the token" || bad "the token is in the join's output"
+[ "$(stat -c '%a %U' "$D/state/node.token")" = "600 $ME" ] && [ "$(stat -c '%a %U' "$D/state/node.key")" = "600 $ME" ] && [ "$(stat -c '%a' "$D/state")" = 700 ] \
+  && ok "the token and the key are 0600 files of the node service's user in a 0700 directory" || bad "file modes: $(stat -c '%a %U %n' "$D/state" "$D/state"/node.* 2>&1 | tr '\n' ' ')"
+python3 - "$D/etc/estate.yaml" "$TOK" <<'PY' && ok "estate.yaml: bare, no principal, no vault secrets, no overlay, actions apply_updates only, no token in it" || bad "estate.yaml"
+import json, sys
+raw = open(sys.argv[1]).read()
+try:
+    c = json.loads(raw)
+except ValueError:
+    import yaml; c = yaml.safe_load(raw)
+assert c.get("bare") is True and c.get("principal") is None and not c.get("secrets") and not c.get("overlay"), c
+assert c["actions"]["allow"] == ["apply_updates"] and c["node"]["name"] == "db-1", c
+assert sys.argv[2] not in raw
+PY
+estate status 2>&1 | grep -q 'a bare node: no vault' && ok "status says it is a bare node" || bad "status: $(estate status 2>&1 | tail -3)"
+
+env "${ENVV[@]}" python3 -m maluos_estate >"$D/daemon.log" 2>&1 & DAEMON=$!
+for i in $(seq 1 60); do curl -fsS "$URL/mock/nodes" 2>/dev/null | grep -q '"last_report_at": "2' && break; sleep 0.5; done
+NID=$(curl -fsS "$URL/mock/nodes" | python3 -c 'import json,sys; print([n["id"] for n in json.load(sys.stdin)["nodes"] if n["name"] == "db-1"][0])')
+curl -fsS -H "Authorization: Bearer $TOK" "$URL/api/v1/estate/nodes/$NID" > "$D/nodes.json"
+python3 - "$D/nodes.json" <<'PY' && ok "the node is online with a report: the database server's units only, the database part, no vault or gateway part" || bad "the report: $(head -c 600 "$D/nodes.json")"
+import json, sys
+d = json.load(open(sys.argv[1]))
+def find(x):
+    if isinstance(x, dict):
+        if x.get("name") == "db-1" and "report" in x:
+            return x
+        x = list(x.values())
+    for y in x if isinstance(x, list) else []:
+        r = find(y)
+        if r:
+            return r
+n = find(d)
+assert n, list(d)
+assert n.get("presence") == "online", n.get("presence")
+rep = n.get("report") or {}
+units = [u["unit"] for u in rep.get("units") or []]
+assert not any("vault" in u or "gateway" in u for u in units), units
+assert (rep.get("database") or {}).get("role") == "server", rep.get("database")
+assert not rep.get("vault") and not rep.get("gateway"), (rep.get("vault"), rep.get("gateway"))
+PY
+grep -q '"role": "database-server"' "$D/mock.log" "$D/nodes.json" 2>/dev/null || env "${ENVV[@]}" python3 -c 'from maluos_estate import client as C; assert C.facts()["role"] == "database-server"' \
+  && ok "the node's facts carry its role (database-server)" || bad "the role fact"
+kill "$DAEMON" 2>/dev/null; wait "$DAEMON" 2>/dev/null; DAEMON=
+grep -q 'said offline' "$D/daemon.log" && ok "the daemon said offline when stopped" || bad "daemon: $(tail -3 "$D/daemon.log")"
+! grep -qF "$TOK" "$D/daemon.log" && ok "the daemon's log does not show the token" || bad "the token is in the daemon's log"
+
+out=$(sestate leave 2>&1); rc=$?
+[ $rc = 0 ] && echo "$out" | grep -q 'told; node retired' && [ ! -e "$D/state/node.token" ] && [ ! -e "$D/state/node.key" ] && [ ! -e "$D/etc/estate.yaml" ] \
+  && ok "leave: the office told, the token, the key and the enrolment removed" || bad "leave: rc=$rc $out"
+[ "$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOK" "$URL/api/v1/estate/me")" != 200 ] && ok "the old token is refused" || bad "the old token still works"
+
+[ $fail = 0 ] && echo "PASS: a bare node joins, reports and leaves" || echo "FAIL"
+exit $fail
