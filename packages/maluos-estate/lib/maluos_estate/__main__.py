@@ -152,6 +152,17 @@ class Inbox:
             cmd = ["systemctl", verb, f"maluos-agent@{agent}.service"]
         elif action == "apply_updates":
             cmd = ["systemctl", "start", "maluos-estate-updates.service"]
+        elif action == "restart_unit":
+            # slice 4d: only a unit of this node's own list, through a root helper that checks the list again
+            import re
+            unit = str((item.get("args") or {}).get("unit") or "")
+            if not re.fullmatch(C.UNIT_RE, unit) or unit not in C.allowed_units(self.conf):
+                self.log(f"action {item['id']} restart_unit {unit[:60]!r}: not a unit this node lets the office restart")
+                self.post(item["id"], {"refused": "not_allowed", "result": {"ok": False, "error": f"{unit[:120]} is not in this node's actions.units"}}); return
+            esc = subprocess.run(["systemd-escape", "--", unit], capture_output=True, text=True, timeout=10).stdout.strip()
+            cmd = ["systemctl", "start", f"maluos-estate-restart@{esc}.service"]
+        elif action in ("postgres_cancel", "postgres_terminate"):
+            self.post(item["id"], pg_signal(action, (item.get("args") or {}).get("pid"), self.log, item["id"])); return
         elif action == "reboot":
             self.post(item["id"], {"result": {"ok": True, "output": "rebooting"}})
             subprocess.run(["systemctl", "reboot"], capture_output=True, text=True, timeout=30); return
@@ -161,6 +172,26 @@ class Inbox:
         out = (r.stdout or "").strip()[-2000:]; err = (r.stderr or "").strip()[-400:]
         self.log(f"action {item['id']} {action}{' ' + agent if agent else ''}: {'ok' if r.returncode == 0 else 'failed'} {err}")
         self.post(item["id"], {"result": {"ok": r.returncode == 0, "output": out or f"{' '.join(cmd)}: exit {r.returncode}", "error": err or None}})
+
+
+def pg_signal(action, pid, log, item_id):
+    """postgres_cancel / postgres_terminate (slice 4d): one client backend of this host's cluster, by pid, as the
+    node service's own role (pg_signal_backend through maluos_monitor: it cannot touch a superuser's session). The
+    pid is an integer or nothing is run; the statement is fixed. Returns the inbox result."""
+    from maluos_estate import collectors as K
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid < 2:
+        return {"refused": "invalid", "result": {"ok": False, "error": "pid must be a backend's process id"}}
+    if not K.pg_applies():
+        return {"refused": "not_applicable", "result": {"ok": False, "error": "this node runs no cluster of its own for others"}}
+    fn = "pg_cancel_backend" if action == "postgres_cancel" else "pg_terminate_backend"
+    try:
+        out = K._psql(f"SELECT {fn}(pid) FROM pg_stat_activity WHERE pid = {int(pid)} AND backend_type = 'client backend' AND pid <> pg_backend_pid()")
+    except Exception as e:
+        log(f"action {item_id} {action} {pid}: failed: {str(e)[:160]}")
+        return {"result": {"ok": False, "error": str(e)[:300]}}
+    ok = out.strip() == "t"
+    log(f"action {item_id} {action} {pid}: {'ok' if ok else 'no such client backend' if not out.strip() else 'not signalled'}")
+    return {"result": {"ok": ok, "output": f"{fn}({pid}): {out.strip() or 'no such client backend'}", "error": None if ok else (f"no client backend with pid {pid}" if not out.strip() else f"{fn} answered false")}}
 
 
 def log(msg):

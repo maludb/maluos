@@ -1,3 +1,13 @@
+maluos-installer (0.3.8) resolute; urgency=medium
+
+  * The plan takes firstboot.role application-server,
+    firstboot.application_server {kernel, apps, address} and
+    firstboot.database_server.suffix, with their checks (no kernel on an
+    application server; applications need the door and an estate
+    enrolment), and writes them into firstboot.yaml.
+
+ -- Edward Honour <ed@maludb.org>  Thu, 12 Nov 2026 18:00:00 +0000
+
 maluos-installer (0.3.7) resolute; urgency=medium
 
   * Phase 14 slice 1: firstboot.role (database-server) and

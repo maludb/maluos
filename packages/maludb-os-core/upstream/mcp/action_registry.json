@@ -1,6 +1,6 @@
 {
     "generated_from": "docs/business-os-action-manifest.md",
-    "generated_at": "2026-09-29T15:12:42+00:00",
+    "generated_at": "2026-11-13T06:13:02+00:00",
     "screens": {
         "dashboard": {
             "screen": "dashboard",
@@ -3138,6 +3138,55 @@
             "approval": null,
             "log_event": "location.delete",
             "who": "super",
+            "built": true
+        },
+        "estate_node_action": {
+            "action": "estate_node_action",
+            "section": "Estate: buildings, offices & desks (and the task queue)",
+            "endpoint": "/estate/node-action.php",
+            "params": [
+                {
+                    "name": "location",
+                    "required": true,
+                    "repeated": false,
+                    "hint": "a server or inference node"
+                },
+                {
+                    "name": "action",
+                    "required": true,
+                    "repeated": false,
+                    "hint": "restart_unit / postgres_cancel / postgres_terminate / apply_updates / reboot / restart_agent / start_agent / stop_agent"
+                },
+                {
+                    "name": "reason",
+                    "required": true,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "unit",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "pid",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                },
+                {
+                    "name": "agent",
+                    "required": false,
+                    "repeated": false,
+                    "hint": ""
+                }
+            ],
+            "undo": null,
+            "confirm": false,
+            "approval": null,
+            "log_event": "estate.node_action",
+            "who": "super, IT agents",
             "built": true
         },
         "application_save": {

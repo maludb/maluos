@@ -57,11 +57,19 @@ if (!in_array($mode, ['plan', 'apply'], true) || $source === '') {
         . "       [--tenant <db prefix>] [--ref <tag>] [--hire-agents] [--grant-standing-departments] [--no-restart] [--rotate-db-passwords]\n"
         . "       [--proxy-address <addr>]  (https behind a proxy: the name points at the proxy, not loopback)\n"
         . "       [--db-host <host> --db-port <port> --db-admin <role> --db-passfile <file> [--db-sslmode <mode>] [--db-ca <file>]]\n"
-        . "                                 (the database on another server, as its admin role)\n");
+        . "                                 (the database on another server, as its admin role)\n"
+        . "       [--kernel <door URL> --node-token-file <file> [--address <this server's address>]]\n"
+        . "                                 (an application server: the kernel is on another server, reached at its applications' door)\n");
     exit(1);
 }
 $APPLY = $mode === 'apply';
-if ($APPLY && posix_geteuid() !== 0) {
+// MaluOS Phase 14 slice 3 (db/194, app/features/applications/remote_install.php): an application on a server of its own.
+//   host   --kernel <the applications' door, http://kernel:8081> --node-token-file <file>: this server does steps 1 to 7 and
+//          asks the kernel for the rest (prepare, register, job); it never opens the kernel's database
+//   kernel --half kernel --host-report <file> --result <file> --node-id <n>: the kernel, for a registration it received, does
+//          steps 8 to 16 on the bundle (the source directory), as the web user
+$HALF = isset($opts['kernel']) && is_string($opts['kernel']) ? 'host' : ((string) ($opts['half'] ?? '') === 'kernel' ? 'kernel' : 'both');
+if ($APPLY && $HALF !== 'kernel' && posix_geteuid() !== 0) {
     fwrite(STDERR, "apply writes /etc, /srv/apps and the database roles — run it as root: sudo php bin/app_install.php apply …\n");
     exit(1);
 }
@@ -225,8 +233,29 @@ function render_template(string $text, array $vars): array
 }
 
 // ---- 0. the kernel, the super-admin, the manifest ---------------------------------------------------------------
-$pdo = db();
-$kernelEnv = env_file_read($KERNEL . '/config/.env');
+$REMOTE = null;      // host half: the door, the node token, what prepare answered
+$HOSTREPORT = [];    // kernel half: what the host half reported
+if ($HALF === 'host') {
+    require_once $KERNEL . '/app/features/applications/remote_client.php';
+    $tokenFile = (string) ($opts['node-token-file'] ?? '');
+    if ($tokenFile === '' || !is_readable($tokenFile)) { stop('kernel', '--kernel needs --node-token-file <file>: this server\'s node token (maluctl estate join).'); }
+    $REMOTE = ['door' => rtrim((string) $opts['kernel'], '/'), 'token' => trim((string) file_get_contents($tokenFile))];
+    if (preg_match('#^https?://[A-Za-z0-9.:\[\]-]+$#', $REMOTE['door']) !== 1) { stop('kernel', '--kernel is the applications\' door of the kernel server, like http://kernel.example.lan:8081.'); }
+    [$code, $prep] = remote_call($REMOTE, 'POST', '/api/v1/estate/apps/prepare.php', []);
+    if ($code !== 200) { stop('kernel', 'the kernel\'s door did not prepare this install (HTTP ' . $code . '): ' . (string) ($prep['error']['message'] ?? $prep['raw'] ?? 'no answer')); }
+    $REMOTE['prepare'] = $prep;
+    $pdo = null;
+    $kernelEnv = (array) ($prep['env'] ?? []);
+    $kernelEnv['MALUDB_API_URL'] = $REMOTE['door'] . '/maludb';
+    say('kernel', 'done', 'the kernel at ' . $REMOTE['door'] . ' prepared the install for node ' . (string) ($prep['node']['name'] ?? '?') . ' (' . implode(', ', (array) ($prep['apps'] ?? [])) . ')');
+} else {
+    $pdo = db();
+    $kernelEnv = env_file_read($KERNEL . '/config/.env');
+}
+if ($HALF === 'kernel') {
+    $HOSTREPORT = json_decode((string) @file_get_contents((string) ($opts['host-report'] ?? '')), true) ?: [];
+    if (empty($HOSTREPORT['base_url']) || (int) ($opts['node-id'] ?? 0) <= 0) { stop('kernel', '--half kernel needs --host-report <file> and --node-id <n>.'); }
+}
 // The database server (MaluOS Phase 14): the options, else what MaluOS wrote into the kernel's config/.env.
 $optStr = static fn (string $k): string => isset($opts[$k]) && is_string($opts[$k]) ? trim($opts[$k]) : '';
 $dbHost = $optStr('db-host') !== '' ? $optStr('db-host') : (string) ($kernelEnv['DB_HOST'] ?? '');
@@ -248,7 +277,9 @@ if (!$dbLocal && $dbAdmin !== '' && $dbPassfile !== '') {
     say('database-server', 'done', "{$DBT['host']}:{$DBT['port']} as {$DBT['admin']}" . ($DBT['sslmode'] !== '' ? " ({$DBT['sslmode']})" : '') . ' — the roles and the database are made there');
 }
 $by = null;
-if (isset($opts['by']) && is_string($opts['by'])) {
+if ($HALF === 'host') {
+    $by = ['id' => 0, 'email' => (string) ($REMOTE['prepare']['by'] ?? ''), 'business_role' => 'super_admin', 'role' => 'organizer'];
+} elseif (isset($opts['by']) && is_string($opts['by'])) {
     $by = find_member_by_email($pdo, normalize_email($opts['by']));
 } else {
     $by = $pdo->query("SELECT * FROM members WHERE business_role = 'super_admin' AND member_kind = 'human' AND status = 'active' ORDER BY id LIMIT 1")->fetch() ?: null;
@@ -257,17 +288,20 @@ if ($by === null || ($by['business_role'] ?? '') !== 'super_admin') {
     stop('super-admin', 'the install is recorded under a super-admin: --by <email>.');
 }
 $byId = (int) $by['id'];
-$_SESSION['member_id'] = $byId;
-$_SESSION['member_role'] = $by['role'] ?? 'organizer';
-db_apply_context($pdo);
+if ($pdo !== null) {
+    $_SESSION['member_id'] = $byId;
+    $_SESSION['member_role'] = $by['role'] ?? 'organizer';
+    db_apply_context($pdo);
+}
 
 $domain = (string) ($opts['domain'] ?? '');
+if ($domain === '' && $HALF === 'host') { $domain = (string) ($REMOTE['prepare']['domain'] ?? ''); }
 if ($domain === '') {
     $host = (string) ($kernelEnv['APP_HOST'] ?? $kernelEnv['OS_HOST'] ?? '');
     $domain = $host !== '' ? preg_replace('/^[^.]+\./', '', $host) : '';
 }
 if ($domain === '') { stop('domain', 'no business domain: --domain <domain> (APP_HOST is not set in the kernel\'s config/.env).'); }
-$scheme = (string) ($opts['scheme'] ?? 'http');
+$scheme = (string) ($opts['scheme'] ?? ($HALF === 'host' ? ($REMOTE['prepare']['scheme'] ?? 'http') : 'http'));
 // The proxy's address as this host sees it (https behind a reverse proxy): a name that must be written into /etc/hosts
 // goes to it, never to loopback, where nothing serves https; the sign-on proof dials it too.
 $proxyAddress = isset($opts['proxy-address']) && is_string($opts['proxy-address']) && preg_match('/^[A-Za-z0-9.:-]{1,253}$/', trim($opts['proxy-address'])) === 1 ? trim($opts['proxy-address']) : null;
@@ -297,7 +331,10 @@ $name = (string) ($m['name'] ?? ucfirst($key));
 $label = (string) ($m['vhost']['label'] ?? $key);
 $fqdn = $label . '.' . $domain;
 $appUrl = $scheme . '://' . $fqdn;
-$A = '/srv/apps/' . $key;
+$A = $HALF === 'kernel' ? $srcDir : '/srv/apps/' . $key;      // kernel half: the bundle is all there is of the application here
+if ($HALF === 'host' && !in_array($key, (array) ($REMOTE['prepare']['apps'] ?? []), true)) {
+    stop('kernel', "this server's join code does not name {$key}: it may install " . (implode(', ', (array) ($REMOTE['prepare']['apps'] ?? [])) ?: 'nothing') . '.');
+}
 $dbName = $tenant . '_' . (string) ($m['database']['suffix'] ?? $key);
 $roles = (array) ($m['database']['roles'] ?? ['rw' => $key . '_rw', 'records_ro' => $key . '_records_ro', 'activity_ro' => $key . '_activity_ro']);
 $portEnvs = ['APP_INTERNAL_PORT' => (string) ($m['vhost']['internal_port_env'] ?? 'APP_INTERNAL_PORT')];
@@ -309,6 +346,7 @@ $grantStanding = !empty($opts['grant-standing-departments']);
 
 echo ($APPLY ? "Applying" : "Plan for") . " {$name} ({$key}) at {$A}, {$appUrl}, database {$dbName}, as {$by['email']}\n\n";
 
+if ($HALF !== 'kernel') {
 // ---- 1. the code at /srv/apps/<key> ----------------------------------------------------------------------------
 if (is_file($A . '/maludb-os.json')) {
     say('code', 'done', "{$A} holds the application" . (realpath($srcDir) !== realpath($A) ? ' (the source given is elsewhere; the installed copy is used)' : ''));
@@ -452,7 +490,7 @@ $values = [
     'DB_HOST' => $DBT['host'] ?? '127.0.0.1', 'DB_PORT' => (string) ($DBT['port'] ?? '5432'), 'DB_NAME' => $dbName, 'DB_USER' => (string) $roles['rw'],
     'MCP_RECORDS_DB_USER' => (string) ($roles['records_ro'] ?? ''), 'MCP_ACTIVITY_DB_USER' => (string) ($roles['activity_ro'] ?? ''),
     'ACTION_TOKEN_KEY' => (string) ($kernelEnv['ACTION_TOKEN_KEY'] ?? ''), 'ACTIONS_RELAY_KEY' => (string) ($kernelEnv['ACTIONS_RELAY_KEY'] ?? ''),
-    'OS_INTERNAL_URL' => 'http://127.0.0.1:8080', 'OS_LAUNCHER_URL' => $scheme . '://' . (string) ($kernelEnv['APP_HOST'] ?? ('app.' . $domain)) . '/',
+    'OS_INTERNAL_URL' => $HALF === 'host' ? $REMOTE['door'] : 'http://127.0.0.1:8080', 'OS_LAUNCHER_URL' => $scheme . '://' . (string) ($kernelEnv['APP_HOST'] ?? ('app.' . $domain)) . '/',
     'MALUDB_API_URL' => (string) ($kernelEnv['MALUDB_API_URL'] ?? 'http://127.0.0.1:8000'),
 ] + $ports;
 if ($DBT !== null && $DBT['sslmode'] !== '') {
@@ -641,6 +679,59 @@ foreach ($answering as $n => $code) {
 }
 if ($APPLY && in_array(0, $answering, true)) { stop('answers', 'an endpoint is not answering — registration waits for it.'); }
 
+} else {
+    // the kernel half: what steps 8 to 16 take from the host half comes from its report
+    $deployDir = $srcDir . '/deploy';
+    $env = array_map('strval', (array) ($HOSTREPORT['env'] ?? [])) + (!empty($HOSTREPORT['has_token']) ? ['OS_APPLICATION_TOKEN' => '(on the application server)'] : []);
+    $existingEnv = $env;
+    $answering = array_map('intval', (array) ($HOSTREPORT['answering'] ?? []));
+    $units = [];
+    $envPath = '(config/.env on the application server)';
+    say('host', 'done', 'the application server at ' . (string) ($HOSTREPORT['address'] ?? '?') . ' reported ' . count($answering) . ' endpoint(s); its internal base is ' . (string) $HOSTREPORT['base_url']);
+}
+
+if ($HALF === 'host') {
+    // ---- 8 to 16, on the kernel: the bundle and this server's report go to the door; the kernel runs its half -------------
+    if (!$APPLY) {
+        say('register', 'todo', 'send the manifest, the action registry, the skills and the job descriptions to the kernel; it registers, grants and hires');
+        echo "\nPlan: the steps above on this server, then the kernel's half at {$REMOTE['door']}.\n";
+        exit(0);
+    }
+    $address = isset($opts['address']) && is_string($opts['address']) ? trim($opts['address']) : remote_own_address($REMOTE['door']);
+    if ($address === '' || in_array($address, ['127.0.0.1', '::1'], true)) { stop('register', 'this server\'s address on the business\'s network is not known: --address <address>.'); }
+    $internalPort = (int) ($env['APP_INTERNAL_PORT'] ?? 0);
+    $relay = remote_relay_vhost($key, $address, $internalPort, (string) (parse_url($REMOTE['door'], PHP_URL_HOST) ?: ''));
+    say('relay', $relay['state'], $relay['detail']);
+    $files = remote_bundle($A, $srcDir, $m);
+    say('register', 'todo', count($files) . ' files and this server\'s report to the kernel');
+    [$code, $ans] = remote_call($REMOTE, 'POST', '/api/v1/estate/apps/register.php', [
+        'key' => $key, 'files' => $files, 'source' => $source, 'hire_agents' => $hire, 'grant_standing_departments' => $grantStanding,
+        'host' => ['base_url' => 'http://' . (str_contains($address, ':') ? "[{$address}]" : $address) . ':' . $relay['port'], 'address' => $address,
+                   'env' => array_intersect_key($env, array_flip(array_values($portEnvs))), 'answering' => $answering,
+                   'has_token' => !empty($env['OS_APPLICATION_TOKEN'])],
+    ]);
+    if ($code !== 202 || empty($ans['job'])) { stop('register', 'the kernel refused the registration (HTTP ' . $code . '): ' . (string) ($ans['error']['message'] ?? $ans['raw'] ?? 'no answer')); }
+    $job = (string) $ans['job'];
+    $state = ['state' => 'running'];
+    for ($i = 0; $i < 360 && ($state['state'] ?? '') === 'running'; $i++) {
+        sleep(5);
+        [$code, $state] = remote_call($REMOTE, 'GET', '/api/v1/estate/apps/job.php?id=' . rawurlencode($job), null);
+        if ($code !== 200) { $state = ['state' => 'running']; }
+    }
+    echo "\n---- the kernel's half (job {$job}) ----\n" . (string) ($state['output'] ?? '') . "---- end of the kernel's half ----\n\n";
+    $tok = (string) ($state['result']['application_token'] ?? '');
+    if ($tok !== '') {
+        $text = preg_replace('/^OS_APPLICATION_TOKEN=.*\n?/m', '', (string) file_get_contents($envPath));
+        if (@file_put_contents($envPath, rtrim($text) . "\nOS_APPLICATION_TOKEN=" . $tok . "\n") === false) { stop('token', "could not write {$envPath} — revoke the application's token on its page in the kernel and run again"); }
+        if ($units !== []) { sh('systemctl restart ' . implode(' ', array_map('escapeshellarg', array_filter($units, static fn (string $u): bool => str_ends_with($u, '.service') && !in_array(preg_replace('/\.service$/', '.timer', $u), $units, true)))), true); }
+        say('token', 'ok', 'the application token is in config/.env (never shown); the services restarted');
+    }
+    if (($state['state'] ?? '') !== 'done') { stop('register', 'the kernel\'s half ' . (($state['state'] ?? '') === 'running' ? 'is still running after thirty minutes' : 'failed') . ' (job ' . $job . '): run this again once the cause above is fixed.'); }
+    say('register', 'ok', "the kernel registered {$name}; its public name {$fqdn} must reach this server ({$address}) at the proxy or in DNS");
+    echo "\nApplied on this server and on the kernel.\nSecrets: {$envPath} (group www-data, never printed).\n";
+    exit(0);
+}
+
 // ---- 8. registration in the kernel --------------------------------------------------------------------------------
 $areaId = null;
 foreach (find_business_areas($pdo) as $area) {
@@ -669,7 +760,7 @@ if ($app !== null) {
 } else {
     say('application', 'todo', "register {$name} with url {$appUrl}, sso {$m['sso']['path']}, scope_kind " . ($m['scopes']['kind'] ?? 'none'));
     if ($APPLY) {
-        $office = $pdo->query("SELECT location_id FROM applications WHERE name = 'Business OS' ORDER BY id LIMIT 1")->fetchColumn();
+        $office = $HALF === 'kernel' ? (int) $opts['node-id'] : $pdo->query("SELECT location_id FROM applications WHERE name = 'Business OS' ORDER BY id LIMIT 1")->fetchColumn();
         $frontOffice = $pdo->query("SELECT id FROM departments WHERE system_key = 'front_office'")->fetchColumn();
         $row = upsert_application($pdo, null, [
             'name' => $name, 'app_key' => $key, 'catalog_key' => $key, 'category' => (string) ($m['category'] ?? 'other'),
@@ -677,7 +768,7 @@ if ($app !== null) {
             'location_id' => $office !== false ? (int) $office : null, 'owner_department_id' => $frontOffice !== false ? (int) $frontOffice : null,
             'owner_member_id' => null, 'url' => $appUrl, 'version' => (string) ($m['version'] ?? ''),
             'criticality' => in_array($m['criticality'] ?? '', ['low', 'normal', 'high', 'critical'], true) ? $m['criticality'] : 'normal',
-            'notes' => 'Installed by bin/app_install.php from ' . $source, 'business_area_id' => $areaId, 'business_area_sent' => true,
+            'notes' => 'Installed by bin/app_install.php from ' . ($HALF === 'kernel' ? 'the application server ' . (string) ($HOSTREPORT['address'] ?? '') . ' (' . (string) ($opts['source-note'] ?? '') . ')' : $source), 'business_area_id' => $areaId, 'business_area_sent' => true,
             'scope_kind' => (string) ($m['scopes']['kind'] ?? 'none'), 'scope_kind_sent' => true,
             'sso_path' => (string) $m['sso']['path'], 'sso_logout_path' => (string) ($m['sso']['logout_path'] ?? ''),
             'directory_writes' => !empty($m['directory']['writes']), 'created_by' => $byId,
@@ -689,6 +780,11 @@ if ($app !== null) {
     }
 }
 $appId = $app !== null ? (int) $app['id'] : 0;
+if ($HALF === 'kernel' && $appId > 0 && $APPLY) {
+    // db/194: where a remote application runs — its node, and the address the Actions MCP posts its actions to
+    $pdo->prepare('UPDATE applications SET internal_base_url = :u, location_id = :l WHERE id = :id')
+        ->execute(['u' => (string) $HOSTREPORT['base_url'], 'l' => (int) $opts['node-id'], 'id' => $appId]);
+}
 $have = [];
 if ($appId > 0) { foreach (find_application_endpoints($pdo, $appId) as $e) { $have[(string) $e['name']] = $e; } }
 foreach ((array) ($m['endpoints'] ?? []) as $e) {
@@ -712,12 +808,22 @@ if (empty($env['OS_APPLICATION_TOKEN'])) {
         if ($appId === 0) { stop('token', 'no application row.'); }
         $t = mint_application_token($pdo, $appId, $byId, $name . ' (application token)');
         log_activity($pdo, 'application.token_mint', 'application', $appId, ['source' => 'cron', 'after' => ['token_id' => $t['id'], 'by' => 'bin/app_install.php']]);
+        if ($HALF === 'kernel') {
+            // the application's config/.env is on its own server: the token goes back once, in the job's result
+            $resultFile = (string) ($opts['result'] ?? '');
+            $fh = $resultFile !== '' ? @fopen($resultFile, 'w') : false;
+            if ($fh === false) { stop('token', "could not write the job's result — revoke token {$t['id']} on the application's page and run again"); }
+            @chmod($resultFile, 0600);
+            fwrite($fh, json_encode(['application_token' => $t['raw'], 'application_id' => $appId])); fclose($fh);
+            $env['OS_APPLICATION_TOKEN'] = '(on the application server)';
+        } else {
         $text = preg_replace('/^OS_APPLICATION_TOKEN=.*\n?/m', '', (string) file_get_contents($envPath));
         if (@file_put_contents($envPath, rtrim($text) . "\nOS_APPLICATION_TOKEN=" . $t['raw'] . "\n") === false) {
             stop('token', "could not write {$envPath} — revoke token {$t['id']} on the application's page and run again");
         }
+        }
         if ($units !== []) { sh('systemctl restart ' . implode(' ', array_map('escapeshellarg', array_filter($units, static fn (string $u): bool => str_ends_with($u, '.service') && !in_array(preg_replace('/\.service$/', '.timer', $u), $units, true))))); }
-        $env = env_file_read($envPath);
+        if ($HALF !== 'kernel') { $env = env_file_read($envPath); }
     }
 } else {
     say('token', 'done', 'config/.env carries OS_APPLICATION_TOKEN');
@@ -789,7 +895,7 @@ if (!is_file($registrySrc)) {
     $recordsPath = '/mcp/records';
     foreach ((array) ($m['endpoints'] ?? []) as $e) { if (($e['kind'] ?? '') === 'mcp' && stripos((string) $e['name'], 'records') !== false) { $recordsPath = (string) ($e['path'] ?? $recordsPath); } }
     $file = ['schema' => 'maludb-os.registry/1', 'app_key' => $key, 'name' => $name,
-        'base_url' => 'http://127.0.0.1:' . (int) ($env['APP_INTERNAL_PORT'] ?? 0), 'records_url' => $appUrl . $recordsPath,
+        'base_url' => $HALF === 'kernel' ? (string) $HOSTREPORT['base_url'] : 'http://127.0.0.1:' . (int) ($env['APP_INTERNAL_PORT'] ?? 0), 'records_url' => $appUrl . $recordsPath,
         'resolve' => (array) ($wrapper['resolve'] ?? []), 'registry' => $registry];
     $target = $KERNEL . '/mcp/registries/' . $key . '.json';
     // K55 (2026-10-11): every action gets the name it is served under on the kernel's ONE Actions MCP — its own name when no other
@@ -814,8 +920,13 @@ if (!is_file($registrySrc)) {
         say('registry', 'todo', (is_file($target) ? 'refresh ' : 'write ') . "mcp/registries/{$key}.json ({$built} built actions)" . (empty($opts['no-restart']) ? ' and restart maludb-os-actions-mcp' : ''));
         if ($APPLY) {
             if (@file_put_contents($target, $json) === false) { stop('registry', "could not write {$target}"); }
-            sh('chmod 644 ' . escapeshellarg($target) . ' && chown ' . escapeshellarg((string) (getenv('SUDO_USER') ?: 'root')) . ':www-data ' . escapeshellarg($target), true);
-            if (empty($opts['no-restart'])) { sh('systemctl restart maludb-os-actions-mcp'); }
+            if (posix_geteuid() === 0) {
+                sh('chmod 644 ' . escapeshellarg($target) . ' && chown ' . escapeshellarg((string) (getenv('SUDO_USER') ?: 'root')) . ':www-data ' . escapeshellarg($target), true);
+                if (empty($opts['no-restart'])) { sh('systemctl restart maludb-os-actions-mcp'); }
+            } else {
+                // the web user cannot restart a unit: maludb-os-actions-reload.path watches mcp/registries and restarts the server
+                say('registry', 'note', 'written as ' . (posix_getpwuid(posix_geteuid())['name'] ?? 'this user') . '; the Actions MCP reloads through maludb-os-actions-reload.path');
+            }
         }
     }
 }
@@ -934,7 +1045,7 @@ foreach ($agents as $a) {
     if ($hire) {
         say('agents', 'todo', "hire {$ak} ({$tools} tools, " . count((array) ($a['skills'] ?? [])) . ' skills) — bin/hire_application_agent.php');
         if ($APPLY) {
-            $cmd = 'runuser -u www-data -- php ' . escapeshellarg($KERNEL . '/bin/hire_application_agent.php') . ' --app ' . escapeshellarg($key) . ' --agent ' . escapeshellarg($ak) . ' --by ' . escapeshellarg((string) $by['email']) . ' --app-dir ' . escapeshellarg($A);
+            $cmd = (posix_geteuid() === 0 ? 'runuser -u www-data -- ' : '') . 'php ' . escapeshellarg($KERNEL . '/bin/hire_application_agent.php') . ' --app ' . escapeshellarg($key) . ' --agent ' . escapeshellarg($ak) . ' --by ' . escapeshellarg((string) $by['email']) . ' --app-dir ' . escapeshellarg($A);
             [$c, $o] = q($cmd);
             say('agents', $c === 0 ? 'ok' : 'note', str_replace("\n", ' · ', trim($o)));
         }
@@ -955,7 +1066,7 @@ if ($appId > 0 && $APPLY) {
         $ch = curl_init($launch);
         $jar = tempnam(sys_get_temp_dir(), 'sso');
         curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 8, CURLOPT_COOKIEJAR => $jar, CURLOPT_FOLLOWLOCATION => false,
-            CURLOPT_RESOLVE => [$fqdn . ':80:' . ($proxyAddress ?? '127.0.0.1'), $fqdn . ':443:' . ($proxyAddress ?? '127.0.0.1')]]);
+            CURLOPT_RESOLVE => [$fqdn . ':80:' . ($proxyAddress ?? ($HOSTREPORT['address'] ?? '127.0.0.1')), $fqdn . ':443:' . ($proxyAddress ?? ($HOSTREPORT['address'] ?? '127.0.0.1'))]]);
         curl_exec($ch);
         $first = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
         curl_setopt($ch, CURLOPT_COOKIEJAR, tempnam(sys_get_temp_dir(), 'sso'));

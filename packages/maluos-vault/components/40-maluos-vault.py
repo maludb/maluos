@@ -40,7 +40,7 @@ def provision(ctx):
         log(f"vault: master key sealed to {CRED} ({'TPM2 + host key' if has_tpm() else 'host key'})")
 
     # 2. database role and schema
-    ensure_schema(psql, exists, qi, ql, db, tenant, psql_file=ctx.get("psql_file"))
+    ensure_schema(psql, exists, qi, ql, db, tenant, role=ctx["db_role"](ROLE) if ctx.get("db_role") else ROLE, psql_file=ctx.get("psql_file"))
     log(f"vault: schema in {tenant}, grants to {ROLE}")
     # Phase 14: the database on another server. The vault cannot ask itself for its password: a file of its own.
     login = ctx["service_login"](ROLE, password_file=os.path.join(STATE, "pg.password"), owner=ROLE) if ctx.get("service_login") else {}

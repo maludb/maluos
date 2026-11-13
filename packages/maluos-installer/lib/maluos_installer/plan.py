@@ -117,10 +117,14 @@ SCHEMA = {
         "cloud_init": S("bool", lambda v: v == "server"),
         # Phase 14 (docs/phase14-database-server.md): "" = an ordinary host with its own PostgreSQL (or an office
         # whose database_server.host names another server); database-server = this host is the estate's database.
-        "role": E(["", "database-server"], ""),
+        # application-server (docs/phase14-application-servers.md) = the platform services and applications, no kernel:
+        # it joins the estate (enroll: kind estate, the kernel's public URL, a code minted for its applications) and
+        # installs application_server.apps through the kernel server's door.
+        "role": E(["", "database-server", "application-server"], ""),
+        "application_server": {"kernel": S("str", ""), "apps": S("list", []), "address": S("str", "")},
         "database_server": {
             "host": S("str", ""), "port": S("int", 5432), "admin": S("str", "maluos_admin"),
-            "credential": S("str", ""), "sslmode": E(["", "require", "verify-ca", "verify-full"], ""), "ca": S("str", ""),
+            "credential": S("str", ""), "sslmode": E(["", "require", "verify-ca", "verify-full"], ""), "ca": S("str", ""), "suffix": S("str", ""),
             "listen": S("str", ""), "clients": S("list", []), "names": S("list", []), "addresses": S("list", []),
         },
     },
@@ -332,7 +336,24 @@ def database_errors(fb):
             errs.append(f"{where}.sslmode {ds['sslmode']} needs {where}.ca (the database server's certificate: 'file:' + a path)")
         if not re.match(r"^[A-Za-z_][A-Za-z0-9_-]{0,62}$", ds["admin"]):
             errs.append(f"{where}.admin {ds['admin']!r} is not a role name")
-    elif any(ds[k] for k in ("credential", "ca", "listen", "clients")):
+    if role == "application-server":
+        ap, en = fb["application_server"], fb["enroll"]
+        spec = (fb["components"] or {}).get(BOS)
+        if spec is True or (isinstance(spec, dict) and spec.get("enabled") is True):
+            errs.append(f"firstboot.role application-server runs no Business OS kernel: turn firstboot.components.{BOS} off (the kernel is on another server)")
+        if ap["apps"]:
+            if not re.match(r"^https?://[A-Za-z0-9.\[\]:-]+$", ap["kernel"]):
+                errs.append("firstboot.application_server.kernel is the kernel server's applications' door, like http://kernel.example.lan:8081")
+            if en["kind"] != "estate" or not en["url"] or not en["code"]:
+                errs.append("firstboot.application_server.apps needs firstboot.enroll (kind estate, the kernel's public url, a code minted for these applications)")
+            for k in ap["apps"]:
+                if not re.match(r"^[a-z][a-z0-9_]{1,31}$", str(k)):
+                    errs.append(f"firstboot.application_server.apps: {k!r} is not an application key")
+        if ds["suffix"] and not re.match(r"^[a-z0-9_]{1,24}$", ds["suffix"]):
+            errs.append(f"{where}.suffix {ds['suffix']!r}: lowercase letters, digits and underscores (this server's names on the database server)")
+    elif fb["application_server"]["apps"] or fb["application_server"]["kernel"]:
+        errs.append("firstboot.application_server is set but firstboot.role is not application-server")
+    if role != "database-server" and not ds["host"] and any(ds[k] for k in ("credential", "ca", "listen", "clients")):
         errs.append(f"{where} is set but names no host and firstboot.role is not database-server: give {where}.host (an office) or the role (the server)")
     return errs
 

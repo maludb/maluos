@@ -10,7 +10,18 @@ GW = os.environ.get("MALUOS_GATEWAY_SOCKET", "/run/maluos/gateway.sock")
 VAULT = os.environ.get("MALUOS_VAULT_SOCKET", "/run/maluos/vault.sock")
 AGENTS = os.environ.get("MALUOS_AGENTS_DIR", "/etc/maluos/agents")
 UNITS = ["postgresql@18-main.service", "maludb-mc2dbd.service", "maluos-vault.service", "maluos-gateway.service", "maluos-estate.service"]
+# a database server runs the cluster, the engine's listener and the node service: the vault and the gateway are
+# installed and idle there, and are not its units to report
+UNITS_DATABASE_SERVER = ["postgresql@18-main.service", "maludb-mc2dbd.service", "maluos-estate.service"]
 MAX_BYTES = 32 * 1024
+
+
+def _role():
+    try:
+        with open(os.environ.get("MALUOS_PROVISIONED", "/var/lib/maluos/firstboot/done")) as f:
+            return str(json.load(f).get("role") or "")
+    except (OSError, ValueError):
+        return ""
 
 
 class _UnixConn(http.client.HTTPConnection):
@@ -49,7 +60,7 @@ def _ok(sock, path, query=None, default=None):
 
 def units():
     """The fixed list plus every maluos-agent@ unit present, through systemctl show; units systemd does not know are left out."""
-    names = list(UNITS)
+    names = list(UNITS_DATABASE_SERVER if _role() == "database-server" else UNITS)
     try:
         r = subprocess.run(["systemctl", "list-units", "--no-legend", "--plain", "--all", "maluos-agent@*.service"], capture_output=True, text=True, timeout=10)
         for line in r.stdout.splitlines():
@@ -250,12 +261,27 @@ def report():
     part("database", database)
     if rep.get("database") is None:
         rep.pop("database", None)       # a node with its own cluster reports as it always did
+    # Phase 14 slice 4b: what the watching agents read (collectors.py); one state file for what they remember
+    from maluos_estate import collectors as K
+    st = K._state()
+    part("linux", K.linux)
+    part("security", K.security, st)
+    part("postgres", K.postgres, st)
+    if rep.get("postgres") is None and not any(e.startswith("postgres:") for e in errors):
+        rep.pop("postgres", None)       # no cluster of its own to report
+    K._save(st)
     rep["errors"] = errors
     data = json.dumps(rep)
     if len(data) > MAX_BYTES:
         for key, n in (("units", 40), ("agents", 20), ("disk", 6)):
             if isinstance(rep.get(key), list):
                 rep[key] = rep[key][:n]
+        if isinstance(rep.get("security"), dict):
+            rep["security"]["listening"] = (rep["security"].get("listening") or [])[:20]
+            rep["security"]["failed_sources"] = (rep["security"].get("failed_sources") or [])[:3]
+        if isinstance(rep.get("postgres"), dict):
+            rep["postgres"]["databases"] = (rep["postgres"].get("databases") or [])[:6]
+            rep["postgres"]["dead_tuples"] = (rep["postgres"].get("dead_tuples") or [])[:3]
         if isinstance(rep.get("vault"), dict):
             rep["vault"]["alerts"] = (rep["vault"].get("alerts") or [])[:5]
         rep["errors"].append(f"report trimmed from {len(data)} bytes")

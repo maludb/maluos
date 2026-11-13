@@ -1,3 +1,100 @@
+maludb-os-core (2026.11.13maluos1) resolute; urgency=medium
+
+  * The kernel at its main, commit 58dc9f5 (2026-11-13): application
+    servers (db/194), the node samples (db/195), the watching agents
+    (db/196) and their node actions (db/197), and the Actions MCP skipping
+    a nameless action. The same files as 2026.11.12maluos7, now vendored
+    from the merged main.
+
+ -- Edward Honour <ed@maludb.org>  Fri, 13 Nov 2026 15:50:00 +0000
+
+maludb-os-core (2026.11.12maluos7) resolute; urgency=medium
+
+  * The Actions MCP skips (and logs) a built action of an application's
+    registry that has neither 'action' nor 'tool_name', where it raised
+    KeyError at import and restarted forever, leaving every agent without
+    its actions. Found by the boot test: its fixture application had such
+    a registry, and the watching agents' first live pass could not connect.
+
+ -- Edward Honour <ed@maludb.org>  Fri, 13 Nov 2026 09:10:00 +0000
+
+maludb-os-core (2026.11.12maluos6) resolute; urgency=medium
+
+  * Phase 14 slice 4d (docs/phase14-watching-agents.md): node actions for
+    the watching agents. db/197: the verbs restart_unit, postgres_cancel
+    and postgres_terminate with their arguments (estate_actions.args), and
+    a policy that pauses an agent's estate.node_action for its approver.
+    The kernel action estate_node_action (html/estate/node-action.php): a
+    super-admin directly, an IT agent through approval; the coordinator
+    signs the action's envelope. The playbooks ask for the one bounded
+    answer a check has (end a session idle in a transaction for hours,
+    restart a failed unit of the role's list, apply security updates left
+    for days) in live mode, and say what they would ask in shadow.
+    bin/hire_watch_agents.php grants estate_node_action. Proof
+    bin/test_node_actions.php. The kernel's files are those of its commit
+    5ab6dd9 on phase14/application-servers (the entries below named the
+    working tree; this is the same content, committed).
+
+ -- Edward Honour <ed@maludb.org>  Fri, 13 Nov 2026 06:35:00 +0000
+
+maludb-os-core (2026.11.12maluos5) resolute; urgency=medium
+
+  * Phase 14 slice 4c (docs/phase14-watching-agents.md): the watching
+    agents. db/196 and three system_one playbooks, watch_postgres,
+    watch_linux and watch_security (mcp/agent_runner/system_one/watch.py):
+    they read the estate's node reports and samples at the kernel,
+    thresholds only, no model; one probe per check per node, a decision
+    when a status changes, shadow first. bin/hire_watch_agents.php hires
+    the database administrator, the Linux administrator and the security
+    officer into IT; the component runs it once at provisioning. Vendored
+    from the kernel's working tree on phase14/application-servers; to be
+    re-vendored at the commit.
+
+ -- Edward Honour <ed@maludb.org>  Fri, 13 Nov 2026 06:00:00 +0000
+
+maludb-os-core (2026.11.12maluos4) resolute; urgency=medium
+
+  * Phase 14 slice 4b: db/195 estate_node_samples. The numbers of a node's
+    reports, one row per node per ten minutes, kept thirty days by the
+    presence sweep: what the watching agents follow over time. Vendored
+    from the kernel's working tree on phase14/application-servers; to be
+    re-vendored at the commit.
+
+ -- Edward Honour <ed@maludb.org>  Fri, 13 Nov 2026 06:10:00 +0000
+
+maludb-os-core (2026.11.12maluos3) resolute; urgency=medium
+
+  * Phase 14 slice 4a (docs/phase14-watching-agents.md): a node that names
+    its role (kernel, application-server, database-server) at its join or
+    in a heartbeat is labelled with it (locations.node_role); the nodes
+    answer carries role. Vendored from the kernel's working tree on
+    phase14/application-servers (app/features/estate/nodes.php and its
+    proof); to be re-vendored at the commit.
+
+ -- Edward Honour <ed@maludb.org>  Fri, 13 Nov 2026 05:30:00 +0000
+
+maludb-os-core (2026.11.12maluos2) resolute; urgency=medium
+
+  * Application servers, the kernel half. Vendored at the kernel's branch
+    phase14/application-servers (761e957): db/194, the installer in two
+    halves, /api/v1/estate/apps/{prepare,register,job}, the applications'
+    door, the registry's reload path unit, bin/app_names.php. To be
+    re-vendored at main once the branch is merged.
+  * The component renders the applications' door (the kernel server's LAN
+    address, port 8081, admitted by address) when
+    components.maludb-os-core.application_servers lists the application
+    servers (door_address overrides the address); makes mcp/registries and
+    storage/app-installs the web user's; enables
+    maludb-os-actions-reload.path; writes OS_PROXY_ADDRESS. The summary
+    carries door.
+  * maludb_os_apps: install_remote_apps (an application server's
+    applications, the installer's host half), remote_apps, office_upstreams;
+    office_names includes the applications on servers of their own.
+  * maluctl app install KEY… (on an application server) and
+    maluctl app names --upstreams.
+
+ -- Edward Honour <ed@maludb.org>  Thu, 12 Nov 2026 18:00:00 +0000
+
 maludb-os-core (2026.11.12maluos1) resolute; urgency=medium
 
   * The landing page is a starter. Vendored at the kernel's branch

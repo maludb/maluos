@@ -192,6 +192,64 @@ else
   echo "== (the vendored kernel has no --db-* options yet: the installer's remote steps are not exercised)"
 fi
 
+echo "== an application server on the same database server: names of its own (gap 8, docs/phase14-application-servers.md)"
+mkdir -p "$W/app"
+cat > "$W/app/firstboot.yaml" <<EOF
+role: application-server
+database: maludb
+database_server:
+  host: localhost
+  port: $PORT
+  admin: maluos_admin
+  credential: file:$W/export/db-admin.txt
+  sslmode: verify-full
+  ca: file:$W/export/db-ca.pem
+  suffix: App-1
+EOF
+APP="MALUOS_FIRSTBOOT_CONFIG=$W/app/firstboot.yaml MALUOS_STATE_DIR=$W/app/state MALUOS_SECRETS_DIR=$W/app/secrets MALUOS_DB_CA=$W/app/ca.pem PYTHONPATH=$W/lib"
+sudo env $APP python3 - "$ROOT" "$W" > "$W/app/provision.log" 2>&1 <<'PY'
+import importlib.util, sys
+import maluos_provision as mp
+R, W = sys.argv[1] + "/packages", sys.argv[2]
+def comp(path, name):
+    spec = importlib.util.spec_from_file_location(name, path); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m
+def step(name, fn):
+    try:
+        r = fn(); print(f"STEP ok {name}" + (f" {r}" if r is not None else ""))
+    except Exception as e:
+        print(f"STEP FAIL {name}: {str(e)[:400]}")
+cfg = mp.load_config(); t = mp.database_target(cfg); mp.prepare_remote(t)
+db, tenant = mp.platform_db(cfg), "maluos"
+step("names", lambda: f"{mp.is_application_server(cfg)} {mp.platform_suffix()} {db} {mp.db_role('maluos-vault')}")
+step("database", lambda: mp.ensure_database(db))
+step("tenant", lambda: mp.ensure_tenant(db, tenant))
+step("principal", lambda: mp.ensure_principal(db, tenant, cfg["admin_principal"]))
+v = comp(R + "/maluos-vault/components/40-maluos-vault.py", "v")
+step("vault-schema", lambda: v.ensure_schema(mp.psql, mp.exists, mp.qi, mp.ql, db, tenant, role=mp.db_role(v.ROLE), schema=R + "/maluos-vault/share/schema.sql", psql_file=mp.psql_file))
+g = comp(R + "/maluos-gateway/components/45-maluos-gateway.py", "g")
+step("gateway-schema", lambda: g.ensure_schema(mp.psql, mp.exists, mp.qi, mp.ql, db, tenant, role=mp.db_role(g.ROLE), schema=R + "/maluos-gateway/share/schema.sql", psql_file=mp.psql_file))
+m = comp(R + "/maluos-memory/components/50-maluos-memory.py", "m")
+step("memory-schema", lambda: m.ensure_schema(mp.psql, mp.exists, mp.qi, mp.ql, db, tenant, role=mp.db_role(m.ROLE)))
+step("vault-login", lambda: sorted(mp.service_login("maluos-vault", password_file=W + "/app/vault-pg.password").items()))
+step("again", lambda: (v.ensure_schema(mp.psql, mp.exists, mp.qi, mp.ql, db, tenant, role=mp.db_role(v.ROLE), schema=R + "/maluos-vault/share/schema.sql", psql_file=mp.psql_file),
+                       sorted(mp.service_login("maluos-vault", password_file=W + "/app/vault-pg.password").items()))[1])
+PY
+sudo chown -R "$(id -un)" "$W/app" 2>/dev/null
+L="$W/app/provision.log"
+grep '^STEP FAIL' "$L" | cut -c1-300
+check "the application server's first boot against the same server: no step failed" "! grep -q '^STEP FAIL' $L && [ \"\$(grep -c '^STEP ok' $L)\" = 9 ]"
+check "its names: the suffix from the plan, a database and roles of its own" "grep -q '^STEP ok names True app_1 maludb_app_1 maluos-vault-app_1' $L"
+check "the database maludb_app_1 and the three suffixed roles exist beside the office's" \
+  "[ \"\$(PSQL -c \"select count(*) from pg_database where datname in ('maludb','maludb_app_1')\")\" = 2 ] && [ \"\$(PSQL -c \"select string_agg(rolname, ',' order by rolname) from pg_roles where rolname like 'maluos-%'\")\" = 'maluos-gateway,maluos-gateway-app_1,maluos-memory,maluos-memory-app_1,maluos-vault,maluos-vault-app_1' ]"
+check "the service's login carries the suffixed role" "grep -q \"^STEP ok vault-login .*('pg_user', 'maluos-vault-app_1')\" $L"
+VP() { PGPASSWORD=$(cat "$2") psql -XAtq "host=localhost port=$PORT user=$1 dbname=$3 sslmode=verify-full sslrootcert=$W/export/db-ca.pem connect_timeout=10" -c "$4" 2>&1; }
+check "the office's vault still logs in with its own password after the application server's first boot (and its re-run)" \
+  "[ \"\$(VP maluos-vault $W/off/vault-pg.password maludb 'select current_user')\" = maluos-vault ]"
+check "the application server's vault logs in to its own database with its own password" \
+  "[ \"\$(VP maluos-vault-app_1 $W/app/vault-pg.password maludb_app_1 'select current_user')\" = maluos-vault-app_1 ] && ! cmp -s $W/off/vault-pg.password $W/app/vault-pg.password"
+check "and reads nothing of the office's vault" \
+  "VP maluos-vault-app_1 $W/app/vault-pg.password maludb 'select count(*) from maluos.vault_secret' | grep -qi 'permission denied'"
+
 echo
 [ "${KEEP:-0}" = 1 ] || cleanup
 echo "$n checks, $fail failed"

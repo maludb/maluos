@@ -1,0 +1,8 @@
+[Unit]
+Description=MaluOS estate: restart %I for the office (a node action, the unit checked against this node's list)
+Documentation=https://github.com/maludb/maluos
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/maluos/maluos-estate-restart %I
+TimeoutStartSec=300

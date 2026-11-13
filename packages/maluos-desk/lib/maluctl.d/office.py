@@ -24,6 +24,7 @@ shows the desk and whether it is online.
   maluctl office inbox [--json] [--all]     the person's estate inbox (questions, decisions, results, notes)
   maluctl office inbox decide ID approve|deny [--note TEXT] | reply ID TEXT | read ID
   maluctl office estate action NODE restart_agent|start_agent|stop_agent|apply_updates|reboot [AGENT] [--wait S]
+  maluctl office estate action NODE restart_unit UNIT.service | postgres_cancel PID | postgres_terminate PID [--wait S]
   maluctl office agents [--capability X]   the directory (the estate's agents and the office's own)
   sudo maluctl office key                   make and register this desk's signing key (desks enrolled before slice 2)
   maluctl office estate [--json] [--refresh]       the estate as this desk's owner may see it (endpoints.estate, published to
@@ -755,7 +756,12 @@ def estate_action(a, conf):
     n = rows[0]
     ep = (conf.get("endpoints") or {}).get("actions") or sys.exit("the office publishes no actions endpoint to this desk (not an operator)")
     env = my_envelope(conf, {"node": f"{n['kind']}:{n['id']}", "action": action}, f"{action} on {n['name']}")
-    st, r = http("POST", conf["url"].rstrip("/") + f"/api/v1/estate/nodes/{n['id']}/actions", {"action": action, "agent": agent, "envelope": env, "wait": wait}, token=token_for_me(), timeout=int(wait) + 20)
+    body = {"action": action, "agent": agent, "envelope": env, "wait": wait}
+    if action == "restart_unit":                       # Phase 14 slice 4d: the third word is the unit, or the backend's pid
+        body["unit"], body["agent"] = agent, None
+    elif action in ("postgres_cancel", "postgres_terminate"):
+        body["pid"], body["agent"] = (int(agent) if str(agent or "").isdigit() else agent), None
+    st, r = http("POST", conf["url"].rstrip("/") + f"/api/v1/estate/nodes/{n['id']}/actions", body, token=token_for_me(), timeout=int(wait) + 20)
     if st not in (200, 201):
         raise RuntimeError(f"HTTP {st} {r.get('error') or ''}: {r.get('message') or ''}")
     x = r.get("action") or {}

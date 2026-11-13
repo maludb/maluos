@@ -1,3 +1,4 @@
 lib/maluos_estate          usr/lib/maluos
 lib/maluctl.d/estate.py    usr/lib/maluos/maluctl.d
+lib/maluos-estate-restart  usr/lib/maluos
 debian/60-maluos-estate.rules    usr/share/polkit-1/rules.d

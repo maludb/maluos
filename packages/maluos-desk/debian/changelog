@@ -1,3 +1,11 @@
+maluos-desk (0.9.1) resolute; urgency=medium
+
+  * maluctl office estate action takes the three new node actions:
+    restart_unit UNIT.service, postgres_cancel PID, postgres_terminate PID
+    (Phase 14 slice 4d).
+
+ -- Edward Honour <ed@maludb.org>  Fri, 13 Nov 2026 06:35:00 +0000
+
 maluos-desk (0.9.0) resolute; urgency=medium
 
   * Slice 4b: office.env carries MALUOS_OFFICE_MEMORY_URL (the holders view,

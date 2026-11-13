@@ -1,0 +1,27 @@
+#!/usr/bin/python3
+"""maluos-estate-restart UNIT: restart one unit for the office (Phase 14 slice 4d). Root, started only as
+maluos-estate-restart@<escaped unit>.service by the node service. The unit must be in this node's own list
+(actions.units in /etc/maluos/estate.yaml, else the list of the host's role) and restart_unit in actions.allow:
+the same checks the node service made, made again where the privilege is."""
+import re, subprocess, sys
+
+sys.path.insert(0, "/usr/lib/maluos")
+from maluos_estate import client as C
+
+
+def main(argv):
+    unit = argv[1] if len(argv) > 1 else ""
+    conf = C.read_conf()
+    if not conf:
+        print("not a node of an estate", file=sys.stderr); return 2
+    if "restart_unit" not in C.allowed_actions(conf):
+        print("restart_unit is not in this node's actions.allow", file=sys.stderr); return 3
+    if not re.fullmatch(C.UNIT_RE, unit) or unit not in C.allowed_units(conf):
+        print(f"{unit[:120]!r} is not in this node's actions.units", file=sys.stderr); return 4
+    r = subprocess.run(["systemctl", "restart", "--", unit], capture_output=True, text=True, timeout=300)
+    sys.stderr.write((r.stderr or r.stdout)[-400:])
+    return r.returncode
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

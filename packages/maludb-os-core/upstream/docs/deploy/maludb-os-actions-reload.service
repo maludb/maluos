@@ -1,0 +1,7 @@
+[Unit]
+Description=MaluDB OS: restart the Actions MCP for a changed action registry
+
+[Service]
+Type=oneshot
+ExecStartPre=/bin/sleep 2
+ExecStart=/bin/systemctl try-restart maludb-os-actions-mcp.service

@@ -1,3 +1,14 @@
+maludb-api (0.4.1maluos8) resolute; urgency=medium
+
+  * The unit gives a worker sixty seconds to answer uvicorn's health check
+    (--timeout-worker-healthcheck 60; the default is five). On a slow or
+    busy host a worker that took longer than five seconds to import was
+    killed and started again without end, and the API never listened
+    (found by the boot test, 2026-11-13: after a restart of the platform
+    services against a database server, under emulation).
+
+ -- Edward Honour <ed@maludb.org>  Fri, 13 Nov 2026 03:40:00 +0000
+
 maludb-api (0.4.1maluos7) resolute; urgency=medium
 
   * The component waits for /health by the clock (240 s) instead of thirty

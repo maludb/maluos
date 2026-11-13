@@ -215,6 +215,7 @@ Actions (base `/locations/`):
 | `location_remove_department` | `/locations/department-remove.php` | **location**, **department** | add it back | | | `department.set_home_location` | mod:locations, admin |
 | `location_retire` | `retire.php` | **location** (revokes the desk's token) | — | ✔ | | `location.retire` | desk owner, super |
 | `location_delete` | `delete.php` | **location** (only one nothing points at) | — | ✔ | | `location.delete` | super |
+| `estate_node_action` | `/estate/node-action.php` | **location** (a server or inference node), **action** (restart_unit / postgres_cancel / postgres_terminate / apply_updates / reboot / restart_agent / start_agent / stop_agent), **reason**, unit, pid, agent | — | | | `estate.node_action` | super, IT agents |
 
 Desk enrollment is screen-only and built (2026-10-22, db/187, `docs/build-specs/desk-enrolment.md`): a person mints a one-time code at Settings → Desks (or an operator with `bin/mint_desk_code.php`), and the MaluOS desktop exchanges it for a desk token at `POST /api/v1/desks/enroll`; the desk heartbeats its presence, reads records and activity as its owner, and leaves with `POST /api/v1/desks/leave`. A building or office is never retired while it still has active children, applications or resident members; the endpoint refuses and names them.
 

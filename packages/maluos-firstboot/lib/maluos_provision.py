@@ -66,6 +66,46 @@ def is_database_server(cfg):
     return str(cfg.get("role") or "").strip() == "database-server"
 
 
+def is_application_server(cfg):
+    """role: application-server (docs/phase14-application-servers.md): a MaluOS server with the platform services
+    (the tenant, the vault, the gateway, the memory face, so agents can run on it) and applications, and no kernel."""
+    return str(cfg.get("role") or "").strip() == "application-server"
+
+
+_SUFFIX = {}
+
+
+def platform_suffix(cfg=None):
+    """Gap 8 of the split topology: every MaluOS server makes the same database and service roles, so two servers
+    on one database server would take each other's. An application server whose data is on a database server
+    therefore uses names of its own there: the database maludb_<suffix> and the roles maluos-vault-<suffix>,
+    maluos-gateway-<suffix>, maluos-memory-<suffix>. The suffix is database_server.suffix or the host's name.
+    Empty everywhere else: a kernel server, a single host and a local cluster keep the plain names."""
+    if "v" in _SUFFIX and cfg is None:
+        return _SUFFIX["v"]
+    c = cfg if cfg is not None else load_config()
+    v = ""
+    if is_application_server(c) and database_target(c):
+        blk = c.get("database_server") or {}
+        import re, socket
+        v = re.sub(r"[^a-z0-9]+", "_", str(blk.get("suffix") or socket.gethostname().split(".")[0]).lower()).strip("_")[:24]
+    _SUFFIX["v"] = v
+    return v
+
+
+def platform_db(cfg):
+    """The engine database of this server's platform services: cfg.database, with the suffix on an application server."""
+    s, db = platform_suffix(cfg), str(cfg["database"])
+    return f"{db}_{s}" if s and not db.endswith("_" + s) else db
+
+
+def db_role(name):
+    """A platform service's role in the database: its own name, with the suffix on an application server (the
+    system user and the vault's principal keep the plain name)."""
+    s = platform_suffix()
+    return f"{name}-{s}" if s else name
+
+
 def _ref(value):
     """`file:PATH` or a bare path -> PATH."""
     v = str(value or "").strip()
@@ -255,6 +295,26 @@ def ensure_role(name, *attrs):
         log(f"created role {name}")
         return True
     return False
+
+
+MONITOR_ROLE = "maluos_monitor"
+MONITOR_USER = os.environ.get("MALUOS_ESTATE_USER", "maluos-estate")
+
+
+def ensure_monitor():
+    """Phase 14 slice 4b (docs/phase14-watching-agents.md): the node service reads this host's cluster for its
+    report as its own user by peer authentication. maluos_monitor holds pg_monitor and nothing else; the login role
+    named after the node service's user is its only member. Only on the cluster of this host."""
+    import pwd
+    try:
+        pwd.getpwnam(MONITOR_USER)
+    except KeyError:
+        return False
+    ensure_role(MONITOR_ROLE, "NOLOGIN")
+    psql(f"GRANT pg_monitor, pg_signal_backend TO {qi(MONITOR_ROLE)}")      # slice 4d: postgres_cancel / postgres_terminate (never a superuser's session)
+    ensure_role(MONITOR_USER, "LOGIN")
+    psql(f"GRANT {qi(MONITOR_ROLE)} TO {qi(MONITOR_USER)}")
+    return True
 
 
 def unit_property(unit, prop):
@@ -586,6 +646,7 @@ def provision_database_server(cfg):
     for u in ops:
         ensure_role(u, "LOGIN", "SUPERUSER", "CREATEDB")
     ds = ensure_database_server(cfg, db)
+    ensure_monitor()
     os.makedirs(STATE_DIR, exist_ok=True)
     summary = {"provisioned_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "role": "database-server",
                "database": db, "maludb_core": version, "tenant": None, "admin_principal": None, "listener": url,
@@ -632,7 +693,7 @@ def service_login(role, password_file=None, owner=None, vault_ref=None, level="u
         pw = secrets.token_urlsafe(32)
         with open(os.open(keep, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
             f.write(pw + "\n")
-    psql(f"ALTER ROLE {qi(role)} WITH LOGIN PASSWORD {ql(pw)}")
+    psql(f"ALTER ROLE {qi(db_role(role))} WITH LOGIN PASSWORD {ql(pw)}")
     if password_file:
         with open(os.open(password_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
             f.write(pw + "\n")
@@ -646,7 +707,7 @@ def service_login(role, password_file=None, owner=None, vault_ref=None, level="u
         from maluos_vault_client import Vault
         Vault().grant(f"system/{name}", "principal", f"user:{role}", level=level)
         out["pg_password_ref"] = f"system/{name}"
-    out["pg_user"] = role
+    out["pg_user"] = db_role(role)
     return out
 
 
@@ -663,10 +724,14 @@ def run_components(cfg, db, tenant):
            "qi": qi, "ql": ql, "secrets_dir": SECRETS_DIR, "set_env": set_env, "read_env_file": read_env_file,
            "store_secret": store_system_secret,
            "psql_file": psql_file, "ensure_maludb_database": ensure_maludb_database,
-           "database_target": database_target(), "service_login": service_login}
+           "database_target": database_target(), "service_login": service_login, "db_role": db_role}
+    # an application server runs no kernel and no MaluDB API of its own: it uses the kernel server's through the door
+    skip = {"maludb-os-core", "maludb-api"} if is_application_server(cfg) else set()
     os.makedirs(SECRETS_DIR, mode=0o700, exist_ok=True)
     for path in sorted(glob.glob(os.path.join(COMPONENTS_DIR, "*.py"))):
         name = os.path.basename(path)[:-3].split("-", 1)[-1]
+        if name in skip:
+            log(f"component {name}: not on an application server"); continue
         if wanted.get(name, {}).get("enabled", True) is False:
             log(f"component {name}: disabled by configuration"); continue
         spec = importlib.util.spec_from_file_location(f"maluos_component_{name}", path)
@@ -709,8 +774,33 @@ def run_enroll(cfg):
         return None
     url, code, name, owner = e.get("url") or "", e.get("code") or "", e.get("name") or "", e.get("owner") or ""
     if kind == "estate":
-        log("enroll: estate enrolment is not available on this release (Phase 13 slice 1); the key is left in place")
-        return {"kind": kind, "url": url, "error": "estate enrolment is not available on this release"}
+        # a server joins the estate as a node (maluos-estate); an application server does not need the overlay to
+        # reach the kernel (the owner's decision 2026-11-12: LAN addresses), so it joins without it unless asked
+        if not os.path.exists("/usr/lib/maluos/maluctl.d/estate.py"):
+            return {"kind": kind, "url": url, "error": "maluos-estate is not installed (no `maluctl estate`)"}
+        if os.path.exists("/etc/maluos/estate.yaml"):
+            return {"kind": kind, "url": url, "name": name, "ok": True, "output": "already a node of an estate"}
+        if not code:
+            return {"kind": kind, "url": url, "error": "no code (used already, or none given)"}
+        argv = ["maluctl", "estate", "join", url, "--code", code, "--kind", "server"]
+        if name:
+            argv += ["--name", name]
+        if is_database_server(cfg):
+            argv += ["--bare"]            # no vault and no gateway here (docs/phase14-watching-agents.md, step 4a)
+        elif not e.get("overlay", not is_application_server(cfg)):
+            argv += ["--no-overlay"]
+        log(f"enroll: estate {url} as {name or 'this host'}")
+        try:
+            r = subprocess.run(argv, capture_output=True, text=True, timeout=300)
+            out, ok = (r.stdout + r.stderr).strip(), r.returncode == 0
+        except (OSError, subprocess.SubprocessError) as ex:
+            out, ok = repr(ex), False
+        _scrub_enroll_code()
+        log(f"enroll: {'ok' if ok else 'FAILED'}: {out[-300:]}")
+        res = {"kind": kind, "url": url, "name": name, "ok": ok, "output": out[-400:]}
+        if not ok:
+            res["error"] = out.splitlines()[-1][:200] if out else "the join failed"
+        return res
     if kind != "office":
         return {"kind": kind, "url": url, "error": f"unknown enrolment kind {kind!r}"}
     if not os.path.exists("/usr/lib/maluos/maluctl.d/office.py"):
@@ -737,6 +827,32 @@ def run_enroll(cfg):
     return res
 
 
+def run_application_server(cfg, enroll):
+    """role: application-server, after the join: the applications of application_server.apps installed here by the
+    kernel's installer in its host half (maludb-os-core's maludb_os_apps.install_remote_apps), registered with the
+    kernel server through its applications' door. Returns the outcome for the summary and `maluctl status`."""
+    blk = cfg.get("application_server") if isinstance(cfg.get("application_server"), dict) else {}
+    out = {"kernel": blk.get("kernel"), "apps": list(blk.get("apps") or []), "installed": [], "failed": []}
+    if not out["apps"]:
+        return out
+    if not blk.get("kernel"):
+        out["error"] = "application_server.kernel is not set (the kernel server's door, like http://kernel.example.lan:8081)"
+    elif not os.path.exists("/etc/maluos/estate.yaml"):
+        out["error"] = "this server is not a node of the estate (enroll: kind estate, url, code): " + str((enroll or {}).get("error") or "no enrolment")
+    else:
+        try:
+            sys.path.insert(0, "/usr/lib/maluos")
+            import maludb_os_apps as A
+            t = database_target()
+            out.update(A.install_remote_apps(blk, os.path.join(STATE_DIR, "..", "business-os", "apps"), log=log,
+                                             database=({**t, "passfile": DB_PGPASS, "ca": DB_CA if t.get("ca") else None} if t else None)))
+        except Exception as e:
+            out["error"] = repr(e)
+    if out.get("error"):
+        log(f"application server: {out['error']}")
+    return out
+
+
 def provision(force=False):
     if os.geteuid() != 0:
         sys.exit("must run as root")
@@ -745,8 +861,8 @@ def provision(force=False):
     cfg = load_config()
     if is_database_server(cfg):
         return provision_database_server(cfg)
-    db, tenant = cfg["database"], cfg["tenant"]["name"]
     target = database_target(cfg)
+    db, tenant = platform_db(cfg), cfg["tenant"]["name"]
     if target:
         prepare_remote(target)
         log(f"provisioning database={db} tenant={tenant} on the database server {target['host']}:{target['port']} as {target['admin']} ({target['sslmode']})")
@@ -756,6 +872,8 @@ def provision(force=False):
     version = ensure_database(db)
     ensure_tenant(db, tenant)
     ensure_principal(db, tenant, cfg["admin_principal"])
+    if not target:
+        ensure_monitor()
     if target:
         # the listener is the engine's own face and stays with the data (decision 6): this host runs none; the
         # tools this host registers are granted to the database server's listener role when it has one
@@ -777,8 +895,11 @@ def provision(force=False):
     ensure_operators(db, tenant, ops)
     components = run_components(cfg, db, tenant)
     enroll = run_enroll(cfg)
+    appserver = run_application_server(cfg, enroll) if is_application_server(cfg) else None
     os.makedirs(STATE_DIR, exist_ok=True)
     summary = {"provisioned_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+               "role": "application-server" if appserver is not None else None, "application_server": appserver,
+               "platform_suffix": platform_suffix() or None,
                "database": db, "maludb_core": version, "tenant": tenant,
                "admin_principal": cfg["admin_principal"]["ref"], "listener": url,
                "listener_user": listener_user, "token_file": TOKEN_FILE if os.path.exists(TOKEN_FILE) else None,

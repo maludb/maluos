@@ -79,6 +79,45 @@ def render_landing(domain):
     open(mark, "w").write(landing_digest(landing) + "\n")
     return "starter"
 
+def lan_address():
+    """This server's address on the business's network: the source address of its default route."""
+    r = subprocess.run(["ip", "-o", "route", "get", "192.0.2.1"], capture_output=True, text=True)
+    import re
+    m = re.search(r"\bsrc\s+(\S+)", r.stdout or "")
+    return m.group(1) if m else None
+
+
+def render_door(vhost, cfg, log=print):
+    """The applications' door (docs/phase14-application-servers.md, section 3): the commented lines of the kernel's
+    Apache file become a vhost on this server's LAN address, port 8081, admitted by address, when
+    components.maludb-os-core.application_servers lists the application servers (addresses or networks);
+    door_address overrides the address. Without the list the lines stay comments: nothing listens.
+    Returns (the file's text, {address, port, clients} or None)."""
+    import re
+    clients = cfg.get("application_servers") or []
+    if isinstance(clients, str):
+        clients = [clients]
+    clients = [str(c).strip() for c in clients if str(c).strip()]
+    bad = [c for c in clients if not re.fullmatch(r"[0-9A-Fa-f:.]+(/\d{1,3})?", c)]
+    if bad:
+        log(f"warning: application_servers: not addresses or networks: {', '.join(bad)}; left out")
+        clients = [c for c in clients if c not in bad]
+    if not clients:
+        return vhost, None
+    addr = str(cfg.get("door_address") or lan_address() or "")
+    if not addr or addr.startswith("127."):
+        log("warning: the applications' door: this server's LAN address is not known (door_address); not rendered")
+        return vhost, None
+    bind = f"[{addr}]" if ":" in addr else addr
+    out = []
+    for line in vhost.split("\n"):
+        if line.startswith("#DOOR "):
+            line = line[6:].replace("DOOR_ADDRESS", bind).replace("DOOR_CLIENTS", " ".join(clients))
+        out.append(line)
+    log(f"the applications' door: {bind}:8081 for {', '.join(clients)}")
+    return "\n".join(out), {"address": addr, "port": 8081, "clients": clients}
+
+
 def provision(ctx):
     log, psql, exists, qi, ql = ctx["log"], ctx["psql"], ctx["exists"], ctx["qi"], ctx["ql"]
     set_env, read_env = ctx["set_env"], ctx["read_env_file"]
@@ -252,6 +291,8 @@ def provision(ctx):
              "MALUDB_API_URL": api_url, "MALUDB_API_TOKEN": token, "MALUDB_MEMORY_DB": MEM_DB, "MALUDB_MEMORY_USER": MEM_USER,
              "MALUDB_MEMORY_PASSWORD": mem_pw, "MAIL_FROM": f"no-reply@{domain}", **db_tls}
     if cfg.get("malumail_api_key"): pairs["MALUMAIL_API_KEY"] = cfg["malumail_api_key"]
+    # the kernel's half of an application server's install dials the application's public name: at the proxy under https
+    pairs["OS_PROXY_ADDRESS"] = proxy_address or ""
     write_env(envf, pairs, ("root", "www-data"), 0o640)
     webenv = f"{WWW}/web/.env.local"
     write_env(webenv, {"API_BASE_URL": "http://127.0.0.1:8080", "LOGIN_URL": f"{scheme}://app.{domain}/login",
@@ -269,7 +310,15 @@ def provision(ctx):
 
     # ---- 7. Apache: the kernel's vhosts rendered for the domain; the web drop-in
     vhost = open(f"{WWW}/docs/deploy/apache-react-cutover.conf").read().replace("subello.com", domain)
+    vhost, door = render_door(vhost, cfg, log)
     open("/etc/apache2/sites-available/maludb-os.conf", "w").write(vhost)
+    # a registration from an application server runs as the web user: it writes the application's action registry, and
+    # the path unit restarts the Actions MCP for it (kernel docs/build-specs/application-servers.md)
+    os.makedirs(f"{WWW}/mcp/registries", exist_ok=True)
+    subprocess.run(["chown", "www-data:www-data", f"{WWW}/mcp/registries"], check=False, capture_output=True)
+    os.makedirs(f"{WWW}/storage/app-installs", exist_ok=True)
+    subprocess.run(["chown", "www-data:www-data", f"{WWW}/storage/app-installs"], check=False, capture_output=True)
+    os.chmod(f"{WWW}/storage/app-installs", 0o750)
     landing_state = render_landing(domain)
     subprocess.run(["a2dissite", "-q", "000-default"], check=False, capture_output=True)
     subprocess.run(["a2ensite", "-q", "maludb-os"], check=False, capture_output=True)
@@ -284,6 +333,8 @@ def provision(ctx):
     subprocess.run(["systemctl", "restart", "apache2"], check=False)
     subprocess.run(["systemctl", "enable", "--now", "--quiet", *UNITS], check=False)
     subprocess.run(["systemctl", "restart", *UNITS], check=False)
+    if os.path.exists("/usr/lib/systemd/system/maludb-os-actions-reload.path"):
+        subprocess.run(["systemctl", "enable", "--now", "--quiet", "maludb-os-actions-reload.path"], check=False)
     deadline = time.monotonic() + 300    # by the clock: a refused connection returns at once, a loaded host is slow
     last = None
     while True:
@@ -316,7 +367,10 @@ def provision(ctx):
         open(logf, "a").close(); shutil.chown(logf, "www-data", "www-data")
     subprocess.run(["crontab", "-u", "www-data", f"{WWW}/docs/deploy/crontab.example"], check=False, capture_output=True)
     for marker, cmd in (("hire-installer", ["php", "bin/hire_installation_agent.php", "--by", admin_email]),
-                        ("hire-jev", ["php", "bin/hire_jev_prompt_writer.php", "--by", admin_email])):
+                        ("hire-jev", ["php", "bin/hire_jev_prompt_writer.php", "--by", admin_email]),
+                        # Phase 14 slice 4c: the database administrator, the Linux administrator and the security
+                        # officer (system_one, IT, shadow mode): they watch the estate's nodes from here
+                        ("hire-watch", ["php", "bin/hire_watch_agents.php", "--by", admin_email])):
         m = os.path.join(STATE, marker)
         if not os.path.exists(m):
             try:
@@ -344,4 +398,4 @@ def provision(ctx):
             "database": DB, "memory_database": MEM_DB, "admin_email": admin_email,
             "admin_password_file": pw_file if os.path.exists(pw_file) else None,
             "apps": apps, "names": names, "healthy": True,
-            "landing": landing_state, "proxy_address": proxy_address, "hosts": {"mode": hosts_mode, "address": proxy_address if hosts_mode.startswith("proxy") else ("127.0.0.1" if hosts_mode == "loopback" else None), "note": hosts_note}}
+            "landing": landing_state, "door": door, "proxy_address": proxy_address, "hosts": {"mode": hosts_mode, "address": proxy_address if hosts_mode.startswith("proxy") else ("127.0.0.1" if hosts_mode == "loopback" else None), "note": hosts_note}}

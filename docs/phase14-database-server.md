@@ -437,14 +437,14 @@ servers.
 
 | # | Gap | State |
 |---|---|---|
-| 1 | An application on a server of its own. The kernel's installer clones into `/srv/apps` of the kernel's host, registers `http://127.0.0.1:<port>`, writes `OS_INTERNAL_URL=http://127.0.0.1:8080` (the internal API listens on loopback only), enables units and a vhost locally | open: slice 3, design below |
+| 1 | An application on a server of its own. The kernel's installer clones into `/srv/apps` of the kernel's host, registers `http://127.0.0.1:<port>`, writes `OS_INTERNAL_URL=http://127.0.0.1:8080` (the internal API listens on loopback only), enables units and a vhost locally | written 2026-11-12 (slices 3a and 3b, docs/phase14-application-servers.md, "As built"); its boot test has not run yet |
 | 2 | Office setup did not know the database server | **closed** in maluos-office-setup 0.1.3: Phase 1b of the interview, `database-server.py --show/--check/--apply`, the data in `preflight.py` and `verify.sh`, `references/database-server.md` |
 | 3 | An office that already holds data cannot be moved | open (difference 5); `--apply` refuses a provisioned kernel without `--data-not-moved` |
-| 4 | `proxy-config.sh` renders one upstream for every name | open: with slice 3 |
+| 4 | `proxy-config.sh` renders one upstream for every name | written with slice 3b: an upstream per application (`maluctl app names --upstreams`) |
 | 5 | No `application-server` role in the installer, no node kinds `database` and `application` | open: slices 2 and 3 |
 | 6 | The overlay name in `maluctl db export` | **closed** in maluos-firstboot 0.1.18: the export names the server by `database_server.names[0]` or its full name; open question 1 answered by the owner 2026-11-12 (the LAN name, for good); the plugin's check explains a name the certificate does not carry |
 | 7 | Agents on the database server | open, a design gap: `role: database-server` provisions the cluster and nothing else (no tenant, vault, gateway or memory face), and `maluos-agent@` needs all three, so no agent can run there today. No database or Linux support agent ships either: the kernel's Sysadmin agent watches its own host. What the office has is the server's node report (its `database` part) and the estate's node actions |
-| 8 | Two servers on one database server. Every MaluOS server's first boot makes the roles `maluos-vault`, `maluos-gateway`, `maluos-memory` and the database `maludb` under fixed names; against a database server `service_login()` sets each role's password, so a second server resets the first one's | open: must be settled by slice 3 (found 2026-11-12; one database server serves one kernel server until then) |
+| 8 | Two servers on one database server. Every MaluOS server's first boot makes the roles `maluos-vault`, `maluos-gateway`, `maluos-memory` and the database `maludb` under fixed names; against a database server `service_login()` sets each role's password, so a second server resets the first one's | written with slice 3b: an application server uses names of its own on the database server (`platform_suffix`); proven on a scratch cluster. One database server still serves one kernel server |
 
 ### Slice 3, the owner's choices (2026-11-12)
 

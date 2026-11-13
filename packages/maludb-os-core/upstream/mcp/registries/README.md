@@ -23,6 +23,8 @@ action with an approval category is posted. Restart `maludb-os-actions-mcp` afte
 ```
 
 `base_url` is the application's internal PHP port (never its public name); `records_url` is
+  For an application on a server of its own (db/194, `docs/build-specs/application-servers.md`) it is that server's
+  relay address, `http://<application server>:<internal port + 1000>`, which admits the kernel server only.
 where its records MCP answers, used to turn a name into an id with the caller's own token;
 `resolve` names, per entity, the application's `find_*` tool and which action params carry that
 entity. A file with a malformed shape is skipped and logged; an action whose name collides with a

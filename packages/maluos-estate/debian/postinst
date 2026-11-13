@@ -8,6 +8,12 @@ case "$1" in
         fi
         install -d -m 0755 /var/lib/maluos
         install -d -o maluos-estate -g maluos-estate -m 0755 /var/lib/maluos/estate
+        # Phase 14 slice 4b: the collectors read the journal (logins, sudo) and the PostgreSQL server log
+        for g in systemd-journal adm; do
+            if getent group "$g" >/dev/null && ! id -nG maluos-estate | tr ' ' '\n' | grep -qx "$g"; then
+                adduser --quiet maluos-estate "$g" || true
+            fi
+        done
         ;;
 esac
 #DEBHELPER#
