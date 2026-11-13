@@ -1159,6 +1159,39 @@ fi
 # --- Phase 14 slice 4a (docs/phase14-watching-agents.md): a server with no vault and no gateway (a database server)
 # joins the kernel's estate as a bare node. This VM stands in for it: scratch files beside the host's own (the
 # enrolment in /run, the state in its own directory, a first-boot record that says database-server), no vault named.
+# --- Phase 14 slice 4b (docs/phase14-watching-agents.md): the collectors, as the node service's user on this host
+if installed maluos-estate; then
+echo "== the node's collectors: the postgres, linux and security parts of the report"
+id -nG maluos-estate | tr ' ' '\n' | grep -qx systemd-journal && id -nG maluos-estate | tr ' ' '\n' | grep -qx adm \
+  && echo "  ok   the node service's user reads the journal and the server log (systemd-journal, adm)" || { echo "  FAIL groups of maluos-estate: $(id -nG maluos-estate)"; fail=1; }
+[ "$(sudo -n -u postgres psql -Atc "select rolcanlogin::text || rolsuper::text || rolcreaterole::text || rolcreatedb::text || rolbypassrls::text || pg_has_role('maluos-estate', 'pg_monitor', 'member')::text || (select count(*) from pg_auth_members m where m.member = r.oid) from pg_roles r where rolname = 'maluos-estate'")" = 'truefalsefalsefalsefalsetrue1' ] \
+  && [ "$(sudo -n -u postgres psql -Atc "select rolcanlogin from pg_roles where rolname = 'maluos_monitor'")" = f ] \
+  && echo "  ok   first boot made the monitoring role: a login for the node service's user, pg_monitor through maluos_monitor and nothing else" || { echo "  FAIL the monitoring role: $(sudo -n -u postgres psql -Atc "select rolname, rolcanlogin, rolsuper from pg_roles where rolname like 'maluos%monitor' or rolname = 'maluos-estate'" | tr '\n' ' ')"; fail=1; }
+# a long transaction with a recognisable statement, so the part has one to report and its text must not travel
+( sudo -n -u postgres env PGAPPNAME=boot-long psql -qAtc "select 'boot-test-secret-query' as marker, pg_sleep(900)" >/dev/null 2>&1 & )
+sleep 6
+sudo -n -u maluos-estate maluctl estate report --json > /tmp/collect-report.json 2>/tmp/collect-report.err
+python3 - /tmp/collect-report.json <<'PY' && echo "  ok   the report as the node service's user: the three parts, the long transaction by seconds and pid, no part in errors, no statement text" || { echo "  FAIL the collectors' report: $(head -c 300 /tmp/collect-report.err) $(python3 -c "import json; r=json.load(open('/tmp/collect-report.json')); print(r.get('errors'), sorted(r))" 2>&1 | cut -c1-300)"; fail=1; }
+import json, sys
+raw = open(sys.argv[1]).read()
+r = json.loads(raw)
+assert not [e for e in r.get("errors") or [] if e.split(":")[0] in ("postgres", "linux", "security")], r.get("errors")
+pg, lx, sec = r["postgres"], r["linux"], r["security"]
+assert pg["max_connections"] > 0 and isinstance(pg["connections_pct"], int) and isinstance(pg["xid_age"], int) and pg["databases"], pg
+lt = pg["longest_transaction"]
+assert lt and lt["seconds"] >= 3 and isinstance(lt["pid"], int) and lt["database"], lt
+assert isinstance(pg["superusers"], list) and pg["log"] is not None and set(pg["log"]) >= {"error", "fatal", "panic"}, (pg["superusers"], pg["log"])
+assert isinstance(lx["failed_units"], list) and lx["clock_synced"] in (True, False, None) and lx["inodes"]["used_pct"] >= 0, lx
+assert isinstance(sec["failed_logins"], int) and isinstance(sec["sudo"], int) and sec["sudo"] >= 1, sec
+assert any(l["proto"] == "tcp" and l["port"] == 80 for l in sec["listening"]) and not any(l["port"] == 5432 for l in sec["listening"]), sec["listening"]
+assert len(sec["config"]["digest"]) == 32 and sec["config"]["files"] > 5, sec["config"]
+assert "boot-test-secret-query" not in raw and "pg_sleep" not in raw and "COMMAND=" not in raw, "statement or command text in the report"
+assert len(raw) < 32 * 1024, len(raw)
+PY
+sudo -n -u postgres psql -qAtc "select pg_terminate_backend(pid) from pg_stat_activity where application_name = 'boot-long'" >/dev/null 2>&1
+[ "$(sudo -n stat -c '%a %U' /var/lib/maluos/estate/collect.json 2>/dev/null)" = '600 maluos-estate' ] && echo "  ok   what the collectors remember is a 0600 file of the node service's user" || { echo "  FAIL collect.json: $(sudo -n stat -c '%a %U' /var/lib/maluos/estate/collect.json 2>&1)"; fail=1; }
+fi
+
 if installed maluos-business-os && bos_on && installed maluos-estate && [ "${BOOT_TEST_BARE:-1}" = 1 ]; then
 echo "== a bare node: a server without a vault joins the estate (the VM standing in for a database server)"
 BADM=$(sudo -n python3 -c "import yaml; print(yaml.safe_load(open('/etc/maluos/firstboot.yaml'))['components']['maludb-os-core'].get('admin_email',''))" 2>/dev/null)
@@ -1178,7 +1211,114 @@ out=$(sudo -n -u maluos-estate env $BENV maluctl estate heartbeat --report 2>&1)
 BROW=$(sudo -n -u postgres psql -Atd maludb_os -c "select node_role || '|' || presence || '|' || (report is not null) || '|' || coalesce((select string_agg(u->>'unit', ',') from jsonb_array_elements(report->'units') u), '') || '|' || coalesce(report->'database'->>'role', '') || '|' || (select count(*) from estate_alerts a where a.location_id = l.id and a.cleared_at is null) from locations l where name = 'boot-db-1' and status = 'active'")
 [ $rc = 0 ] && echo "$BROW" | grep -q '^database-server|online|true|' && ! echo "$BROW" | grep -q 'vault\|gateway' && echo "$BROW" | grep -q '|server|0$' \
   && echo "  ok   its heartbeat as the node service's user: labelled database-server, the report without the vault and the gateway, the database part, no alert" || { echo "  FAIL the bare node's report (rc=$rc): $BROW | $(echo "$out" | tail -2 | cut -c1-200)"; fail=1; }
+BSAMP=$(sudo -n -u postgres psql -Atd maludb_os -c "select (report ? 'postgres') || '|' || (report ? 'linux') || '|' || (report ? 'security') || '|' || coalesce((select count(*) from estate_node_samples s where s.location_id = l.id and s.numbers ? 'pg.connections_pct' and s.numbers ? 'sec.listening' and s.numbers ? 'load1'), 0) from locations l where name = 'boot-db-1' and status = 'active'")
+[ "$BSAMP" = 'true|true|true|1' ] && echo "  ok   the kernel holds the bare node's postgres, linux and security parts and one sample of their numbers (db/195)" || { echo "  FAIL the parts or the sample at the kernel: $BSAMP"; fail=1; }
 sudo -n env $BENV maluctl estate status 2>&1 | grep -q 'a bare node: no vault' && echo "  ok   maluctl estate status says it is a bare node" || { echo "  FAIL bare status: $(sudo -n env $BENV maluctl estate status 2>&1 | tail -3 | cut -c1-200)"; fail=1; }
+# --- Phase 14 slice 4c: the watching agents (system_one, IT, shadow) read this node's report at the kernel
+echo "  -- the watching agents: the database administrator, the Linux administrator, the security officer (shadow)"
+KQ() { sudo -n -u postgres psql -Atd maludb_os -c "$1"; }
+[ "$(KQ "select string_agg(p.role_key || ':' || coalesce(v.runtime_config->>'mode', 'shadow') || ':' || d.instructions, ',' order by p.role_key) from agent_profiles p join department_members dm on dm.member_id = p.member_id join departments dep on dep.id = dm.department_id and dep.system_key = 'it' join agent_duties d on d.agent_member_id = p.member_id and d.active left join agent_config_versions v on v.id = p.current_config_version_id where p.role_key in ('dba', 'linux_admin', 'security_officer')")" = 'dba:shadow:playbook: watch_postgres,linux_admin:shadow:playbook: watch_linux,security_officer:shadow:playbook: watch_security' ] \
+  && echo "  ok   the three watching agents were hired into IT at provisioning, each with its playbook as a duty, in shadow mode" || { echo "  FAIL the watching agents: $(KQ "select p.role_key, p.member_id from agent_profiles p where p.role_key in ('dba', 'linux_admin', 'security_officer')" | tr '\n' ' ')"; fail=1; }
+BNODE=$(KQ "select id from locations where name = 'boot-db-1' and status = 'active'")
+watch_run() {   # role_key playbook: one manual run as the administrator, waited for; prints the run's status, result and error
+  sudo -n -u www-data php -r 'require "/var/www/app/bootstrap.php"; require_once "/var/www/app/features/agents/render.php"; agents_require_files(); $pdo = db();
+    $a = (int) $pdo->query("SELECT member_id FROM agent_profiles WHERE role_key = " . $pdo->quote($argv[1]))->fetchColumn();
+    $by = (int) $pdo->query("SELECT id FROM members WHERE business_role = \x27super_admin\x27 AND member_kind = \x27human\x27 ORDER BY id LIMIT 1")->fetchColumn();
+    [$r, $e] = start_agent_run($a, "playbook: " . $argv[2], "manual", null, $by); echo $r["run_id"] ?? ("ERR " . $e);' "$1" "$2" > /tmp/watch-run.id 2>/tmp/watch-run.err
+  local id; id=$(cat /tmp/watch-run.id)
+  case "$id" in ''|ERR*|*[!0-9]*) echo "not started: $id $(head -c 200 /tmp/watch-run.err)"; return 1;; esac
+  for i in $(seq 1 60); do [ "$(KQ "select status in ('succeeded', 'failed', 'cancelled') from agent_runs where id = $id")" = t ] && break; sleep 3; done
+  KQ "select status || ' | ' || coalesce(result, '') || ' | ' || coalesce(error, '') from agent_runs where id = $id"
+}
+# the node's real report, made plainly healthy where this test sets nothing, then with three things wrong: connections
+# at 97 %, a failed unit, a port nobody expects. Both are sent as the node.
+sudo -n -u maluos-estate env $BENV maluctl estate report --json > /tmp/bare-report.json 2>/dev/null
+python3 - <<'PY'
+import copy, json
+r = json.load(open("/tmp/bare-report.json"))
+r["disk"], r["memory"] = [{"mount": "/", "size_gb": 20, "used_pct": 40}], {"total_mb": 4000, "available_mb": 2000, "swap_used_mb": 0}
+r["linux"] = {"failed_units": [], "clock_synced": True, "inodes": {"mount": "/", "used_pct": 5}, "reboot_required_days": None}
+r["postgres"].update({"connections": 5, "connections_pct": 5, "longest_transaction": None, "longest_lock_wait": None, "lock_waiters": 0, "dead_tuples": [],
+                      "log": {"error": 0, "fatal": 0, "panic": 0}, "certificate_days": None, "replicas": 0, "replication_lag_mb": None})
+r["security"].update({"failed_logins": 0, "failed_sources": [], "failed_source_count": 0, "new_addresses": [],
+                      "listening": [{"proto": "tcp", "port": 22, "scope": "any"}, {"proto": "tcp", "port": 5432, "scope": "any"}]})
+r["updates"] = {"pending_count": 0, "security_count": 0, "reboot_required": False}
+good = copy.deepcopy(r)
+r["postgres"]["connections"], r["postgres"]["connections_pct"] = 97, 97
+r["linux"]["failed_units"] = ["boot-test-broken.service"]
+r["security"]["listening"].append({"proto": "tcp", "port": 4444, "scope": "any"})
+json.dump({"presence": "online", "report": r}, open("/tmp/bare-bad.json", "w"))
+json.dump({"presence": "online", "report": good}, open("/tmp/bare-good.json", "w"))
+PY
+ESC0=$(KQ "select count(*) from agent_escalations")
+[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 -H "Authorization: Bearer $BTOK" -H 'Content-Type: application/json' -d @/tmp/bare-bad.json http://127.0.0.1:8080/api/v1/estate/heartbeat)" = 200 ] || { echo "  FAIL the crafted heartbeat was not accepted"; fail=1; }
+R1=$(watch_run dba watch_postgres); R2=$(watch_run linux_admin watch_linux); R3=$(watch_run security_officer watch_security)
+echo "$R1" | grep -q '^succeeded | watch_postgres (shadow)' && echo "$R2" | grep -q '^succeeded | watch_linux (shadow)' && echo "$R3" | grep -q '^succeeded | watch_security (shadow)' \
+  && echo "  ok   the three playbooks ran on the runner as their agents, in shadow" || { echo "  FAIL the watch runs: $R1 || $R2 || $R3"; sudo -n journalctl -u maludb-os-agent-runner --no-pager -n 15 | cut -c1-240; fail=1; }
+[ "$(KQ "select string_agg(probe || '=' || status, ',' order by probe) from system_probes where probe like 'node:$BNODE:%' and status <> 'ok'")" = "node:$BNODE:linux:failed_units=warning,node:$BNODE:pg:connections=failed,node:$BNODE:sec:listening=warning" ] \
+  && echo "  ok   exactly the three faults became probes of the node: connections failed, a failed unit and an unexpected port warned" || { echo "  FAIL the node's probes: $(KQ "select probe || '=' || status from system_probes where probe like 'node:$BNODE:%' and status <> 'ok'" | tr '\n' ' ')"; fail=1; }
+[ "$(KQ "select string_agg(playbook || ':' || decision || ':' || mode || ':' || acted, ',' order by playbook) from system_one_decisions where subject_kind = 'node' and subject_id = $BNODE")" = 'watch_linux:finding:shadow:false,watch_postgres:alert:shadow:false,watch_security:finding:shadow:false' ] \
+  && [ "$(KQ "select count(*) from agent_escalations")" = "$ESC0" ] && KQ "select note from system_one_decisions where subject_id = $BNODE and playbook = 'watch_security'" | grep -q 'tcp/4444' \
+  && echo "  ok   three decisions recorded (an alert, two findings), none acted on, no escalation raised: shadow sends nothing" || { echo "  FAIL the decisions: $(KQ "select playbook, decision, mode, acted, left(note, 80) from system_one_decisions where subject_id = $BNODE" | tr '\n' ' ') escalations $ESC0 -> $(KQ "select count(*) from agent_escalations")"; fail=1; }
+watch_run dba watch_postgres >/dev/null
+[ "$(KQ "select count(*) from system_one_decisions where subject_kind = 'node' and subject_id = $BNODE")" = 3 ] && echo "  ok   a second pass over the same report records nothing new (only a change is a judgement)" || { echo "  FAIL a second pass added decisions"; fail=1; }
+curl -s -o /dev/null --max-time 30 -H "Authorization: Bearer $BTOK" -H 'Content-Type: application/json' -d @/tmp/bare-good.json http://127.0.0.1:8080/api/v1/estate/heartbeat
+watch_run dba watch_postgres >/dev/null; watch_run linux_admin watch_linux >/dev/null; watch_run security_officer watch_security >/dev/null
+[ "$(KQ "select count(*) from system_probes where probe like 'node:$BNODE:%' and status <> 'ok'")" = 0 ] && [ "$(KQ "select count(*) from system_one_decisions where subject_id = $BNODE and decision = 'record' and note like 'Recovered:%'")" = 3 ] \
+  && echo "  ok   the healthy report clears the three probes and records three recoveries" || { echo "  FAIL recovery: $(KQ "select probe || '=' || status from system_probes where probe like 'node:$BNODE:%' and status <> 'ok'" | tr '\n' ' ') $(KQ "select decision, left(note, 60) from system_one_decisions where subject_id = $BNODE order by id desc limit 4" | tr '\n' ' ')"; fail=1; }
+# --- Phase 14 slice 4d: a finding with one bounded answer. The database administrator, set live, asks the node to end
+# a session idle in a transaction; the request pauses for its approver; approved, the node ends that session.
+echo "  -- node actions: the database administrator asks, a person approves, the node acts"
+sudo -n env $BENV maluctl estate actions 2>&1 | tr '\n' ' ' | grep -q 'apply_updates, restart_unit, postgres_cancel, postgres_terminate.*restart_unit may name: postgresql@18-main.service, maludb-mc2dbd.service' \
+  && echo "  ok   the bare node allows updates, a restart of its two units, cancelling or ending a backend; not a reboot" || { echo "  FAIL the bare node's actions: $(sudo -n env $BENV maluctl estate actions 2>&1 | tr '\n' ' ')"; fail=1; }
+[ "$(sudo -n -u postgres psql -Atc "select pg_has_role('maluos-estate', 'pg_signal_backend', 'member')")" = t ] && echo "  ok   the monitoring role may signal a backend (pg_signal_backend), still no superuser" || { echo "  FAIL pg_signal_backend not granted"; fail=1; }
+# the victim: a session of the node service's own role, idle in a transaction
+( (echo "begin; select 1;"; sleep 900) | sudo -n -u maluos-estate env PGAPPNAME=boot-idle psql -qAtX -d postgres >/dev/null 2>&1 & )
+for i in $(seq 1 30); do VPID=$(sudo -n -u postgres psql -Atc "select pid from pg_stat_activity where application_name = 'boot-idle' and state = 'idle in transaction'"); [ -n "$VPID" ] && break; sleep 1; done
+python3 - "$VPID" <<'PY'
+import json, sys
+d = json.load(open("/tmp/bare-good.json"))
+d["report"]["postgres"]["longest_transaction"] = {"seconds": 20000, "pid": int(sys.argv[1] or 0), "database": "postgres", "role": "maluos-estate", "state": "idle in transaction"}
+json.dump(d, open("/tmp/bare-idle.json", "w"))
+PY
+DBA=$(KQ "select member_id from agent_profiles where role_key = 'dba'")
+KQ "update agent_config_versions set runtime_config = coalesce(runtime_config, '{}'::jsonb) || '{\"mode\": \"live\"}'::jsonb where id = (select current_config_version_id from agent_profiles where member_id = $DBA)" >/dev/null
+AR0=$(KQ "select coalesce(max(id), 0) from approval_requests"); ACT0=$(KQ "select count(*) from estate_actions where location_id = $BNODE")
+curl -s -o /dev/null --max-time 30 -H "Authorization: Bearer $BTOK" -H 'Content-Type: application/json' -d @/tmp/bare-idle.json http://127.0.0.1:8080/api/v1/estate/heartbeat
+RL=$(watch_run dba watch_postgres)
+AREQ=$(KQ "select id from approval_requests where id > $AR0 and action_key = 'estate_node_action' and status = 'pending' and requested_by_member_id = $DBA order by id desc limit 1")
+echo "$RL" | grep -q '^succeeded | watch_postgres (live)' && [ -n "$AREQ" ] && [ "$(KQ "select count(*) from estate_actions where location_id = $BNODE")" = "$ACT0" ] \
+  && KQ "select summary from approval_requests where id = $AREQ" | grep -q "End the session of PostgreSQL backend $VPID on boot-db-1" \
+  && KQ "select note from system_one_decisions where subject_id = $BNODE and playbook = 'watch_postgres' order by id desc limit 1" | grep -q "waits for approval (request $AREQ)" \
+  && echo "  ok   live: the long idle transaction is an alert, and the request to end that session waits for approval; nothing is queued to the node" || { echo "  FAIL the live pass: $RL | request ${AREQ:-none} | $(KQ "select decision, acted, left(note, 200) from system_one_decisions where subject_id = $BNODE order by id desc limit 1")"; sudo -n journalctl -u maludb-os-agent-runner -u maludb-os-actions-mcp --no-pager -n 12 | cut -c1-240; fail=1; }
+[ -n "$VPID" ] && [ -n "$(sudo -n -u postgres psql -Atc "select 1 from pg_stat_activity where pid = ${VPID:-0}")" ] && echo "  ok   the session is still there: nothing acts before the approval" || { echo "  FAIL the session ended before the approval"; fail=1; }
+# the approver decides (as the Approvals screen does: decide, then replay the request as its requester)
+APO=$(sudo -n -u www-data php -r 'require "/var/www/app/bootstrap.php"; require_once "/var/www/app/features/approvals/queries.php"; require_once "/var/www/app/features/approvals/replay.php"; $pdo = db();
+  $r = $pdo->query("SELECT approver_member_id FROM approval_requests WHERE id = " . (int) $argv[1])->fetch(); $_SESSION["member_id"] = (int) $r["approver_member_id"]; db_apply_context($pdo);
+  $full = find_approval_request($pdo, (int) $argv[1]); $d = decide_approval_request($pdo, (int) $argv[1], "approved", (int) $r["approver_member_id"], "boot test");
+  $o = replay_approved_request($full); finish_approval_execution($pdo, (int) $argv[1], $o["ok"], $o["error"]); echo ($d && $o["ok"]) ? "approved-and-queued" : ("FAILED " . $o["error"]);' "${AREQ:-0}" 2>&1 | tail -1)
+AID=$(KQ "select id from estate_actions where location_id = $BNODE and approval_request_id = ${AREQ:-0}")
+[ "$APO" = approved-and-queued ] && [ -n "$AID" ] && [ "$(KQ "select action || '|' || (args->>'pid') || '|' || requested_by_member_id || '|' || state from estate_actions where id = '$AID'")" = "postgres_terminate|$VPID|$DBA|queued" ] \
+  && echo "  ok   approved: the action is queued to the node as the agent, with the pid and the approval that let it through" || { echo "  FAIL the approval: $APO | $(KQ "select action, args, state from estate_actions where location_id = $BNODE order by created_at desc limit 1")"; fail=1; }
+# the node's side: its daemon takes the action from its inbox and runs the fixed verb as the node service's user
+( sudo -n -u maluos-estate env $BENV PYTHONPATH=/usr/lib/maluos timeout 150 python3 -s -m maluos_estate >/tmp/bare-daemon.log 2>&1 & )
+for i in $(seq 1 70); do [ "$(KQ "select state in ('completed', 'failed', 'refused') from estate_actions where id = '${AID:-none}'")" = t ] && break; sleep 2; done
+[ "$(KQ "select state || '|' || (result->>'ok') from estate_actions where id = '${AID:-none}'")" = 'completed|true' ] && [ -z "$(sudo -n -u postgres psql -Atc "select 1 from pg_stat_activity where pid = ${VPID:-0}")" ] \
+  && echo "  ok   the node ended that session and said so: the action is completed, the backend is gone" || { echo "  FAIL the node's action: $(KQ "select state, reason, result from estate_actions where id = '${AID:-none}'") | $(tail -3 /tmp/bare-daemon.log | cut -c1-200 | tr '\n' ' ')"; fail=1; }
+# a unit that is not on the node's list, asked by a super-admin (no approval needed): the node refuses it
+UID2=$(sudo -n -u www-data php -r 'require "/var/www/app/bootstrap.php"; require_once "/var/www/app/features/estate/nodes.php"; $pdo = db();
+  $adm = $pdo->query("SELECT * FROM members WHERE business_role = \x27super_admin\x27 AND member_kind = \x27human\x27 ORDER BY id LIMIT 1")->fetch(); $_SESSION["member_id"] = (int) $adm["id"]; db_apply_context($pdo);
+  $pdo->beginTransaction(); $a = action_create_kernel($pdo, node_row($pdo, (int) $argv[1]), "restart_unit", null, ["unit" => "ssh.service"], $adm, null, "boot test: a unit off the list"); $pdo->commit(); echo $a["id"];' "$BNODE" 2>/dev/null | tail -1)
+for i in $(seq 1 45); do [ "$(KQ "select state in ('completed', 'failed', 'refused') from estate_actions where id = '${UID2:-none}'")" = t ] && break; sleep 2; done
+[ "$(KQ "select state || '|' || reason from estate_actions where id = '${UID2:-none}'")" = 'refused|not_allowed' ] && systemctl is-active --quiet ssh \
+  && echo "  ok   a restart of a unit that is not on the node's list is refused by the node" || { echo "  FAIL the unlisted unit: $(KQ "select state, reason, result from estate_actions where id = '${UID2:-none}'")"; fail=1; }
+# the root helper and its polkit rule: the node service may start it, and it refuses a unit of no list
+out=$(sudo -n -u maluos-estate systemctl start 'maluos-estate-restart@cups.service' 2>&1); rc=$?
+[ $rc != 0 ] && ! echo "$out" | grep -qi 'access denied\|authentication\|not authorized' && sudo -n journalctl -u 'maluos-estate-restart@cups.service' --no-pager -n 5 | grep -q 'not a node of an estate\|is not in this node' \
+  && echo "  ok   the node service may start the restart helper (polkit), and the helper itself refuses a unit it has no list for" || { echo "  FAIL the restart helper: rc=$rc $(echo "$out" | tail -2 | cut -c1-200) | $(sudo -n journalctl -u 'maluos-estate-restart@cups.service' --no-pager -n 3 | cut -c1-200 | tr '\n' ' ')"; fail=1; }
+sudo -n systemctl reset-failed 'maluos-estate-restart@*' 2>/dev/null
+KQ "update agent_config_versions set runtime_config = runtime_config - 'mode' where id = (select current_config_version_id from agent_profiles where member_id = $DBA)" >/dev/null
+sudo -n -u postgres psql -qAtc "select pg_terminate_backend(pid) from pg_stat_activity where application_name = 'boot-idle'" >/dev/null 2>&1
 out=$(sudo -n env $BENV maluctl estate leave 2>&1); rc=$?
 [ $rc = 0 ] && echo "$out" | grep -q 'told; node retired' && ! sudo -n test -e $BD/node.token && ! sudo -n test -e /run/bare-estate.yaml \
   && [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -H "Authorization: Bearer $BTOK" http://127.0.0.1:8080/api/v1/estate/me)" = 410 ] \

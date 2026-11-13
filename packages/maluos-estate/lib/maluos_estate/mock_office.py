@@ -15,6 +15,8 @@ deterministic replies. Lives in maluos-estate; maluos_desk.mock_office is the sa
   GET  /mock/nodes                         the nodes and the alerts, inspection
   POST /mock/report {"node_id": N, "report": {...}}   set a node's report (the rules run)
   POST /mock/alert {"node_id": N, "kind": K, "severity": S, "title": T}   raise one by hand
+  POST /mock/action {"node_id": N, "action": A, "args": {...}}             queue a node action as the kernel does (slice 4d)
+  GET  /mock/actions                       the node actions with their state and result
   POST /mock/code {"code": "...", "kind": "desk"|"node"}
 
   GET  /api/v1/health                      {"ok": true, "office": NAME}
@@ -976,7 +978,7 @@ class Office:
         for x in sorted(self.estate_actions.values(), key=lambda t: t["created_at"]):
             if x["location_id"] == node["id"] and x["state"] == "queued":
                 x.update(state="leased", lease_until=time.time() + 120, leases=x["leases"] + 1)
-                items.append({"id": x["id"], "kind": "action", "action": x["action"], "agent": x.get("agent"), "envelope": x["envelope"], "lease_until": now(), "leases": x["leases"]})
+                items.append({"id": x["id"], "kind": "action", "action": x["action"], "agent": x.get("agent"), "args": x.get("args"), "envelope": x["envelope"], "lease_until": now(), "leases": x["leases"]})
         return items
 
     def dg_inbox_post(self, kind, subject, body, from_principal, from_node, task_id=None, options=None):
@@ -1028,8 +1030,8 @@ class Office:
 
     def dg_action_create(self, node, desk, b):
         action = b.get("action"); agent = b.get("agent")
-        if action not in ("restart_agent", "start_agent", "stop_agent", "apply_updates", "reboot"):
-            return 400, {"error": "invalid", "message": "action is one of restart_agent, start_agent, stop_agent, apply_updates, reboot"}
+        if action not in ("restart_agent", "start_agent", "stop_agent", "apply_updates", "reboot", "restart_unit", "postgres_cancel", "postgres_terminate"):
+            return 400, {"error": "invalid", "message": "action is one of restart_agent, start_agent, stop_agent, apply_updates, reboot, restart_unit, postgres_cancel, postgres_terminate"}
         if action.endswith("_agent") and not (isinstance(agent, str) and re.fullmatch(r"[a-z][a-z0-9-]{0,30}", agent)):
             return 400, {"error": "invalid", "message": "the agent actions need agent"}
         env = b.get("envelope")
@@ -1040,7 +1042,8 @@ class Office:
             return 403, {"error": reason, "message": msg}
         if (env.get("target") or {}).get("node") != self.dg_node_ref(node):
             return 400, {"error": "bad_envelope", "message": "envelope.target.node is not this node"}
-        x = {"id": "a_" + secrets.token_hex(8), "location_id": node["id"], "action": action, "agent": agent if action.endswith("_agent") else None, "envelope": env, "state": "queued",
+        args = {"unit": b.get("unit")} if action == "restart_unit" else {"pid": b.get("pid")} if action.startswith("postgres_") else None      # Phase 14 slice 4d
+        x = {"id": "a_" + secrets.token_hex(8), "location_id": node["id"], "action": action, "agent": agent if action.endswith("_agent") else None, "args": args, "envelope": env, "state": "queued",
              "lease_until": None, "leases": 0, "result": None, "reason": None, "created_at": now(), "done_at": None}
         self.estate_actions[x["id"]] = x
         if b.get("wait"):
@@ -1253,6 +1256,9 @@ class Handler(BaseHTTPRequestHandler):
             with o.lock:
                 ans = o.nodes_answer(self.base(), nid)
             return self.send(200, ans) if ans else self.err(404, "not_found", f"no node #{nid}")
+        if p == "/mock/actions":
+            with o.lock:
+                return self.send(200, {"actions": [o.dg_present_action(x) for x in o.estate_actions.values()]})
         if p == "/mock/nodes":
             with o.lock:
                 return self.send(200, {"nodes": [o.node_row(n) for n in o.nodes.values()], "alerts": o.alerts})
@@ -1557,6 +1563,15 @@ class Handler(BaseHTTPRequestHandler):
                 node["report"], node["last_report_at"] = b.get("report") or {}, now()
                 o.evaluate(node)
                 return self.send(200, {"ok": True, "node": o.node_row(node), "alerts": o.open_alerts(node)})
+        if p == "/mock/action":      # Phase 14 slice 4d: queue an action as the kernel does for an approved agent request (no desk)
+            with o.lock:
+                node = o.nodes.get(b.get("node_id"))
+                if not node:
+                    return self.err(404, "not_found", "no such node")
+                x = {"id": "a_" + secrets.token_hex(8), "location_id": node["id"], "action": b.get("action"), "agent": b.get("agent"), "args": b.get("args"),
+                     "envelope": {"id": "env_mock"}, "state": "queued", "lease_until": None, "leases": 0, "result": None, "reason": None, "created_at": now(), "done_at": None}
+                o.estate_actions[x["id"]] = x
+                return self.send(200, {"ok": True, "action": o.dg_present_action(x)})
         if p == "/mock/alert":
             with o.lock:
                 node = o.nodes.get(b.get("node_id"))

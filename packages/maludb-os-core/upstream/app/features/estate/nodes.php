@@ -19,6 +19,8 @@ const NODE_REPORT_S = 300;
 const NODE_KINDS = ['server', 'inference'];
 const NODE_REPORT_MAX_BYTES = 32 * 1024;
 const NODE_REPORTS_KEPT = 24;
+const NODE_SAMPLE_EVERY_S = 600;      // db/195: one sample of a node's numbers per ten minutes
+const NODE_SAMPLES_KEPT_DAYS = 30;
 const NODE_CRITICAL_UNITS = ['postgresql@18-main.service', 'maluos-vault.service'];
 
 // --------------------------------------------------------------------------
@@ -161,8 +163,71 @@ function node_heartbeat(PDO $pdo, array $node, string $presence, array $body): v
     $pdo->prepare('UPDATE locations SET ' . implode(', ', $sets) . ' WHERE id = :id')->execute($params);
     if ($report !== null) {
         node_evaluate($pdo, $id, $report);
+        node_sample($pdo, $id, $report);
     }
     node_set_presence($pdo, $id, (string) $node['name'], $presence);
+}
+
+/**
+ * The numbers of a report, flat (db/195): what the watching agents follow over time. Only numbers and booleans as
+ * 0/1; a part the node did not send leaves no key. Keys: load1, mem.available_pct, disk.<mount>, inodes_pct,
+ * updates.pending, updates.security, reboot_days, failed_units, clock_synced, pg.*, sec.*.
+ * @return array<string,int|float>
+ */
+function node_sample_numbers(array $rep): array
+{
+    $n = [];
+    $num = static function (string $k, $v) use (&$n): void {
+        if (is_bool($v)) { $n[$k] = $v ? 1 : 0; } elseif (is_int($v) || is_float($v)) { $n[$k] = $v; } elseif (is_string($v) && is_numeric($v)) { $n[$k] = $v + 0; }
+    };
+    if (is_array($rep['load'] ?? null)) { $num('load1', $rep['load'][0] ?? null); }
+    $m = is_array($rep['memory'] ?? null) ? $rep['memory'] : [];
+    if (!empty($m['total_mb'])) { $num('mem.available_pct', (int) round(100 * (float) ($m['available_mb'] ?? 0) / (float) $m['total_mb'])); }
+    foreach (array_slice(is_array($rep['disk'] ?? null) ? $rep['disk'] : [], 0, 12) as $d) {
+        if (is_array($d) && is_string($d['mount'] ?? null)) { $num('disk.' . mb_substr($d['mount'], 0, 80), $d['used_pct'] ?? null); }
+    }
+    $u = is_array($rep['updates'] ?? null) ? $rep['updates'] : [];
+    $num('updates.pending', $u['pending_count'] ?? null);
+    $num('updates.security', $u['security_count'] ?? null);
+    $l = is_array($rep['linux'] ?? null) ? $rep['linux'] : [];
+    if (is_array($l['failed_units'] ?? null)) { $num('failed_units', count($l['failed_units'])); }
+    $num('clock_synced', $l['clock_synced'] ?? null);
+    $num('reboot_days', $l['reboot_required_days'] ?? null);
+    $num('inodes_pct', is_array($l['inodes'] ?? null) ? ($l['inodes']['used_pct'] ?? null) : null);
+    $pg = is_array($rep['postgres'] ?? null) ? $rep['postgres'] : [];
+    foreach (['connections', 'connections_pct', 'idle_in_transaction', 'lock_waiters', 'xid_age', 'wal_mb', 'replicas', 'replication_lag_mb', 'deadlocks', 'certificate_days'] as $k) {
+        $num('pg.' . $k, $pg[$k] ?? null);
+    }
+    $num('pg.longest_transaction_s', is_array($pg['longest_transaction'] ?? null) ? ($pg['longest_transaction']['seconds'] ?? null) : ($pg === [] ? null : 0));
+    $num('pg.longest_lock_wait_s', is_array($pg['longest_lock_wait'] ?? null) ? ($pg['longest_lock_wait']['seconds'] ?? null) : ($pg === [] ? null : 0));
+    if (is_array($pg['databases'] ?? null)) {
+        $num('pg.size_mb', array_sum(array_map(static fn ($d) => is_array($d) ? (float) ($d['size_mb'] ?? 0) : 0, $pg['databases'])));
+    }
+    if (is_array($pg['superusers'] ?? null)) { $num('pg.superusers', count($pg['superusers'])); }
+    if (is_array($pg['dead_tuples'] ?? null) && $pg['dead_tuples'] !== []) {
+        $num('pg.dead_pct_max', max(array_map(static fn ($t) => is_array($t) ? (int) ($t['dead_pct'] ?? 0) : 0, $pg['dead_tuples'])));
+    }
+    foreach (['error', 'fatal', 'panic'] as $k) { $num('pg.log_' . $k, is_array($pg['log'] ?? null) ? ($pg['log'][$k] ?? null) : null); }
+    $sec = is_array($rep['security'] ?? null) ? $rep['security'] : [];
+    foreach (['failed_logins', 'failed_source_count', 'logins', 'sudo'] as $k) { $num('sec.' . $k, $sec[$k] ?? null); }
+    if (is_array($sec['new_addresses'] ?? null)) { $num('sec.new_addresses', count($sec['new_addresses'])); }
+    if (is_array($sec['listening'] ?? null)) { $num('sec.listening', count($sec['listening'])); }
+    return $n;
+}
+
+/** One sample per node per NODE_SAMPLE_EVERY_S (db/195); the sweep trims them to NODE_SAMPLES_KEPT_DAYS. */
+function node_sample(PDO $pdo, int $id, array $rep): void
+{
+    $numbers = node_sample_numbers($rep);
+    if ($numbers === []) {
+        return;
+    }
+    $st = $pdo->prepare('SELECT 1 FROM estate_node_samples WHERE location_id = :id AND ts > now() - make_interval(secs => :s) LIMIT 1');
+    $st->execute(['id' => $id, 's' => NODE_SAMPLE_EVERY_S - 30]);
+    if ($st->fetchColumn() === false) {
+        $pdo->prepare('INSERT INTO estate_node_samples (location_id, numbers) VALUES (:id, :n)')
+            ->execute(['id' => $id, 'n' => json_encode($numbers, JSON_UNESCAPED_SLASHES)]);
+    }
 }
 
 /** Presence changes raise and clear node_offline: a clean offline (shutdown, stop) is told like a swept one. */
@@ -273,6 +338,7 @@ function node_presence_sweep(PDO $pdo): array
             SELECT id FROM (SELECT id, row_number() OVER (PARTITION BY location_id ORDER BY ts DESC) AS n FROM estate_node_reports) x WHERE x.n > :keep
         ) old WHERE r.id = old.id
     SQL)->execute(['keep' => NODE_REPORTS_KEPT]);
+    $pdo->prepare('DELETE FROM estate_node_samples WHERE ts < now() - make_interval(days => :d)')->execute(['d' => NODE_SAMPLES_KEPT_DAYS]);
     return $gone;
 }
 

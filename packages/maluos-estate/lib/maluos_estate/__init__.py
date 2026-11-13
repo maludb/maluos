@@ -2,7 +2,8 @@
 
 client   the HTTP client, the enrolment files and the estate endpoints (join, heartbeat, me, leave, nodes)
 report   what a node reports with its heartbeat: units, agents, the gateway, vault alerts, updates, disk, memory, load
+collectors  the report's postgres, linux and security parts (Phase 14 slice 4b)
 __main__ maluos-estated, the heartbeat daemon (python3 -m maluos_estate)
 mock_office  the mock Business OS office for tests: desks (Phase 12 slice 6) and the estate (this slice)
 """
-VERSION = "0.8.0"
+VERSION = "0.10.0"

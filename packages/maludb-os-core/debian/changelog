@@ -1,3 +1,47 @@
+maludb-os-core (2026.11.12maluos6) resolute; urgency=medium
+
+  * Phase 14 slice 4d (docs/phase14-watching-agents.md): node actions for
+    the watching agents. db/197: the verbs restart_unit, postgres_cancel
+    and postgres_terminate with their arguments (estate_actions.args), and
+    a policy that pauses an agent's estate.node_action for its approver.
+    The kernel action estate_node_action (html/estate/node-action.php): a
+    super-admin directly, an IT agent through approval; the coordinator
+    signs the action's envelope. The playbooks ask for the one bounded
+    answer a check has (end a session idle in a transaction for hours,
+    restart a failed unit of the role's list, apply security updates left
+    for days) in live mode, and say what they would ask in shadow.
+    bin/hire_watch_agents.php grants estate_node_action. Proof
+    bin/test_node_actions.php. The kernel's files are those of its commit
+    5ab6dd9 on phase14/application-servers (the entries below named the
+    working tree; this is the same content, committed).
+
+ -- Edward Honour <ed@maludb.org>  Fri, 13 Nov 2026 06:35:00 +0000
+
+maludb-os-core (2026.11.12maluos5) resolute; urgency=medium
+
+  * Phase 14 slice 4c (docs/phase14-watching-agents.md): the watching
+    agents. db/196 and three system_one playbooks, watch_postgres,
+    watch_linux and watch_security (mcp/agent_runner/system_one/watch.py):
+    they read the estate's node reports and samples at the kernel,
+    thresholds only, no model; one probe per check per node, a decision
+    when a status changes, shadow first. bin/hire_watch_agents.php hires
+    the database administrator, the Linux administrator and the security
+    officer into IT; the component runs it once at provisioning. Vendored
+    from the kernel's working tree on phase14/application-servers; to be
+    re-vendored at the commit.
+
+ -- Edward Honour <ed@maludb.org>  Fri, 13 Nov 2026 06:00:00 +0000
+
+maludb-os-core (2026.11.12maluos4) resolute; urgency=medium
+
+  * Phase 14 slice 4b: db/195 estate_node_samples. The numbers of a node's
+    reports, one row per node per ten minutes, kept thirty days by the
+    presence sweep: what the watching agents follow over time. Vendored
+    from the kernel's working tree on phase14/application-servers; to be
+    re-vendored at the commit.
+
+ -- Edward Honour <ed@maludb.org>  Fri, 13 Nov 2026 06:10:00 +0000
+
 maludb-os-core (2026.11.12maluos3) resolute; urgency=medium
 
   * Phase 14 slice 4a (docs/phase14-watching-agents.md): a node that names

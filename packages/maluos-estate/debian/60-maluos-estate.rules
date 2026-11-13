@@ -10,6 +10,9 @@ polkit.addRule(function(action, subject) {
             return polkit.Result.YES;
         if (unit == "maluos-estate-updates.service" && verb == "start")
             return polkit.Result.YES;
+        // Phase 14 slice 4d: restart_unit goes through a root helper that checks the unit against this node's list
+        if (/^maluos-estate-restart@[A-Za-z0-9\\\\:_.@-]+\.service$/.test(unit) && verb == "start")
+            return polkit.Result.YES;
     }
     if (action.id == "org.freedesktop.login1.reboot" || action.id == "org.freedesktop.login1.reboot-multiple-sessions")
         return polkit.Result.YES;

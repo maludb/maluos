@@ -261,12 +261,27 @@ def report():
     part("database", database)
     if rep.get("database") is None:
         rep.pop("database", None)       # a node with its own cluster reports as it always did
+    # Phase 14 slice 4b: what the watching agents read (collectors.py); one state file for what they remember
+    from maluos_estate import collectors as K
+    st = K._state()
+    part("linux", K.linux)
+    part("security", K.security, st)
+    part("postgres", K.postgres, st)
+    if rep.get("postgres") is None and not any(e.startswith("postgres:") for e in errors):
+        rep.pop("postgres", None)       # no cluster of its own to report
+    K._save(st)
     rep["errors"] = errors
     data = json.dumps(rep)
     if len(data) > MAX_BYTES:
         for key, n in (("units", 40), ("agents", 20), ("disk", 6)):
             if isinstance(rep.get(key), list):
                 rep[key] = rep[key][:n]
+        if isinstance(rep.get("security"), dict):
+            rep["security"]["listening"] = (rep["security"].get("listening") or [])[:20]
+            rep["security"]["failed_sources"] = (rep["security"].get("failed_sources") or [])[:3]
+        if isinstance(rep.get("postgres"), dict):
+            rep["postgres"]["databases"] = (rep["postgres"].get("databases") or [])[:6]
+            rep["postgres"]["dead_tuples"] = (rep["postgres"].get("dead_tuples") or [])[:3]
         if isinstance(rep.get("vault"), dict):
             rep["vault"]["alerts"] = (rep["vault"].get("alerts") or [])[:5]
         rep["errors"].append(f"report trimmed from {len(data)} bytes")

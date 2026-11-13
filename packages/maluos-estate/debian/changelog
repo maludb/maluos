@@ -1,3 +1,47 @@
+maluos-estate (0.10.0) resolute; urgency=medium
+
+  * Phase 14 slice 4d (docs/phase14-watching-agents.md): three more node
+    actions, each a fixed verb with checked arguments, each only if this
+    node's actions.allow names it.
+    restart_unit: a unit of this node's own list (actions.units in
+    estate.yaml, else the list of the host's role; maluctl estate actions
+    units …). The node service starts maluos-estate-restart@<unit>.service,
+    a root helper that checks the list again before it restarts anything.
+    postgres_cancel, postgres_terminate: one client backend by pid, as the
+    node service's own role (pg_signal_backend: never a superuser's
+    session); the pid is an integer or nothing runs.
+  * A bare node (a database server) allows apply_updates, restart_unit,
+    postgres_cancel and postgres_terminate by default; other nodes gain
+    restart_unit. reboot stays off unless the node's owner allows it.
+  * The mock office queues an action with arguments (/mock/action) and
+    lists the actions (/mock/actions).
+
+ -- Edward Honour <ed@maludb.org>  Fri, 13 Nov 2026 06:30:00 +0000
+
+maluos-estate (0.9.0) resolute; urgency=medium
+
+  * Phase 14 slice 4b (docs/phase14-watching-agents.md): the collectors.
+    The node's report gains three parts for the watching agents on the
+    kernel server, numbers and short facts only:
+    postgres (a database server, or a host whose own cluster holds its
+    data): connections against the limit, the longest transaction and lock
+    wait (seconds and the pid, never the query), WAL, replication, sizes,
+    dead tuples and vacuum age, transaction-id age, ERROR/FATAL/PANIC
+    counts in the server log since the last report, the server
+    certificate's days left, superusers other than postgres. Read as the
+    node service's user by peer authentication (pg_monitor only).
+    linux: failed units, a pending reboot and since when, clock sync,
+    inode use.
+    security: failed logins and their top sources, logins from addresses
+    not seen before, sudo uses and their users, what listens beyond
+    loopback, a digest of /etc/maluos and of the units with the time it
+    last changed, the firewall.
+  * The node service's user joins systemd-journal and adm (the journal,
+    the PostgreSQL server log). What the collectors remember between
+    reports is /var/lib/maluos/estate/collect.json (0600).
+
+ -- Edward Honour <ed@maludb.org>  Fri, 13 Nov 2026 06:10:00 +0000
+
 maluos-estate (0.8.0) resolute; urgency=medium
 
   * Phase 14 slice 4a (docs/phase14-watching-agents.md): a bare node.

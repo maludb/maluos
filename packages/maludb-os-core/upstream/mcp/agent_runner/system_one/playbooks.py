@@ -8,6 +8,8 @@ MCP with the run's own token, so the agent's grants and the approval hook apply 
 
 The Auditor (Audit): scheduled_evals, trace_sampling, evidence_integrity.
 The Sysadmin (IT): health, logs_and_guardrails.
+The watching agents (IT; db/196, MaluOS Phase 14 slice 4c): watch_postgres, watch_linux, watch_security. They read the
+estate's node reports and samples; thresholds only, no model (watch.py).
 """
 from __future__ import annotations
 
@@ -21,7 +23,7 @@ from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
 from .. import config, grading, jev, store
-from . import collectors
+from . import collectors, watch
 
 log = logging.getLogger("system_one")
 ACTIONS_URL = "http://127.0.0.1:8813/mcp"
@@ -366,5 +368,85 @@ async def logs_and_guardrails(ctx: Ctx) -> str:
     return ctx.summary("logs_and_guardrails") + f"; {len(lines)} lines, {len(grouped)} kinds" + (f", {left} left for the next pass" if left else "")
 
 
+# ---- the watching agents (db/196) ---------------------------------------------------------------------------
+
+async def _watch(ctx: Ctx, playbook: str) -> str:
+    """One pass over the estate's nodes: the checks of watch.py as probes `node:<id>:<area>:<check>`; a decision is
+    recorded when a check's status changes (as `health` does), an escalation only in live mode. A check that no
+    longer applies (a disk unmounted, a node retired) leaves its probe row as it was: it is history."""
+    area, checks_of = watch.AREAS[playbook]
+    thr = ctx.config.get("thresholds") or {}
+    ports = ctx.config.get("expected_ports") if isinstance(ctx.config.get("expected_ports"), dict) else None
+    now_s = datetime.now(timezone.utc).timestamp()
+    p = await store.pool()
+    async with p.acquire() as con:
+        nodes = [dict(r) for r in await con.fetch("SELECT * FROM watch_nodes()")]
+    judged = 0
+    for node in nodes:
+        if isinstance(node.get("report"), str):
+            node["report"] = json.loads(node["report"])
+        if not watch.applies(playbook, node):
+            continue
+        async with p.acquire() as con:
+            samples = [dict(r) for r in await con.fetch("SELECT age_s, numbers FROM watch_node_samples($1, $2)", node["location_id"], 24 * 7)]
+            rows = await con.fetch("SELECT probe, status, measured FROM system_probes WHERE probe LIKE $1", f"node:{node['location_id']}:{area}:%")
+        for s in samples:
+            if isinstance(s.get("numbers"), str):
+                s["numbers"] = json.loads(s["numbers"])
+        before = {r["probe"]: r for r in rows}
+        prev = {}
+        for r in rows:
+            m = r["measured"]
+            prev[r["probe"].split(":", 3)[3]] = json.loads(m) if isinstance(m, str) else (m or {})
+        found = checks_of(node, samples, thr, prev, now_s, ports) if playbook == "watch_security" else checks_of(node, samples, thr, prev, now_s)
+        for c in found:
+            judged += 1
+            key = watch.probe_key(node, c)
+            was = before[key]["status"] if key in before else None
+            async with p.acquire() as con:
+                await con.execute("""
+                    INSERT INTO system_probes (probe, status, detail, measured, agent_member_id, checked_at, changed_at)
+                    VALUES ($1,$2,$3,$4::jsonb,$5,now(),now())
+                    ON CONFLICT (probe) DO UPDATE SET status = EXCLUDED.status, detail = EXCLUDED.detail, measured = EXCLUDED.measured,
+                           agent_member_id = EXCLUDED.agent_member_id, checked_at = now(),
+                           changed_at = CASE WHEN system_probes.status <> EXCLUDED.status THEN now() ELSE system_probes.changed_at END""",
+                    key, c.status, c.detail[:1000], json.dumps(c.measured, default=str), ctx.member_id)
+            if was == c.status or (was is None and c.status == "ok"):
+                continue                                    # only a change is a judgement; a first sight that is fine is not one
+            if c.status == "ok":
+                await ctx.decide(playbook, "node", int(node["location_id"]), key, "record", note=f"Recovered: {c.detail}")
+            else:
+                # db/197: a check with one bounded answer asks the node for it through the kernel action
+                # estate_node_action, which pauses for this agent's approver. In shadow the note says what it
+                # would have asked; nothing is sent.
+                note, fix = c.detail, watch.remedy(c, node, ctx.config)
+                if fix is not None and ctx.mode == "live":
+                    answer = await ctx.act("estate_node_action", {k: (str(v) if k == "pid" else v) for k, v in fix.items()})
+                    if answer.get("status") == "pending_approval":
+                        note += f" Asked to {watch.remedy_words(fix)}: waits for approval (request {answer.get('approval_request_id')})."
+                    elif answer.get("status") == "success":
+                        note += f" Asked the node to {watch.remedy_words(fix)}."
+                    else:
+                        note += f" Could not ask to {watch.remedy_words(fix)}: {str(answer.get('message') or answer.get('status'))[:160]}"
+                elif fix is not None:
+                    note += f" Would ask to {watch.remedy_words(fix)} (with approval)."
+                await ctx.decide(playbook, "node", int(node["location_id"]), key, "alert" if c.status == "failed" else "finding", note=note,
+                                 escalate={"reason_kind": "error", "summary": f"{playbook.replace('watch_', '').capitalize()} watch: {c.detail}"})
+    return ctx.summary(playbook) + f"; {judged} checks on {len(nodes)} node(s)"
+
+
+async def watch_postgres(ctx: Ctx) -> str:
+    return await _watch(ctx, "watch_postgres")
+
+
+async def watch_linux(ctx: Ctx) -> str:
+    return await _watch(ctx, "watch_linux")
+
+
+async def watch_security(ctx: Ctx) -> str:
+    return await _watch(ctx, "watch_security")
+
+
 PLAYBOOKS = {"scheduled_evals": scheduled_evals, "trace_sampling": trace_sampling, "evidence_integrity": evidence_integrity,
-             "health": health, "logs_and_guardrails": logs_and_guardrails}
+             "health": health, "logs_and_guardrails": logs_and_guardrails,
+             "watch_postgres": watch_postgres, "watch_linux": watch_linux, "watch_security": watch_security}

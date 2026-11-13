@@ -3,7 +3,8 @@ declare(strict_types=1);
 
 /**
  * A system manager's action on a node (db/190). POST /api/v1/estate/nodes/ID/actions (desk token, an operator):
- * {"action": restart_agent|start_agent|stop_agent|apply_updates|reboot, "agent": NAME, "envelope": {…}, "wait": 30}
+ * {"action": restart_agent|start_agent|stop_agent|apply_updates|reboot|restart_unit|postgres_cancel|postgres_terminate,
+ * "agent": NAME, "unit": NAME.service, "pid": N, "envelope": {…}, "wait": 30}
  * — queued to the node, which runs only what its own actions.allow permits. GET /api/v1/estate/actions/ID (the
  * requester, an operator, or the node): the action's state and result; GET /api/v1/estate/actions: the last 50.
  */
@@ -22,7 +23,8 @@ if ($method === 'POST') {
     $body = is_array($body) ? $body : [];
     if (!is_array($body['envelope'] ?? null)) { api_error('envelope_required', 'A node action carries the desk\'s envelope.', 400); }
     $pdo->beginTransaction();
-    $a = action_create($pdo, $node, (string) ($body['action'] ?? ''), is_string($body['agent'] ?? null) ? $body['agent'] : null, $body['envelope'], $ctx);
+    $a = action_create($pdo, $node, (string) ($body['action'] ?? ''), is_string($body['agent'] ?? null) ? $body['agent'] : null, $body['envelope'], $ctx,
+        ['unit' => $body['unit'] ?? null, 'pid' => $body['pid'] ?? null]);      // db/197: restart_unit names a unit, postgres_cancel and postgres_terminate a pid
     $pdo->commit();
     if (isset($body['wait']) && is_numeric($body['wait']) && (float) $body['wait'] > 0) { $a = action_wait($pdo, $a['id'], (float) $body['wait']); }
     api_json(['ok' => true, 'surface' => DESK_SURFACE, 'action' => present_action($a)], 201);

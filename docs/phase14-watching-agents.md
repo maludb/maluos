@@ -1,7 +1,7 @@
 # Phase 14 slice 4: the agents that watch the servers
 
 2026-11-13. The design, agreed by the owner the same day (the six recommendations below, all accepted).
-Step 4a is written; 4b to 4d are not. Follows `docs/phase14-database-server.md` (gap 7, the owner's answer of
+Steps 4a to 4d are written (see "As built"); their boot test is the open item. Follows `docs/phase14-database-server.md` (gap 7, the owner's answer of
 2026-11-12) and `docs/phase14-application-servers.md` ("Watching agents").
 
 ## What the owner asked for
@@ -174,6 +174,112 @@ and joins the ordinary way; nothing else differs.
 - The database server reaches the kernel at its public URL (`https://app.<domain>`), like any node: it
   needs a route to the proxy. Not built yet: `/office-setup` asking for the enrolment on a database
   server (the plan's `enroll` block does it).
+
+## As built: step 4b (2026-11-13)
+
+- **maluos-estate 0.9.0**, `maluos_estate/collectors.py`: the report's `postgres`, `linux` and `security`
+  parts, as designed, with these particulars:
+  - `postgres` applies on a database server and on a host whose own cluster holds its data; an office
+    whose data is on a database server sends none (its own cluster is idle). The longest transaction and
+    lock wait carry seconds, the pid, the database, the role and the state, never the statement. Dead
+    tuples are read in the eight largest databases; one the monitor may not connect to is named in
+    `tables_unread`.
+  - The server log's ERROR, FATAL and PANIC lines are counted from the offset of the last report; the
+    first report starts at the log's end; a rotated log is read from its start. A line's level is its
+    first level word, so a STATEMENT line that quotes "ERROR:" is not an error.
+  - `security.listening` comes from `/proc/net` (the unit's sandbox allows no netlink), loopback left
+    out; the kernel will hold the expected set per role. `security.config` is a digest over `/etc/maluos`
+    and `/etc/systemd/system` (path, mode, owner, content hash) with the time it last changed. The first
+    report learns the login addresses and the digest: nothing is "new" or "changed" then.
+  - No redacted log excerpts (decision 3): counts only.
+  - Not built: backup age (no backup directory is configured anywhere yet).
+- The node service's user joins `systemd-journal` and `adm`. What the collectors remember is
+  `/var/lib/maluos/estate/collect.json` (0600).
+- **maluos-firstboot 0.1.21**: `maluos_monitor` (NOLOGIN, `pg_monitor`) and a login role named after the
+  node service's user (`maluos-estate`) as its only member, on a host's own cluster. Peer authentication,
+  no password.
+- **Kernel** db/195 `estate_node_samples`: the report's numbers, flat (`pg.connections_pct`,
+  `sec.failed_logins`, `disk./`, …), one row per node per ten minutes, thirty days, trimmed by the
+  presence sweep. `node_sample_numbers()` in `app/features/estate/nodes.php`; proof in
+  `bin/test_estate_nodes.php` (five new checks, among them that a sample carries no user, address or
+  unit name).
+- Tests: `tests/collectors-test.py` (26 checks on fixtures); the boot test's "the node's collectors"
+  section and one more check in "a bare node".
+
+## As built: step 4c (2026-11-13)
+
+- **Kernel** db/196: the three playbook names admitted in `system_one_decisions`; `watch_nodes()` and
+  `watch_node_samples(node, hours)`, SECURITY DEFINER, the runner's only way to the nodes and their
+  samples.
+- `mcp/agent_runner/system_one/watch.py`: the checks, pure (a node, its samples, the thresholds, what the
+  last pass knew) and `playbooks.py` `watch_postgres`, `watch_linux`, `watch_security`. Like the
+  Sysadmin's `health` they keep one row per check in `system_probes`
+  (`node:<id>:<area>:<check>`, so the checks show on AI Ops → System beside the kernel's own) and record
+  a decision in `system_one_decisions` only when a check's status changes: a warning is a `finding`, a
+  failure an `alert`, a return to ok a `record` ("Recovered: …"). In live mode a finding or an alert is
+  raised with `escalation_raise` to the agent's approver; in shadow nothing is sent.
+- **Checks and default thresholds** (all overridable in the agent's versioned `runtime_config.thresholds`):
+  - PostgreSQL: connections 80 % / 95 %; a transaction open 1 h / 4 h (the finding carries the pid);
+    a lock wait 1 min / 10 min; dead rows over 20 % with no vacuum in a day; transaction-id age
+    1.0 / 1.5 billion; the certificate under 30 / 7 days; the log's errors over 50, any FATAL, a PANIC
+    fails; a replica gone or over 1 GB behind; a superuser that appears after the first pass (a finding
+    for a day, then known).
+  - Linux: silent for three heartbeats (then nothing else is judged on the old report); a disk at
+    85 % / 95 %, or filling within 14 / 3 days by a least-squares line over the week's samples (at
+    least four samples over six hours); failed units; a reboot pending over 7 days; the clock; inodes
+    over 90 %; memory under 5 % available.
+  - Security: failed logins 20 / 200 per report window, or 10 from one address; a login from an address
+    not seen before; a port listening outside the node's expected set; a change to `/etc/maluos` or a
+    unit since the last pass; security updates pending over 3 days.
+- **Expected ports** are explicit, not learned: a set per role in `watch.py` (every server: ssh, DHCP,
+  mDNS, the overlay; kernel: 80, 443, the door 8081; application server: 80, 443, the relay range
+  9000-9999; database server: 5432 and the listener), extended per role in the agent's
+  `runtime_config.expected_ports`. An unexpected port stays a finding until a person adds it there.
+- **`bin/hire_watch_agents.php`** hires the three into IT (roles `dba`, `linux_admin`,
+  `security_officer`), each with one duty (`playbook: watch_…`, every ten minutes, staggered), the one
+  tool `escalation_raise`, a budget of 1 USD (they call no model), shadow mode. The MaluOS component runs
+  it once at provisioning. The agents' model is the harness's registered one (JEV) only because a hire
+  names a model; these playbooks never ask it, so an office without it loses nothing.
+- Tests: `mcp/agent_runner/tests/test_watch.py` (42 checks on fixture reports: every finding the design
+  names, a healthy node raising none, thresholds from config, no statement or log line in any detail);
+  the boot test runs the three playbooks on the real runner against a crafted report of the bare node
+  (three faults → exactly three probes and three shadow decisions, no escalation; a second pass adds
+  nothing; a healthy report records three recoveries).
+- Not built: an "explained by an approved action" exemption for configuration changes (it needs 4d's
+  action records); a screen of its own (the probes and decisions appear on the existing System and
+  decisions screens).
+
+## As built: step 4d (2026-11-13)
+
+- **Kernel** db/197: the verbs `restart_unit`, `postgres_cancel`, `postgres_terminate` and
+  `estate_actions.args`; an approval policy on `estate.node_action` for agents (expires in a day). The
+  kernel action `estate_node_action` (`html/estate/node-action.php`, in the action registry): a
+  super-admin's request is queued at once, an IT agent's pauses for its approver and is replayed on
+  approval; the coordinator signs the action's envelope, naming who asked; the action row carries the
+  approval that let it through. An operator's desk may send the new verbs too
+  (`maluctl office estate action NODE restart_unit UNIT | postgres_cancel PID | postgres_terminate PID`).
+- **Remedies** (`watch.py` `remedy()`): a transaction open past the failure threshold asks to end the
+  session when it is idle in a transaction, to cancel the statement when it is running; a failed unit asks
+  for a restart only when the unit is in the role's list; security updates left for days ask for
+  `apply_updates`. Live mode sends the request (it waits for approval); shadow records "would ask".
+  `remedies: false` in the agent's config turns them off. Full connections, lock waits, logins and ports
+  have no remedy: a person looks.
+- **maluos-estate 0.10.0**: the node runs a verb only if its `actions.allow` names it. `restart_unit`
+  takes a unit of the node's own list (`actions.units`, else the role's; `maluctl estate actions units`)
+  and goes through `maluos-estate-restart@<unit>.service`, a root helper that checks the list again.
+  The PostgreSQL verbs run a fixed statement as the node service's role with an integer pid.
+  A bare node allows `apply_updates`, `restart_unit`, `postgres_cancel`, `postgres_terminate`; other
+  nodes gain `restart_unit`; `reboot` stays off.
+- **maluos-firstboot 0.1.22**: `maluos_monitor` also holds `pg_signal_backend` (it cannot signal a
+  superuser's session). **maluos-desk 0.9.1**: the desk command's new verbs.
+- Not as designed: `postgres_vacuum` was left out, as decided. Not built: a configuration change
+  "explained by an approved action" in the security officer's check.
+- Tests: `bin/test_node_actions.php` (kernel: arguments, envelope, inbox, the handler over HTTP as a
+  super-admin and as an agent through approval and replay); `tests/estate-bare-local-test.sh` (the node:
+  a real session ended, an unlisted unit, a unit name with a command, a reboot and a non-numeric pid
+  refused); `test_watch.py` (the remedies); the boot test's "node actions" part (the database
+  administrator set live, the approval, the node ending a real session, an unlisted unit refused, the
+  restart helper under polkit).
 
 ## Not in this slice
 

@@ -30,8 +30,10 @@ A desk does not enrol twice: its desk row is its node record.
   maluctl estate tasks ID [--json]          a task's record with its provenance
   maluctl estate keys [--json]              the members' public keys (the daemon caches them in /run/maluos/estate/keys.json)
   maluctl estate inbox [--json]             the daemon's inbox loop: polls, items, the last error
-  sudo maluctl estate actions [allow a,b,…] what an operator may do to this node remotely (restart_agent, start_agent,
-                                            stop_agent, apply_updates; reboot is off unless allowed here)
+  sudo maluctl estate actions [allow a,b,…] what the office may do to this node remotely (restart_agent, start_agent,
+                                            stop_agent, apply_updates, restart_unit, postgres_cancel, postgres_terminate;
+                                            reboot is off unless allowed here)
+  sudo maluctl estate actions units a.service,b.service | default   the units restart_unit may name (default: by this host's role)
   maluctl estate inference [--json] [--refresh] [--peers]   Phase 13 slice 3: the inference facts this node reports, the backends the
                                             estate publishes to it and the peers allowed to call it; --refresh re-reads both now
   maluctl estate memory [--json] [--refresh] [--peers]   Phase 13 slice 4: the memory facts this node reports, the holders the office
@@ -182,8 +184,8 @@ def join(a):
             gateway_reload()
     allow_actions = [x for x in (opt(a, "--allow-actions") or ",".join(C.BARE_ACTIONS if bare else C.DEFAULT_ACTIONS)).split(",") if x]
     for x in allow_actions:
-        if x not in ("restart_agent", "start_agent", "stop_agent", "apply_updates", "reboot"):
-            sys.exit(f"--allow-actions {x}: restart_agent, start_agent, stop_agent, apply_updates or reboot")
+        if x not in C.ACTIONS:
+            sys.exit(f"--allow-actions {x}: one of {', '.join(C.ACTIONS)}")
     # 2. the node key: ed25519, made here, the private half straight into the vault as the node, never on disk after
     with tempfile.TemporaryDirectory(prefix="maluos-estate-") as d:
         kp = os.path.join(d, "key")
@@ -801,10 +803,27 @@ def actions_cmd(a):
         need_root(); a.pop(0)
         allow = [x for x in (a.pop(0) if a else "").split(",") if x]
         for x in allow:
-            if x not in ("restart_agent", "start_agent", "stop_agent", "apply_updates", "reboot"):
-                sys.exit(f"{x}: restart_agent, start_agent, stop_agent, apply_updates or reboot")
-        conf["actions"] = {"allow": allow}; C.write_conf(conf)
+            if x not in C.ACTIONS:
+                sys.exit(f"{x}: one of {', '.join(C.ACTIONS)}")
+        conf["actions"] = {**(conf.get("actions") or {}), "allow": allow}; C.write_conf(conf)
+    elif a and a[0] == "units":
+        # slice 4d: the units restart_unit may name here; `default` goes back to the role's list
+        import re
+        need_root(); a.pop(0)
+        arg = a.pop(0) if a else ""
+        acts = dict(conf.get("actions") or {})
+        if arg == "default":
+            acts.pop("units", None)
+        else:
+            units = [x for x in arg.split(",") if x]
+            for x in units:
+                if not re.fullmatch(C.UNIT_RE, x):
+                    sys.exit(f"{x}: a service unit's name, like apache2.service")
+            acts["units"] = units
+        conf["actions"] = acts; C.write_conf(conf)
     print(f"an operator may {', '.join(C.allowed_actions(conf)) or 'do nothing'} on this node remotely")
+    if "restart_unit" in C.allowed_actions(conf):
+        print(f"restart_unit may name: {', '.join(C.allowed_units(conf)) or 'no unit'}")
     return 0
 
 

@@ -35,7 +35,7 @@ TOK=$(sudo -n cat "$D/state/node.token" 2>/dev/null)
 ! echo "$out" | grep -qF "$TOK" && ok "the join's output does not show the token" || bad "the token is in the join's output"
 [ "$(stat -c '%a %U' "$D/state/node.token")" = "600 $ME" ] && [ "$(stat -c '%a %U' "$D/state/node.key")" = "600 $ME" ] && [ "$(stat -c '%a' "$D/state")" = 700 ] \
   && ok "the token and the key are 0600 files of the node service's user in a 0700 directory" || bad "file modes: $(stat -c '%a %U %n' "$D/state" "$D/state"/node.* 2>&1 | tr '\n' ' ')"
-python3 - "$D/etc/estate.yaml" "$TOK" <<'PY' && ok "estate.yaml: bare, no principal, no vault secrets, no overlay, actions apply_updates only, no token in it" || bad "estate.yaml"
+python3 - "$D/etc/estate.yaml" "$TOK" <<'PY' && ok "estate.yaml: bare, no principal, no vault secrets, no overlay, the bare node's four actions (no reboot), no token in it" || bad "estate.yaml"
 import json, sys
 raw = open(sys.argv[1]).read()
 try:
@@ -43,7 +43,7 @@ try:
 except ValueError:
     import yaml; c = yaml.safe_load(raw)
 assert c.get("bare") is True and c.get("principal") is None and not c.get("secrets") and not c.get("overlay"), c
-assert c["actions"]["allow"] == ["apply_updates"] and c["node"]["name"] == "db-1", c
+assert c["actions"]["allow"] == ["apply_updates", "restart_unit", "postgres_cancel", "postgres_terminate"] and c["node"]["name"] == "db-1", c
 assert sys.argv[2] not in raw
 PY
 estate status 2>&1 | grep -q 'a bare node: no vault' && ok "status says it is a bare node" || bad "status: $(estate status 2>&1 | tail -3)"
@@ -75,6 +75,28 @@ assert not rep.get("vault") and not rep.get("gateway"), (rep.get("vault"), rep.g
 PY
 grep -q '"role": "database-server"' "$D/mock.log" "$D/nodes.json" 2>/dev/null || env "${ENVV[@]}" python3 -c 'from maluos_estate import client as C; assert C.facts()["role"] == "database-server"' \
   && ok "the node's facts carry its role (database-server)" || bad "the role fact"
+# Phase 14 slice 4d: the verbs the office may ask of this node (queued as the kernel queues an approved request)
+estate actions 2>&1 | grep -q 'apply_updates, restart_unit, postgres_cancel, postgres_terminate' && estate actions 2>&1 | grep -q 'restart_unit may name: postgresql@18-main.service, maludb-mc2dbd.service' \
+  && ok "a bare database server allows updates, a restart of its two units, and cancelling or ending a backend" || bad "actions: $(estate actions 2>&1 | tr '\n' ' ')"
+( PGAPPNAME=estate-bare-victim psql -qAtX -d postgres -c "select pg_sleep(300)" >/dev/null 2>&1 & )
+for i in $(seq 1 20); do VPID=$(psql -AtX -d postgres -c "select pid from pg_stat_activity where application_name = 'estate-bare-victim'" 2>/dev/null); [ -n "$VPID" ] && break; sleep 0.3; done
+act() { curl -fsS -H 'Content-Type: application/json' -d "{\"node_id\": $NID, \"action\": \"$1\", \"args\": $2}" "$URL/mock/action" | python3 -c 'import json,sys; print(json.load(sys.stdin)["action"]["id"])'; }
+A1=$(act restart_unit '{"unit": "ssh.service"}'); A2=$(act restart_unit '{"unit": "postgresql@18-main.service; reboot"}'); A3=$(act reboot null)
+A4=$(act postgres_terminate "{\"pid\": ${VPID:-0}}"); A5=$(act postgres_cancel '{"pid": 4194000}'); A6=$(act postgres_terminate '{"pid": "1; select 1"}')
+for i in $(seq 1 90); do curl -fsS "$URL/mock/actions" | python3 -c 'import json,sys; sys.exit(0 if all(a["state"] not in ("queued", "leased") for a in json.load(sys.stdin)["actions"]) else 1)' && break; sleep 1; done
+curl -fsS "$URL/mock/actions" > "$D/actions.json"
+python3 - "$D/actions.json" "$A1" "$A2" "$A3" "$A4" "$A5" "$A6" <<'PY' && ok "the node's answers: a unit off its list and a unit with a command refused, reboot refused, the backend ended, an unknown pid failed, a pid that is not a number refused" || bad "the actions: $(python3 -c "import json; print([(a['action'], a['state'], a.get('reason'), (a.get('result') or {}).get('error')) for a in json.load(open('$D/actions.json'))['actions']])")"
+import json, sys
+acts = {a["id"]: a for a in json.load(open(sys.argv[1]))["actions"]}
+a1, a2, a3, a4, a5, a6 = (acts[i] for i in sys.argv[2:8])
+assert a1["state"] == "refused" and a1["reason"] == "not_allowed" and "actions.units" in a1["result"]["error"], a1
+assert a2["state"] == "refused" and a2["reason"] == "not_allowed", a2
+assert a3["state"] == "refused" and a3["reason"] == "not_allowed" and "actions.allow" in a3["result"]["error"], a3
+assert a4["state"] == "completed" and a4["result"]["ok"] is True and "pg_terminate_backend" in a4["result"]["output"], a4
+assert a5["state"] == "failed" and "no client backend" in a5["result"]["error"], a5
+assert a6["state"] == "refused" and a6["reason"] == "invalid", a6
+PY
+[ -z "$(psql -AtX -d postgres -c "select pid from pg_stat_activity where application_name = 'estate-bare-victim'")" ] && ok "the session is gone from the cluster" || bad "the session is still there"
 kill "$DAEMON" 2>/dev/null; wait "$DAEMON" 2>/dev/null; DAEMON=
 grep -q 'said offline' "$D/daemon.log" && ok "the daemon said offline when stopped" || bad "daemon: $(tail -3 "$D/daemon.log")"
 ! grep -qF "$TOK" "$D/daemon.log" && ok "the daemon's log does not show the token" || bad "the token is in the daemon's log"

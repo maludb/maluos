@@ -110,6 +110,33 @@ $ok($call('GET', '/api/v1/estate/me.php', 'node_notatoken')[0] === 401 && $call(
 $row = node_row($pdo, $nodeId);
 $ok($st === 200 && $j['node']['last_report_at'] !== null && (int) $row['cpu_cores'] === 32 && $row['app_version'] === 'maluos-estate 0.1.2' && is_string($row['report']) && str_contains($row['report'], '"helpdesk"'), "heartbeat with a report: facts updated, the report stored, last_report_at set ({$st})");
 $ok((int) $pdo->query("SELECT count(*) FROM estate_node_reports WHERE location_id = {$nodeId}")->fetchColumn() === 1 && (int) $pdo->query("SELECT count(*) FROM estate_alerts WHERE location_id = {$nodeId}")->fetchColumn() === 0, 'the report is kept; a healthy report raises nothing');
+// MaluOS Phase 14 slice 4b (db/195): the report's numbers are sampled, once per ten minutes
+$ok((int) $pdo->query("SELECT count(*) FROM estate_node_samples WHERE location_id = {$nodeId}")->fetchColumn() === 1, 'the first report leaves one sample');
+$watch = $healthy() + [
+    'linux' => ['failed_units' => ['x.service'], 'clock_synced' => true, 'inodes' => ['mount' => '/', 'used_pct' => 12], 'reboot_required_days' => null],
+    'postgres' => ['connections' => 40, 'max_connections' => 100, 'connections_pct' => 40, 'longest_transaction' => ['seconds' => 4000, 'pid' => 4242, 'database' => 'maludb_os', 'role' => 'app_rw', 'state' => 'idle in transaction'],
+                   'longest_lock_wait' => null, 'xid_age' => 1200000, 'wal_mb' => 512, 'databases' => [['name' => 'maludb_os', 'size_mb' => 300], ['name' => 'maludb', 'size_mb' => 200]],
+                   'superusers' => [], 'dead_tuples' => [['table' => 'public.t', 'dead' => 9000, 'dead_pct' => 31, 'database' => 'maludb_os']], 'log' => ['error' => 3, 'fatal' => 0, 'panic' => 0], 'certificate_days' => 700],
+    'security' => ['failed_logins' => 17, 'failed_source_count' => 2, 'logins' => 1, 'new_addresses' => [['address' => '192.0.2.9', 'user' => 'edward', 'method' => 'publickey']], 'sudo' => 4,
+                   'listening' => [['proto' => 'tcp', 'port' => 22, 'scope' => 'any'], ['proto' => 'tcp', 'port' => 5432, 'scope' => 'any']]],
+];
+$call('POST', '/api/v1/estate/heartbeat.php', $token, ['presence' => 'online', 'report' => $watch]);
+$ok((int) $pdo->query("SELECT count(*) FROM estate_node_samples WHERE location_id = {$nodeId}")->fetchColumn() === 1, 'a second report within ten minutes leaves no second sample');
+$pdo->exec("DELETE FROM estate_node_samples WHERE location_id = {$nodeId}");      // app_rw may not rewrite a sample: an older one is put in its place
+$pdo->exec("INSERT INTO estate_node_samples (location_id, ts, numbers) VALUES ({$nodeId}, now() - interval '11 minutes', '{\"load1\": 1}')");
+$call('POST', '/api/v1/estate/heartbeat.php', $token, ['presence' => 'online', 'report' => $watch]);
+$nums = json_decode((string) $pdo->query("SELECT numbers FROM estate_node_samples WHERE location_id = {$nodeId} ORDER BY ts DESC LIMIT 1")->fetchColumn(), true) ?: [];
+$ok((int) $pdo->query("SELECT count(*) FROM estate_node_samples WHERE location_id = {$nodeId}")->fetchColumn() === 2
+    && ($nums['pg.connections_pct'] ?? null) === 40 && ($nums['pg.longest_transaction_s'] ?? null) === 4000 && ($nums['pg.longest_lock_wait_s'] ?? null) === 0 && ($nums['pg.size_mb'] ?? null) == 500
+    && ($nums['pg.dead_pct_max'] ?? null) === 31 && ($nums['pg.log_error'] ?? null) === 3 && ($nums['pg.superusers'] ?? null) === 0 && ($nums['pg.certificate_days'] ?? null) === 700
+    && ($nums['sec.failed_logins'] ?? null) === 17 && ($nums['sec.new_addresses'] ?? null) === 1 && ($nums['sec.listening'] ?? null) === 2
+    && ($nums['failed_units'] ?? null) === 1 && ($nums['clock_synced'] ?? null) === 1 && !array_key_exists('reboot_days', $nums) && ($nums['inodes_pct'] ?? null) === 12,
+    'after ten minutes a sample with the numbers of the postgres, linux and security parts (' . count($nums) . ' keys)');
+$ok(!str_contains(json_encode($nums), 'edward') && !str_contains(json_encode($nums), '192.0.2.9') && !str_contains(json_encode($nums), 'x.service'), 'a sample carries numbers only: no user, address or unit name');
+$pdo->exec("INSERT INTO estate_node_samples (location_id, ts, numbers) VALUES ({$nodeId}, now() - interval '31 days', '{\"load1\": 1}')");
+node_presence_sweep($pdo);
+$ok((int) $pdo->query("SELECT count(*) FROM estate_node_samples WHERE location_id = {$nodeId} AND ts < now() - interval '30 days'")->fetchColumn() === 0, 'the sweep drops samples older than thirty days');
+$call('POST', '/api/v1/estate/heartbeat.php', $token, ['presence' => 'online', 'report' => $healthy()]);
 // MaluOS Phase 14 slice 4a: the node says what its host is; the office labels it (locations.node_role)
 $ok(($row['node_role'] ?? null) === null, 'a node that names no role has none');
 $call('POST', '/api/v1/estate/heartbeat.php', $token, ['presence' => 'online', 'facts' => ['role' => 'database-server']]);

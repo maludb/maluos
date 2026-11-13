@@ -28,7 +28,7 @@ const TASK_MAX_LEASES = 3;
 const TASK_WAIT_MAX_S = 60;
 const INBOX_WAIT_MAX_S = 25;
 const CLASSIFICATIONS = ['public', 'internal', 'restricted', 'prohibited'];
-const NODE_ACTIONS = ['restart_agent', 'start_agent', 'stop_agent', 'apply_updates', 'reboot'];
+const NODE_ACTIONS = ['restart_agent', 'start_agent', 'stop_agent', 'apply_updates', 'reboot', 'restart_unit', 'postgres_cancel', 'postgres_terminate'];      // the last three: db/197
 
 // --------------------------------------------------------------------------
 // Keys
@@ -568,10 +568,11 @@ function inbox_take(PDO $pdo, int $locationId): array
         }
         $st = $pdo->prepare("UPDATE estate_actions SET state = 'leased', lease_until = now() + make_interval(secs => :lease), leases = leases + 1
                              WHERE id IN (SELECT id FROM estate_actions WHERE location_id = :loc AND state = 'queued' ORDER BY created_at LIMIT 20 FOR UPDATE SKIP LOCKED)
-                             RETURNING id, action, agent, envelope, lease_until, leases");
+                             RETURNING id, action, agent, args, envelope, lease_until, leases");
         $st->execute(['loc' => $locationId, 'lease' => TASK_LEASE_S]);
         foreach ($st->fetchAll() as $a) {
-            $items[] = ['id' => (string) $a['id'], 'kind' => 'action', 'action' => (string) $a['action'], 'agent' => $a['agent'], 'envelope' => json_decode((string) $a['envelope'], true),
+            $items[] = ['id' => (string) $a['id'], 'kind' => 'action', 'action' => (string) $a['action'], 'agent' => $a['agent'],
+                        'args' => is_string($a['args'] ?? null) ? (json_decode($a['args'], true) ?: null) : null, 'envelope' => json_decode((string) $a['envelope'], true),
                         'lease_until' => json_ts($a['lease_until']), 'leases' => (int) $a['leases']];
         }
         $pdo->commit();
@@ -687,25 +688,64 @@ function present_action(array $a): array
 {
     $res = is_string($a['result'] ?? null) ? (json_decode($a['result'], true) ?: null) : ($a['result'] ?? null);
     return ['id' => (string) $a['id'], 'node' => ['id' => (int) $a['location_id'], 'name' => $a['node_name'] ?? null], 'action' => (string) $a['action'], 'agent' => $a['agent'] ?? null,
+            'args' => is_string($a['args'] ?? null) ? (json_decode($a['args'], true) ?: null) : null, 'approval_request_id' => isset($a['approval_request_id']) ? (int) $a['approval_request_id'] : null,
             'state' => (string) $a['state'], 'reason' => $a['reason'] ?? null, 'result' => $res, 'requested_by' => (int) $a['requested_by_member_id'],
             'envelope_id' => json_decode((string) $a['envelope'], true)['id'] ?? null, 'created_at' => json_ts($a['created_at']), 'done_at' => json_ts($a['done_at'] ?? null)];
 }
 
-/** Queue an operator's action on a node with its verified envelope. */
-function action_create(PDO $pdo, array $node, string $action, ?string $agent, array $env, array $ctx): array
+/**
+ * An action's arguments, checked (db/197): what the verb needs and nothing else. Returns [args|null, agent|null] or
+ * a string, the reason it is refused. The node checks again against its own lists: this is only the shape.
+ */
+function action_args(string $action, ?string $agent, array $in): array|string
 {
-    if (!in_array($action, NODE_ACTIONS, true)) { api_error('invalid', 'action is one of ' . implode(', ', NODE_ACTIONS) . '.', 400); }
-    if (str_ends_with($action, '_agent') && (!is_string($agent) || !preg_match('/^[a-z][a-z0-9-]{0,30}$/', $agent))) { api_error('invalid', 'The agent actions need agent.', 400); }
+    if (!in_array($action, NODE_ACTIONS, true)) { return 'action is one of ' . implode(', ', NODE_ACTIONS) . '.'; }
+    if (str_ends_with($action, '_agent')) {
+        return is_string($agent) && preg_match('/^[a-z][a-z0-9-]{0,30}$/', $agent) ? [null, $agent] : 'The agent actions need agent.';
+    }
+    if ($action === 'restart_unit') {
+        $unit = $in['unit'] ?? null;
+        return is_string($unit) && preg_match('/^[A-Za-z0-9][A-Za-z0-9@._:-]{0,120}\.service$/', $unit) ? [['unit' => $unit], null] : 'restart_unit needs unit, a service unit\'s name (apache2.service).';
+    }
+    if ($action === 'postgres_cancel' || $action === 'postgres_terminate') {
+        $pid = $in['pid'] ?? null;
+        return (is_int($pid) || (is_string($pid) && ctype_digit($pid))) && (int) $pid > 1 && (int) $pid < 4194305 ? [['pid' => (int) $pid], null] : "{$action} needs pid, the backend's process id.";
+    }
+    return [null, null];
+}
+
+function action_insert(PDO $pdo, array $node, string $action, ?string $agent, ?array $args, array $env, int $memberId, ?int $approvalId, string $source): array
+{
+    $id = 'a_' . bin2hex(random_bytes(8));
+    $st = $pdo->prepare('INSERT INTO estate_actions (id, location_id, action, agent, args, envelope, requested_by_member_id, approval_request_id) VALUES (:id, :loc, :a, :ag, :args, :env, :m, :ap)');
+    $st->execute(['id' => $id, 'loc' => (int) $node['id'], 'a' => $action, 'ag' => $agent, 'args' => $args !== null ? json_encode($args) : null,
+                  'env' => json_encode($env, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), 'm' => $memberId, 'ap' => $approvalId]);
+    node_notify($pdo, (int) $node['id']);
+    log_activity($pdo, 'estate.action.request', 'location', (int) $node['id'], ['source' => $source, 'after' => ['action' => $action, 'agent' => $agent, 'args' => $args, 'id' => $id, 'envelope' => $env['id'], 'approval_request_id' => $approvalId]]);
+    return action_row($pdo, $id);
+}
+
+/** Queue an operator's action on a node with its verified envelope. `$in` carries unit or pid for the verbs that take one. */
+function action_create(PDO $pdo, array $node, string $action, ?string $agent, array $env, array $ctx, array $in = []): array
+{
+    $checked = action_args($action, $agent, $in);
+    if (is_string($checked)) { api_error('invalid', $checked, 400); }
     $v = envelope_verify($pdo, $env, caller_node_ref($ctx));
     if (!$v['ok']) { api_error($v['reason'], $v['message'], 403); }
     if (($env['target']['node'] ?? null) !== node_ref($node)) { api_error('bad_envelope', 'envelope.target.node is not this node.', 400); }
-    $id = 'a_' . bin2hex(random_bytes(8));
-    $st = $pdo->prepare('INSERT INTO estate_actions (id, location_id, action, agent, envelope, requested_by_member_id) VALUES (:id, :loc, :a, :ag, :env, :m)');
-    $st->execute(['id' => $id, 'loc' => (int) $node['id'], 'a' => $action, 'ag' => str_ends_with($action, '_agent') ? $agent : null,
-                  'env' => json_encode($env, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), 'm' => (int) $ctx['member']['id']]);
-    node_notify($pdo, (int) $node['id']);
-    log_activity($pdo, 'estate.action.request', 'location', (int) $node['id'], ['source' => 'desk', 'after' => ['action' => $action, 'agent' => $agent, 'id' => $id, 'envelope' => $env['id']]]);
-    return action_row($pdo, $id);
+    return action_insert($pdo, $node, $action, $checked[1], $checked[0], $env, (int) $ctx['member']['id'], null, 'desk');
+}
+
+/**
+ * Queue an action the kernel itself originates (db/197): a super-admin's, or an agent's after its approval. The
+ * envelope is the coordinator's, naming the member who asked. The arguments were checked by action_args().
+ */
+function action_create_kernel(PDO $pdo, array $node, string $action, ?string $agent, ?array $args, array $member, ?int $approvalId, string $purpose): array
+{
+    $who = ['principal' => ($member['member_kind'] ?? 'human') . ':' . (int) $member['id'], 'node' => 'coordinator'];
+    $env = envelope_sign_coordinator($pdo, envelope_make($who, ['principal' => 'coordinator', 'node' => 'coordinator'],
+        ['node' => node_ref($node), 'action' => $action], mb_substr($purpose, 0, 300)));
+    return action_insert($pdo, $node, $action, $agent, $args, $env, (int) $member['id'], $approvalId, ($member['member_kind'] ?? 'human') === 'agent' ? 'agent' : 'web');
 }
 
 function action_row(PDO $pdo, string $id): array

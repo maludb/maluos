@@ -297,6 +297,26 @@ def ensure_role(name, *attrs):
     return False
 
 
+MONITOR_ROLE = "maluos_monitor"
+MONITOR_USER = os.environ.get("MALUOS_ESTATE_USER", "maluos-estate")
+
+
+def ensure_monitor():
+    """Phase 14 slice 4b (docs/phase14-watching-agents.md): the node service reads this host's cluster for its
+    report as its own user by peer authentication. maluos_monitor holds pg_monitor and nothing else; the login role
+    named after the node service's user is its only member. Only on the cluster of this host."""
+    import pwd
+    try:
+        pwd.getpwnam(MONITOR_USER)
+    except KeyError:
+        return False
+    ensure_role(MONITOR_ROLE, "NOLOGIN")
+    psql(f"GRANT pg_monitor, pg_signal_backend TO {qi(MONITOR_ROLE)}")      # slice 4d: postgres_cancel / postgres_terminate (never a superuser's session)
+    ensure_role(MONITOR_USER, "LOGIN")
+    psql(f"GRANT {qi(MONITOR_ROLE)} TO {qi(MONITOR_USER)}")
+    return True
+
+
 def unit_property(unit, prop):
     r = subprocess.run(["systemctl", "show", "-p", prop, "--value", unit], capture_output=True, text=True)
     return r.stdout.strip()
@@ -626,6 +646,7 @@ def provision_database_server(cfg):
     for u in ops:
         ensure_role(u, "LOGIN", "SUPERUSER", "CREATEDB")
     ds = ensure_database_server(cfg, db)
+    ensure_monitor()
     os.makedirs(STATE_DIR, exist_ok=True)
     summary = {"provisioned_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "role": "database-server",
                "database": db, "maludb_core": version, "tenant": None, "admin_principal": None, "listener": url,
@@ -851,6 +872,8 @@ def provision(force=False):
     version = ensure_database(db)
     ensure_tenant(db, tenant)
     ensure_principal(db, tenant, cfg["admin_principal"])
+    if not target:
+        ensure_monitor()
     if target:
         # the listener is the engine's own face and stays with the data (decision 6): this host runs none; the
         # tools this host registers are granted to the database server's listener role when it has one

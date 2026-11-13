@@ -30,7 +30,25 @@ KINDS = ("server", "inference")
 # server). Its token and its key are files of the node service's user, mode 0600, instead of vault entries.
 NODE_TOKEN_FILE = os.path.join(STATE_DIR, "node.token")
 NODE_KEY_FILE = os.path.join(STATE_DIR, "node.key")
-BARE_ACTIONS = ["apply_updates"]           # no agents on a bare node; reboot is off unless the node's owner allows it
+# Phase 14 slice 4d: restart_unit (a unit of this node's own list), postgres_cancel and postgres_terminate (one
+# backend by pid, as the node service's monitoring role). No agents on a bare node; reboot is off unless the node's
+# owner allows it. Every one of these reaches the node only after the office's own approval when an agent asked.
+BARE_ACTIONS = ["apply_updates", "restart_unit", "postgres_cancel", "postgres_terminate"]
+ACTIONS = ("restart_agent", "start_agent", "stop_agent", "apply_updates", "reboot", "restart_unit", "postgres_cancel", "postgres_terminate")
+# What restart_unit may name, by what first boot made this host; actions.units in estate.yaml replaces the list.
+UNITS_BY_ROLE = {
+    "database-server": ["postgresql@18-main.service", "maludb-mc2dbd.service"],
+    "kernel": ["apache2.service", "maludb-api.service", "maludb-os-agent-runner.service", "maludb-os-actions-mcp.service", "maludb-os-records-mcp.service",
+               "maludb-os-activity-mcp.service", "maludb-os-memory-mcp.service", "maludb-os-web.service"],
+    "application-server": ["apache2.service"],
+}
+UNIT_RE = r"[A-Za-z0-9][A-Za-z0-9@._:-]{0,120}\.service"
+
+
+def allowed_units(conf):
+    """The units the office may ask this node to restart: actions.units in estate.yaml, else the role's list."""
+    u = ((conf or {}).get("actions") or {}).get("units")
+    return [str(x) for x in u] if isinstance(u, list) else list(UNITS_BY_ROLE.get(role() or "", []))
 
 
 def is_bare(conf):
@@ -273,7 +291,7 @@ def overlay_hint():
 AGENTS_DIR = os.environ.get("MALUOS_AGENTS_DIR", "/etc/maluos/agents")
 AGENTS_HINT = os.environ.get("MALUOS_AGENTS_HINT", "/run/maluos/estate/agents-changed")
 KEYS_CACHE = os.environ.get("MALUOS_ESTATE_KEYS", "/run/maluos/estate/keys.json")
-DEFAULT_ACTIONS = ["restart_agent", "start_agent", "stop_agent", "apply_updates"]      # reboot is off unless the node's owner allows it
+DEFAULT_ACTIONS = ["restart_agent", "start_agent", "stop_agent", "apply_updates", "restart_unit"]      # reboot is off unless the node's owner allows it
 
 
 def manifests():

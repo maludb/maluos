@@ -367,7 +367,10 @@ def provision(ctx):
         open(logf, "a").close(); shutil.chown(logf, "www-data", "www-data")
     subprocess.run(["crontab", "-u", "www-data", f"{WWW}/docs/deploy/crontab.example"], check=False, capture_output=True)
     for marker, cmd in (("hire-installer", ["php", "bin/hire_installation_agent.php", "--by", admin_email]),
-                        ("hire-jev", ["php", "bin/hire_jev_prompt_writer.php", "--by", admin_email])):
+                        ("hire-jev", ["php", "bin/hire_jev_prompt_writer.php", "--by", admin_email]),
+                        # Phase 14 slice 4c: the database administrator, the Linux administrator and the security
+                        # officer (system_one, IT, shadow mode): they watch the estate's nodes from here
+                        ("hire-watch", ["php", "bin/hire_watch_agents.php", "--by", admin_email])):
         m = os.path.join(STATE, marker)
         if not os.path.exists(m):
             try:
