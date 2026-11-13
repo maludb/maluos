@@ -1188,7 +1188,8 @@ assert lt and lt["seconds"] >= 3 and isinstance(lt["pid"], int) and lt["database
 assert isinstance(pg["superusers"], list) and pg["log"] is not None and set(pg["log"]) >= {"error", "fatal", "panic"}, (pg["superusers"], pg["log"])
 assert isinstance(lx["failed_units"], list) and lx["clock_synced"] in (True, False, None) and lx["inodes"]["used_pct"] >= 0, lx
 assert isinstance(sec["failed_logins"], int) and isinstance(sec["sudo"], int) and sec["sudo"] >= 1, sec
-assert any(l["proto"] == "tcp" and l["port"] == 80 for l in sec["listening"]) and not any(l["port"] == 5432 for l in sec["listening"]), sec["listening"]
+# ssh listens on every variant (a desktop has no web server on 80); the cluster on loopback is left out
+assert any(l["proto"] == "tcp" and l["port"] == 22 for l in sec["listening"]) and not any(l["port"] == 5432 for l in sec["listening"]), sec["listening"]
 assert len(sec["config"]["digest"]) == 32 and sec["config"]["files"] > 5, sec["config"]
 assert "boot-test-secret-query" not in raw and "pg_sleep" not in raw and "COMMAND=" not in raw, "statement or command text in the report"
 assert len(raw) < 32 * 1024, len(raw)
