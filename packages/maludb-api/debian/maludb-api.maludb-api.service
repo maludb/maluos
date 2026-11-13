@@ -11,7 +11,7 @@ Group=maludb-api
 WorkingDirectory=/usr/lib/maludb-api
 EnvironmentFile=/etc/maludb/maludb-api.env
 Environment=PYTHONDONTWRITEBYTECODE=1
-ExecStart=/usr/bin/python3 -m uvicorn app.main:app --host ${MALUDB_API_HOST} --port ${MALUDB_API_PORT} --workers ${MALUDB_API_WORKERS}
+ExecStart=/usr/bin/python3 -m uvicorn app.main:app --host ${MALUDB_API_HOST} --port ${MALUDB_API_PORT} --workers ${MALUDB_API_WORKERS} --timeout-worker-healthcheck 60
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
 RestartSec=3
